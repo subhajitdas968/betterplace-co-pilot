@@ -112,16 +112,24 @@ mcp-config:
 
 # ===== F9 · Release / rollback =====
 # Usage: make release notes="Fixed sign-out flow"
-# Bumps patch, snapshots DB, tags git, records to releases table.
+#        make release NOTES="Fixed sign-out flow"   (both work)
+# Bumps patch, snapshots DB, tags git, records to releases table, then
+# auto-commits the bumped VERSION file so the next `make release` runs against
+# a clean tree.
 NOTES ?=
+notes ?=
+RELEASE_NOTES = $(if $(NOTES),$(NOTES),$(notes))
 release:
-	@$(PY) -c "from src import release; r = release.create_release(part='patch', notes='$(NOTES)', actor_email='cli'); print(f\"✓ Released v{r['version']} (was v{r['previous_version']}) · git_tag={r['git_tag']} · backup={r['db_backup_path']}\")"
+	@$(PY) -c "from src import release; r = release.create_release(part='patch', notes='''$(RELEASE_NOTES)''', actor_email='cli'); print(f\"✓ Released v{r['version']} (was v{r['previous_version']}) · git_tag={r['git_tag']} · backup={r['db_backup_path']}\")"
+	@git add VERSION && git commit -m "Bump VERSION → $$(cat VERSION)" --quiet 2>/dev/null && echo "✓ Auto-committed VERSION bump" || true
 
 release-minor:
-	@$(PY) -c "from src import release; r = release.create_release(part='minor', notes='$(NOTES)', actor_email='cli'); print(f\"✓ Released v{r['version']} (minor bump) · backup={r['db_backup_path']}\")"
+	@$(PY) -c "from src import release; r = release.create_release(part='minor', notes='''$(RELEASE_NOTES)''', actor_email='cli'); print(f\"✓ Released v{r['version']} (minor bump) · backup={r['db_backup_path']}\")"
+	@git add VERSION && git commit -m "Bump VERSION → $$(cat VERSION)" --quiet 2>/dev/null && echo "✓ Auto-committed VERSION bump" || true
 
 release-major:
-	@$(PY) -c "from src import release; r = release.create_release(part='major', notes='$(NOTES)', actor_email='cli'); print(f\"✓ Released v{r['version']} (major bump) · backup={r['db_backup_path']}\")"
+	@$(PY) -c "from src import release; r = release.create_release(part='major', notes='''$(RELEASE_NOTES)''', actor_email='cli'); print(f\"✓ Released v{r['version']} (major bump) · backup={r['db_backup_path']}\")"
+	@git add VERSION && git commit -m "Bump VERSION → $$(cat VERSION)" --quiet 2>/dev/null && echo "✓ Auto-committed VERSION bump" || true
 
 # Usage: make rollback v=1.0.5
 # Prints the script you should run; doesn't auto-execute because rollback

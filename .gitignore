@@ -49,3 +49,7 @@ data/kb_drafts/
 dist/
 build/
 *.egg
+
+# macOS FUSE leftovers (from cloud-synced folders)
+.fuse_hidden*
+data/.fuse_hidden*
