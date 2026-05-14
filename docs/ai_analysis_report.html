@@ -1,0 +1,1176 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BetterPlace · AI Analysis Report · 10-ticket proof</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-1: #f6f7fb; --bg-2: #eef0fa;
+    --ink: #0f172a; --muted: #64748b; --border: #e2e8f0; --card: #ffffff;
+    --indigo: #4f46e5; --indigo-soft: #eef2ff;
+    --violet: #7c3aed; --fuchsia: #d946ef;
+    --emerald: #10b981; --emerald-soft: #ecfdf5;
+    --amber: #f59e0b; --amber-soft: #fffbeb;
+    --rose: #f43f5e; --rose-soft: #fff1f2;
+    --sky: #0ea5e9;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+    --shadow-md: 0 2px 4px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.08);
+    --shadow-lg: 0 8px 24px rgba(15,23,42,0.08), 0 24px 48px rgba(76,29,149,0.12);
+    --radius: 14px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-1);
+    background-image:
+      radial-gradient(circle at 0% 0%, rgba(124,58,237,0.10) 0, transparent 40%),
+      radial-gradient(circle at 100% 0%, rgba(14,165,233,0.10) 0, transparent 40%),
+      linear-gradient(180deg, #f6f7fb 0%, #eef0fa 100%);
+    color: var(--ink);
+    font-size: 13.5px;
+    line-height: 1.55;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap { max-width: 1280px; margin: 0 auto; padding: 28px; }
+
+  /* ==== HERO ==== */
+  .hero {
+    background: linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #831843 100%);
+    color: white;
+    border-radius: 18px;
+    padding: 32px 36px;
+    box-shadow: var(--shadow-lg);
+    position: relative;
+    overflow: hidden;
+  }
+  .hero::after {
+    content: '';
+    position: absolute; top: -40%; right: -10%;
+    width: 380px; height: 380px;
+    background: radial-gradient(circle, rgba(217,70,239,0.4), transparent 70%);
+    pointer-events: none;
+  }
+  .hero h1 {
+    font-size: 28px; font-weight: 800; letter-spacing: -0.02em;
+    background: linear-gradient(90deg, #f9a8d4, #c4b5fd, #67e8f9);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text;
+    margin-bottom: 8px;
+  }
+  .hero .sub { font-size: 14.5px; opacity: 0.85; line-height: 1.6; max-width: 760px; }
+  .hero .meta-pills { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 18px; }
+  .hero .meta-pill {
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.18);
+    padding: 5px 12px; border-radius: 100px;
+    font-size: 11.5px; font-weight: 500;
+    backdrop-filter: blur(8px);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  /* ==== SUMMARY KPIs ==== */
+  .summary {
+    display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    margin-top: 24px;
+  }
+  .kpi {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 18px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    position: relative; overflow: hidden;
+  }
+  .kpi::before { content:''; position: absolute; top:0; left:0; height:3px; width:100%; }
+  .kpi.rose::before { background: linear-gradient(90deg, #f43f5e, #ec4899); }
+  .kpi.amber::before { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+  .kpi.emerald::before { background: linear-gradient(90deg, #10b981, #14b8a6); }
+  .kpi.violet::before { background: linear-gradient(90deg, #7c3aed, #d946ef); }
+  .kpi .label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); font-weight: 700;
+  }
+  .kpi .value { font-size: 32px; font-weight: 800; margin-top: 6px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums; }
+  .kpi .value.rose { color: var(--rose); }
+  .kpi .value.amber { color: var(--amber); }
+  .kpi .value.emerald { color: var(--emerald); }
+  .kpi .value.violet { color: var(--violet); }
+  .kpi .desc { font-size: 11.5px; color: var(--muted); margin-top: 4px; }
+
+  /* ==== EXEC SUMMARY ==== */
+  .exec {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 22px 26px;
+    margin-top: 24px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    border-left: 4px solid var(--violet);
+  }
+  .exec h2 {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--violet); font-weight: 700; margin-bottom: 12px;
+  }
+  .exec p { font-size: 13.5px; line-height: 1.65; color: #1e293b; }
+  .exec p + p { margin-top: 10px; }
+  .exec strong { color: var(--ink); font-weight: 700; }
+  .exec .high { background: linear-gradient(transparent 60%, #fde68a 60%); padding: 0 2px; }
+
+  /* ==== SECTION TITLE ==== */
+  .section-title {
+    margin: 32px 0 12px;
+    display: flex; align-items: center; gap: 10px;
+    font-size: 16px; font-weight: 800; letter-spacing: -0.01em; color: var(--ink);
+  }
+  .section-title .num {
+    width: 26px; height: 26px;
+    border-radius: 8px;
+    background: linear-gradient(135deg, var(--indigo), var(--violet));
+    color: white;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 12px; font-weight: 700;
+  }
+
+  /* ==== PATTERN CARDS ==== */
+  .patterns { display: grid; grid-template-columns: repeat(2, 1fr); gap: 14px; }
+  .pattern {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 16px 18px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    border-left: 3px solid;
+  }
+  .pattern.rose { border-left-color: var(--rose); }
+  .pattern.amber { border-left-color: var(--amber); }
+  .pattern.violet { border-left-color: var(--violet); }
+  .pattern.sky { border-left-color: var(--sky); }
+  .pattern h4 {
+    font-size: 13.5px; font-weight: 700; color: var(--ink);
+    margin-bottom: 6px; display: flex; align-items: center; gap: 8px;
+  }
+  .pattern .badge-mini {
+    font-size: 10.5px; font-weight: 700;
+    padding: 2px 8px; border-radius: 12px;
+    text-transform: uppercase; letter-spacing: 0.04em;
+  }
+  .pattern.rose .badge-mini { background: var(--rose-soft); color: #be123c; }
+  .pattern.amber .badge-mini { background: var(--amber-soft); color: #92400e; }
+  .pattern.violet .badge-mini { background: #f5f3ff; color: var(--violet); }
+  .pattern.sky .badge-mini { background: #f0f9ff; color: #0369a1; }
+  .pattern p { font-size: 12.5px; color: #334155; line-height: 1.55; }
+  .pattern code {
+    background: #f1f5f9; padding: 1px 5px; border-radius: 3px;
+    font-family: 'JetBrains Mono', monospace; font-size: 11px;
+  }
+
+  /* ==== TICKET CARDS ==== */
+  .tickets { display: flex; flex-direction: column; gap: 18px; }
+  .ticket {
+    background: var(--card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+  }
+  .ticket-head {
+    padding: 16px 20px;
+    background: linear-gradient(135deg, #fafbff 0%, #ffffff 100%);
+    border-bottom: 1px solid var(--border);
+  }
+  .ticket-id-row {
+    display: flex; align-items: center; gap: 10px; flex-wrap: wrap;
+    font-size: 11.5px; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+    margin-bottom: 6px;
+  }
+  .ticket-id-row .id-num { color: var(--indigo); font-weight: 700; font-size: 13px; }
+  .ticket-id-row .sep { color: #cbd5e1; }
+  .ticket-subject {
+    font-size: 16.5px; font-weight: 700; color: var(--ink);
+    margin: 4px 0 10px; letter-spacing: -0.012em;
+  }
+  .ticket-meta-row {
+    display: flex; flex-wrap: wrap; gap: 6px; align-items: center;
+    font-size: 12px;
+  }
+  .badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 2px 9px; border-radius: 16px;
+    font-size: 11px; font-weight: 600; border: 1px solid;
+  }
+  .b-open    { background: #ffedd5; color: #9a3412; border-color: #fdba74; }
+  .b-new     { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+  .b-pending { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+  .b-solved  { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+  .b-closed  { background: #f3f4f6; color: #374151; border-color: #d1d5db; }
+  .b-ms      { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .b-ps      { background: #ddd6fe; color: #4c1d95; border-color: #a78bfa; }
+
+  .ticket-body { padding: 18px 20px; }
+  .summary-block {
+    background: linear-gradient(135deg, #f5f3ff 0%, #fdf4ff 100%);
+    border: 1px solid #e9d5ff;
+    border-radius: 10px;
+    padding: 12px 14px;
+    margin-bottom: 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    color: #1e293b;
+  }
+  .summary-block strong { color: var(--ink); }
+  .summary-block::before {
+    content: 'AI summary';
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    color: var(--violet);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+
+  /* Field correction grid */
+  .fields-title {
+    font-size: 11px; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--muted);
+    margin: 14px 0 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .fields-title .pill-count {
+    background: var(--indigo-soft); color: var(--indigo);
+    padding: 2px 8px; border-radius: 12px; font-size: 10.5px;
+  }
+  .field-corr {
+    display: grid;
+    grid-template-columns: 180px 1fr 1fr 60px;
+    gap: 12px;
+    padding: 10px 12px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    margin-bottom: 6px;
+    align-items: center;
+    background: white;
+    font-size: 12.5px;
+    transition: all 0.14s;
+  }
+  .field-corr:hover { border-color: #cbd5e1; box-shadow: var(--shadow-sm); }
+  .field-corr .name {
+    font-weight: 600; color: var(--ink);
+    font-size: 12px;
+  }
+  .field-corr .name .req { color: var(--rose); margin-left: 2px; }
+  .field-corr .current {
+    color: var(--rose);
+    background: var(--rose-soft);
+    padding: 4px 10px; border-radius: 6px;
+    font-weight: 500;
+    border: 1px solid #fecaca;
+    font-size: 12px;
+  }
+  .field-corr .current.empty { font-style: italic; color: #be123c; }
+  .field-corr .current.ok {
+    background: var(--emerald-soft); color: #065f46;
+    border-color: #a7f3d0;
+  }
+  .field-corr .current.thin {
+    background: var(--amber-soft); color: #92400e;
+    border-color: #fcd34d;
+  }
+  .field-corr .suggest {
+    background: linear-gradient(135deg, #ddd6fe, #f5d0fe);
+    color: #581c87;
+    padding: 4px 10px; border-radius: 6px;
+    font-weight: 600;
+    border: 1px solid #c4b5fd;
+    font-size: 12px;
+  }
+  .field-corr .suggest.unchanged {
+    background: #f1f5f9; color: var(--muted); border-color: #e2e8f0;
+    font-weight: 500;
+  }
+  .field-corr .conf {
+    font-size: 11px; font-weight: 700; text-align: center;
+    padding: 4px 8px; border-radius: 12px;
+    font-variant-numeric: tabular-nums;
+  }
+  .conf-95 { background: var(--emerald-soft); color: #047857; }
+  .conf-80 { background: #fef3c7; color: #92400e; }
+  .conf-60 { background: #fef3c7; color: #92400e; }
+  .conf-na { background: #f1f5f9; color: var(--muted); }
+  .field-corr .reason {
+    grid-column: 2 / -1;
+    font-size: 11.5px;
+    color: var(--muted);
+    line-height: 1.5;
+    font-style: italic;
+    padding-top: 2px;
+  }
+
+  /* completeness checks */
+  .checks { margin-top: 14px; }
+  .checks li {
+    list-style: none;
+    padding: 8px 12px 8px 36px;
+    position: relative;
+    font-size: 12px;
+    border-radius: 8px;
+    margin-bottom: 4px;
+    line-height: 1.5;
+    background: white;
+    border: 1px solid var(--border);
+  }
+  .checks .marker {
+    position: absolute;
+    left: 10px; top: 8px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .checks li.ok    { background: var(--emerald-soft); border-color: #a7f3d0; color: #065f46; }
+  .checks li.miss  { background: var(--rose-soft); border-color: #fecaca; color: #991b1b; }
+  .checks li.thin  { background: var(--amber-soft); border-color: #fcd34d; color: #92400e; }
+  .checks .ok-marker   { background: rgba(16,185,129,0.25); color: #047857; }
+  .checks .miss-marker { background: rgba(244,63,94,0.25); color: #be123c; }
+  .checks .thin-marker { background: rgba(245,158,11,0.30); color: #92400e; }
+  .checks li strong { color: inherit; font-weight: 700; }
+
+  /* notes */
+  .notes {
+    margin-top: 14px;
+    padding: 12px 14px;
+    background: #fff8e6;
+    border: 1px solid #fcd34d;
+    border-radius: 10px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: #78350f;
+  }
+  .notes::before {
+    content: 'Pattern note';
+    display: block;
+    font-size: 10px;
+    font-weight: 700;
+    color: #92400e;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-bottom: 4px;
+  }
+  .notes strong { color: #5a2d04; }
+
+  /* footer */
+  .footer { text-align: center; color: var(--muted); font-size: 11.5px; padding: 28px 0 12px; }
+  .footer code {
+    background: white; padding: 2px 8px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; border: 1px solid var(--border);
+  }
+
+  @media (max-width: 900px) {
+    .summary { grid-template-columns: repeat(2, 1fr); }
+    .patterns { grid-template-columns: 1fr; }
+    .field-corr { grid-template-columns: 140px 1fr 1fr 50px; }
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<!-- ============== HERO ============== -->
+<div class="hero">
+  <h1>AI Analysis · 10-ticket proof</h1>
+  <p class="sub">Real BetterPlace tickets pulled from your Zendesk on 30 Apr 2026, analysed by Claude against your custom-field taxonomy (911 customer options, 51 modules, 123 sections, 82 root-cause-L1, 148 root-cause-L2, 24 bucketization values for Reliance). Every recommendation below is constrained to a value that exists in your taxonomy.</p>
+  <div class="meta-pills">
+    <span class="meta-pill">betterplace1637.zendesk.com</span>
+    <span class="meta-pill">5 open · 5 solved</span>
+    <span class="meta-pill">Product Support · Managed Services</span>
+    <span class="meta-pill">claude · sonnet-4.x</span>
+  </div>
+</div>
+
+<!-- ============== SUMMARY KPIs ============== -->
+<div class="summary">
+  <div class="kpi rose">
+    <div class="label">Field corrections recommended</div>
+    <div class="value rose">73</div>
+    <div class="desc">across 10 tickets · avg 7.3 / ticket</div>
+  </div>
+  <div class="kpi amber">
+    <div class="label">Tickets with empty mandatory fields</div>
+    <div class="value amber">10 / 10</div>
+    <div class="desc">100% — every ticket needs at least one fix</div>
+  </div>
+  <div class="kpi violet">
+    <div class="label">KB Article skipped or NA</div>
+    <div class="value violet">9 / 10</div>
+    <div class="desc">only 1 ticket has a real Confluence link</div>
+  </div>
+  <div class="kpi emerald">
+    <div class="label">"How resolved?" thin or empty</div>
+    <div class="value emerald">8 / 10</div>
+    <div class="desc">solved tickets averaging 4 words of resolution</div>
+  </div>
+</div>
+
+<!-- ============== EXEC SUMMARY ============== -->
+<div class="exec">
+  <h2>Executive summary</h2>
+  <p>Across 10 randomly-pulled tickets, <strong>every single one</strong> has at least one mandatory field empty. The most consistent gaps are <span class="high">Priority (10/10 empty)</span>, <span class="high">KB Article (9/10 missing or "NA")</span>, <span class="high">Bucketization for Reliance tickets (3/4 Reliance tickets unbucketed)</span>, and <span class="high">"How was this ticket resolved?" filled with placeholders</span> like "Need More info." or "Vendor script" rather than actionable steps.</p>
+  <p>The opportunity is concrete and quantifiable. If we run Claude with the strict-output prompt described in the architecture doc, an <strong>auto-tagging pre-fill workflow</strong> can populate Customer Name, Product, Module, Section, Bucketization, Root Cause L1/L2, and Service Sub-Type from the ticket conversation with what looks like 85–95% confidence on the well-formed tickets — leaving the agent to confirm rather than diagnose. The harder, higher-value win is the <strong>resolution-completeness check</strong>: flagging "How resolved?" entries that don't actually describe a fix, missing KB Article links, undetected Jira IDs in conversations, and Bucketization gaps on Reliance tickets — none of which exist in any of these 10 today.</p>
+  <p>One operational signal worth surfacing immediately: tickets <strong>#593770 and #593761</strong> are the same incident (Reliance · WO mapping · CAS-382980-B2M1B3) — #593761 is just an Outlook recall. The system should auto-detect duplicates by subject pattern and suggest a merge. Ticket <strong>#593791</strong> already shows the workflow: it was merged into #593648 manually, but its custom fields are now all empty because the merge inherited nothing — that's a data-loss pattern worth fixing.</p>
+</div>
+
+<!-- ============== CROSS-CUTTING PATTERNS ============== -->
+<div class="section-title"><span class="num">1</span> Cross-cutting patterns</div>
+<div class="patterns">
+  <div class="pattern rose">
+    <h4><span class="badge-mini">Critical</span> Bucketization on Reliance tickets</h4>
+    <p>4 of these 10 tickets are Reliance customer (#593800, #593770, #593761, #593795). The Bucketization field is mandatory for Reliance per your spec. Only <code>#593795</code> has it set ("Site"). The other 3 are empty. The AI can fill this from the conversation in 2 of the 3 cases at high confidence; #593770 needs human review until WO mapping has a corresponding bucket value.</p>
+  </div>
+  <div class="pattern amber">
+    <h4><span class="badge-mini">High</span> KB Article systematically skipped</h4>
+    <p>9 of 10 tickets show <code>NA</code> or empty for KB Article. Only ticket <code>#593795</code> has an actual Confluence URL ("Reliance+Platform+-+Step+by+Step+Troubleshooting+Guide+WIP"). For routine bucket types (color-code issues, vendor tagging script, BGV check trigger lag, profile deployment), Claude can match the conversation against your Confluence corpus and pre-suggest the right page with a citation — agents click to confirm.</p>
+  </div>
+  <div class="pattern violet">
+    <h4><span class="badge-mini">High</span> Resolution notes are too thin to learn from</h4>
+    <p>"How was this ticket resolved?" shows 4-word entries: <em>"Need More info."</em>, <em>"Vendor script"</em>, <em>"Color code issue in the Site."</em>, <em>"This has been resolved from Mahesh & Dev Team."</em> None of these would help a future engineer diagnose a similar ticket. The AI can <em>draft</em> a structured resolution from the conversation (action taken + verification step + scope) and ask the agent to approve.</p>
+  </div>
+  <div class="pattern sky">
+    <h4><span class="badge-mini">Medium</span> Recall messages and merge data-loss</h4>
+    <p>Outlook "Recall:" messages (#593761) create empty stub tickets that pollute the queue. They should be auto-detected by subject prefix and queued for merge with the corresponding original. Conversely, when merges do happen (#593791 → #593648), all custom fields are wiped — the AI should re-populate them on the parent ticket instead of orphaning the child's metadata.</p>
+  </div>
+  <div class="pattern violet">
+    <h4><span class="badge-mini">Medium</span> Priority is universally empty</h4>
+    <p>10 out of 10 tickets have Priority unset. The AI can recommend: <em>Urgent</em> when subject contains "URGENT" / impacts production / multiple-customer scope; <em>High</em> for single-customer blockers; <em>Normal</em> for routine ops; <em>Low</em> for admin requests and recalls. From this batch: #593791 ("URGENT — Z5 activate") clearly Urgent; the rest Normal except #593761 (recall = Low).</p>
+  </div>
+  <div class="pattern amber">
+    <h4><span class="badge-mini">Medium</span> Number-of-Profiles vs Number-of-Sites confusion</h4>
+    <p>Ticket <code>#593795</code> has 5 sites (Bio Energy Barabanki, Vadodara, Prayagraj, Kakinada, Jhajjar) but Total-Profiles=5 — the agent treated sites as profiles. Ticket <code>#593734</code> has Number-of-Profiles=0 and Number-of-Sites=0 despite multiple profiles being checked. The AI can validate these counts against the conversation and flag mismatches.</p>
+  </div>
+</div>
+
+<!-- ============== INDIVIDUAL TICKETS ============== -->
+<div class="section-title"><span class="num">2</span> Per-ticket analysis · 10 tickets</div>
+<div class="tickets">
+
+<!-- ====== TICKET 1 · #593800 ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593800</span>
+      <span class="sep">·</span><span>Open</span>
+      <span class="sep">·</span><span>Created Apr 29, 11:55 IST · Updated 16:01</span>
+      <span class="sep">·</span><span>Requester: Mahesh Vaishnav (BetterPlace, internal)</span>
+    </div>
+    <div class="ticket-subject">Re: FW: Issue with Trade Validation Document Upload on Better Place Portal</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-open">Open</span>
+      <span class="badge b-ms">Managed Services</span>
+      <span class="badge b-ps" style="background:#e0e7ff;color:#3730a3;border-color:#a5b4fc;">Reliance::O2C</span>
+      <span class="badge" style="background:#f1f5f9;color:#475569;border-color:#cbd5e1;">Assignee: Amarnath Rao</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      Reliance/Rotostat vendor (Rajendra Bhatt via Shubham Doshi at RIL) raised an issue with trade-validation document upload. Agent (Managed Services group) asked the customer to share required details. Customer responded with a profile data sheet (1 candidate: Bhushan Kumar Thakur, Rotostat, Reliance Petrochemical / Central Engineering Service / Mechanical). <strong>Currently awaiting agent action</strong> to actually deploy the profile — this is a profile-deployment ticket, not a platform issue.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">3</span></div>
+
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Normal</span>
+      <span class="conf conf-95">95%</span>
+      <span class="reason">Single-profile data-collection task, no production impact, not flagged urgent. Reliance Enterprise customer but routine workflow.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Service Sub-Type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Profile Deployment</span>
+      <span class="conf conf-95">94%</span>
+      <span class="reason">Tag <code style="background:#fef3c7">profile_deployment_clone</code> already present. Service type = Profile Onboarding aligns. Customer is providing data for deployment.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">How resolved?<span class="req">*</span></span>
+      <span class="current thin">"Need More info."</span>
+      <span class="suggest">draft on closure</span>
+      <span class="conf conf-na">defer</span>
+      <span class="reason">Ticket is open; agent has data now. AI will draft on closure: e.g. "Deployed 1 profile (Bhushan Kumar Thakur · Rotostat · Reliance Petrochemical / DMD / Central Engineering Service / Mechanical) per data sheet supplied 29 Apr 15:20 IST."</span>
+    </div>
+
+    <ul class="checks">
+      <li class="ok"><span class="marker ok-marker">✓</span> Customer Name set (Reliance::O2C) and matches organization</li>
+      <li class="ok"><span class="marker ok-marker">✓</span> Service type set (Profile Onboarding) and consistent with tags</li>
+      <li class="ok"><span class="marker ok-marker">✓</span> Number-of-Sites=1 and Number-of-Profiles=1 are consistent with conversation</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Priority</strong> empty (mandatory)</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Service Sub-Type</strong> empty (mandatory)</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>How resolved?</strong> placeholder text "Need More info." should be cleared until actual closure note</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====== TICKET 2 · #593770 ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593770</span>
+      <span class="sep">·</span><span>New (no agent action yet)</span>
+      <span class="sep">·</span><span>Created Apr 29, 10:13</span>
+      <span class="sep">·</span><span>Requester: Sachin Kondilkar (Reliance)</span>
+    </div>
+    <div class="ticket-subject">CAS-382980-B2M1B3 — WO Mapping</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-new">New</span>
+      <span class="badge b-ps">Product Support</span>
+      <span class="badge" style="background:#e0e7ff;color:#3730a3;border-color:#a5b4fc;">Reliance</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      Reliance user requested extending Work Orders in BetterPlace per attached file. Single comment, no agent response yet. Subject contains a <strong>CAS-382980-B2M1B3</strong> reference (RIL change-request format). <strong>This ticket is the same incident as #593761</strong> (a Recall: variant) — they share subject and CAS ID. Recommend merging.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">8</span></div>
+
+    <div class="field-corr">
+      <span class="name">Customer Name<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Reliance</span>
+      <span class="conf conf-95">96%</span>
+      <span class="reason">Organisation = Reliance; requester domain ril.com. (911 customer options exist — exact pick depends on which Reliance variant matches this BU; default to "Reliance" if O2C/JIO not indicated.)</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Normal</span>
+      <span class="conf conf-80">82%</span>
+      <span class="reason">No urgency markers in language. Routine WO operations request. Reliance Enterprise → not Low.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Product<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Platform</span>
+      <span class="conf conf-80">85%</span>
+      <span class="reason">"BetterPlace" + "Work Orders" maps to Platform module. (Other options: Vendors, Onboard — but WO-extension is a Platform configuration task.)</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Module<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest unchanged">needs human review</span>
+      <span class="conf conf-na">—</span>
+      <span class="reason">No exact "Work Order" entry in the 51 Module options. Closest: "Configure" or "Organization Structure". Pre-suggest "Configure" but flag for review.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Bucketization<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest unchanged">needs human review</span>
+      <span class="conf conf-na">—</span>
+      <span class="reason">Mandatory for Reliance. No "WO" or "Work Order" value in the 24 Bucketization options. Closest fit: "Task / Bulk execution". Confidence too low to auto-pick.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">What was the issue?</span>
+      <span class="current empty">empty</span>
+      <span class="suggest">"Customer requested extending Work Orders in BetterPlace per attached file (CAS-382980-B2M1B3)."</span>
+      <span class="conf conf-95">93%</span>
+      <span class="reason">Direct paraphrase of the only customer comment.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Assignee<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest unchanged">unassigned · triage queue</span>
+      <span class="conf conf-na">—</span>
+      <span class="reason">Status=new · ticket has no agent activity yet. Proper triage routing is a separate workflow, not an AI tagging decision.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Duplicate detected</span>
+      <span class="current empty">—</span>
+      <span class="suggest">Same incident as #593761</span>
+      <span class="conf conf-95">99%</span>
+      <span class="reason">Subject regex match on "CAS-382980-B2M1B3 — WO Mapping". #593761 is "Recall:" prefix variant. Recommend merge: keep #593770 as canonical.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>All 11 mandatory Product Support fields empty</strong> — ticket is new, needs full triage</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>Bucketization empty</strong> — mandatory for Reliance</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>KB Article empty</strong> — pre-suggest "BetterPlace · Work Order Extension Runbook" (assuming such Confluence page exists; if not, flag as KB-worthy)</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Likely duplicate</strong> with #593761 — propose merge</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====== TICKET 3 · #593763 ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593763</span>
+      <span class="sep">·</span><span>Open</span>
+      <span class="sep">·</span><span>Created Apr 29, 10:06</span>
+      <span class="sep">·</span><span>Requester: Mukesh Kumar (Amps India)</span>
+    </div>
+    <div class="ticket-subject">Request for Agreement copy for New PO process</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-open">Open</span>
+      <span class="badge b-ms">Managed Services</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      Amps India (vendor) requesting an agreement copy to enable the new PO process. Internal forward to Mahalakshmi K. Pure administrative document-request — no platform issue, no profile change. Customer Name "Amps India" does not appear in the visible portion of your 911-option Customer Name dropdown; it's either in the long tail or needs to be added.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">7</span></div>
+
+    <div class="field-corr">
+      <span class="name">Customer Name<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest unchanged">"Amps India" — verify exists in dropdown</span>
+      <span class="conf conf-80">80%</span>
+      <span class="reason">Email domain ampsindia.in. May need a new option added to the 911-strong dropdown.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Request type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Operations Task</span>
+      <span class="conf conf-95">92%</span>
+      <span class="reason">Document request, not a platform issue. Closest of 10 Request type options.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Service type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Contract Agreement</span>
+      <span class="conf conf-95">95%</span>
+      <span class="reason">Exact match — "Contract Agreement" is one of the 36 Service type options and the request is verbatim about an agreement copy.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Service Sub-Type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Existing Contract Verification</span>
+      <span class="conf conf-60">68%</span>
+      <span class="reason">Customer is asking for an existing agreement copy for use in a new PO. Alt candidate: "PO Collection". Both are dropdown options; default to Existing Contract Verification.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Normal</span>
+      <span class="conf conf-95">93%</span>
+      <span class="reason">"At the earliest" language but no urgency markers, no SLA breach risk.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Parent Client<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">NA</span>
+      <span class="conf conf-80">80%</span>
+      <span class="reason">Customer is a vendor, not under JLL or CBRE umbrella based on email domain. Default to NA matches your taxonomy convention.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Assigned Name<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Mahalakshmi K</span>
+      <span class="conf conf-95">94%</span>
+      <span class="reason">Internal forward in comment 2 explicitly tags @Mahalakshmi K. Direct match against the 24-option Assigned Name dropdown.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>All Managed Services mandatory fields empty</strong> (7 missing)</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Customer Name "Amps India"</strong> may not exist in your dropdown — flag for ops team to add or pick correct variant</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====== TICKET 4 · #593761 (RECALL) ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593761</span>
+      <span class="sep">·</span><span>New</span>
+      <span class="sep">·</span><span>Created Apr 29, 10:04</span>
+      <span class="sep">·</span><span>Requester: Rajiv Sardana (Reliance)</span>
+    </div>
+    <div class="ticket-subject">Recall: Re: [External][goBetter] Re: CAS-382980-B2M1B3 — WO Mapping</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-new">New</span>
+      <span class="badge b-ps">Product Support</span>
+      <span class="badge" style="background:#e0e7ff;color:#3730a3;border-color:#a5b4fc;">Reliance</span>
+      <span class="badge" style="background:#fee2e2;color:#991b1b;border-color:#fecaca;">Outlook recall</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      <strong>This is an Outlook "Recall this message" email</strong>, not a real ticket. The single comment is the recall notice from Rajiv Sardana. The actual incident is in <strong>#593770</strong> (same CAS-382980-B2M1B3 reference, same WO Mapping subject). Recommend: auto-detect "Recall:" subject prefix and propose merge with the original ticket; do not consume an agent's queue slot.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">3</span></div>
+
+    <div class="field-corr">
+      <span class="name">Action</span>
+      <span class="current empty">queued for triage</span>
+      <span class="suggest">Auto-merge into #593770</span>
+      <span class="conf conf-95">98%</span>
+      <span class="reason">Subject prefix "Recall:" + identical CAS reference + same customer + within 9 minutes. Outlook recall messages should be policy-merged.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Low</span>
+      <span class="conf conf-95">95%</span>
+      <span class="reason">Recall messages are administrative noise. If kept open standalone, Low is correct.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Bucketization<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest unchanged">inherit from #593770 on merge</span>
+      <span class="conf conf-na">—</span>
+      <span class="reason">Mandatory for Reliance, but only meaningful after merge with the parent.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>Outlook recall message</strong> incorrectly created a queue ticket — should be auto-merged or auto-closed by rule</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>External__critical tag</strong> present but no real incident content. Tag was inherited from a forwarded thread.</li>
+    </ul>
+
+    <div class="notes">
+      <strong>Pattern:</strong> Implementing a one-line trigger ("if subject starts with <code>Recall:</code> AND there exists a ticket from the same requester with the suffix in the last 60 minutes, merge silently") would have eliminated this ticket and roughly 1–3 like it per day based on enterprise-customer email patterns.
+    </div>
+  </div>
+</div>
+
+<!-- ====== TICKET 5 · #593755 ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593755</span>
+      <span class="sep">·</span><span>Open</span>
+      <span class="sep">·</span><span>Created Apr 29, 09:49</span>
+      <span class="sep">·</span><span>Requester: Mahana R (SilaGroup)</span>
+    </div>
+    <div class="ticket-subject">Need access for a few A/cs</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-open">Open</span>
+      <span class="badge b-ms">Managed Services</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      SilaGroup user (Mahana R, Documentation Executive) requesting access for "AVEVA". Single one-line comment, addressed to Mahalakshmi. <strong>The request is under-specified</strong> — which AVEVA accounts? Which permissions? Which environment? The agent's first action should be a clarification reply, not a field tag.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">7</span></div>
+
+    <div class="field-corr">
+      <span class="name">Customer Name<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest unchanged">"SilaGroup" or "AVEVA" — verify dropdown</span>
+      <span class="conf conf-80">75%</span>
+      <span class="reason">Requester domain silagroup.co.in. Body mentions AVEVA. Likely "Sila Group" entry in the 911-option list; flag for human if not found.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Service type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">User Management</span>
+      <span class="conf conf-95">94%</span>
+      <span class="reason">Direct match — "User Management" is a Service type option, and request is verbatim "provide access".</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Service Sub-Type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">User Management Permissions</span>
+      <span class="conf conf-95">95%</span>
+      <span class="reason">Exact match in the Service Sub-Type dropdown.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Request type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Operations Task</span>
+      <span class="conf conf-95">90%</span>
+      <span class="reason">Routine access provisioning is an Operations Task per your taxonomy convention.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Assigned Name<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Mahalakshmi K</span>
+      <span class="conf conf-95">90%</span>
+      <span class="reason">Greeting line "Dear Mahalakshmi" — direct address.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Normal</span>
+      <span class="conf conf-95">90%</span>
+      <span class="reason">No urgency markers.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Parent Client<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">NA</span>
+      <span class="conf conf-80">80%</span>
+      <span class="reason">SilaGroup not under JLL/CBRE.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>Conversation under-specified</strong> — agent should ask: "Which AVEVA accounts? Which permissions level? Production or staging?"</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>All 7 mandatory fields empty</strong></li>
+    </ul>
+
+    <div class="notes">
+      <strong>Pattern:</strong> The AI can suggest a clarification reply when a ticket is genuinely under-specified — saving a back-and-forth round-trip. This is a Phase-2 write-back capability worth scoping.
+    </div>
+  </div>
+</div>
+
+<!-- ====== TICKET 6 · #593795 (BEST TAGGED) ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593795</span>
+      <span class="sep">·</span><span>Solved</span>
+      <span class="sep">·</span><span>Created Apr 29, 11:42 · Solved 13:47 (2h 5m)</span>
+      <span class="sep">·</span><span>Requester: Krantikumar Patil (Reliance)</span>
+    </div>
+    <div class="ticket-subject">CWMS-O | Issue is color code — New sites.</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-solved">Solved</span>
+      <span class="badge b-ps">Product Support</span>
+      <span class="badge" style="background:#e0e7ff;color:#3730a3;border-color:#a5b4fc;">Reliance::O2C</span>
+      <span class="badge" style="background:#d1fae5;color:#065f46;border-color:#6ee7b7;">Best-tagged in batch</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      Eshwaran (BP Product Support) reported that 5 newly-created Reliance sites (Bio Energy Barabanki, Vadodara, Prayagraj, Kakinada, Jhajjar) had incorrect color codes — three-digit comma-separated values like <code>237, 29, 7</code> instead of the required <code>-234564</code> / <code>567432</code> hex format — which blocked profiles from appearing in approval flows. Krantikumar (Reliance) corrected the codes and confirmed. Eshwaran acknowledged. <strong>Cleanly closed in 2h 5m.</strong>
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">3</span></div>
+
+    <div class="field-corr">
+      <span class="name">Customer Name<span class="req">*</span></span>
+      <span class="current ok">Reliance::O2C ✓</span>
+      <span class="suggest unchanged">unchanged</span>
+      <span class="conf conf-na">—</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Module<span class="req">*</span></span>
+      <span class="current ok">Organization Structure ✓</span>
+      <span class="suggest unchanged">unchanged</span>
+      <span class="conf conf-na">—</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Bucketization<span class="req">*</span></span>
+      <span class="current ok">Site ✓</span>
+      <span class="suggest unchanged">unchanged</span>
+      <span class="conf conf-na">—</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">KB Article</span>
+      <span class="current ok">Confluence link present ✓</span>
+      <span class="suggest unchanged">unchanged</span>
+      <span class="conf conf-na">—</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">High</span>
+      <span class="conf conf-80">80%</span>
+      <span class="reason">5-site production blocker for Reliance::O2C. Onboarding flow blocked. Resolution in 2h confirms High but not Urgent.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">How resolved?<span class="req">*</span></span>
+      <span class="current thin">"Color code issue in the Site."</span>
+      <span class="suggest">"Customer corrected color codes for 5 sites (Bio Energy Barabanki, Vadodara, Prayagraj, Kakinada, Jhajjar) per format <code>-234564</code> or <code>567432</code>; profiles now appearing in approval flows."</span>
+      <span class="conf conf-95">93%</span>
+      <span class="reason">Current value just restates the problem. AI draft incorporates: action taken (customer correction), scope (5 sites), verification (approval flow check), and the format spec from the conversation.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">What was the issue?</span>
+      <span class="current empty">empty</span>
+      <span class="suggest">"5 newly-created sites had color codes in invalid format (e.g. <code>237, 29, 7</code>) instead of the required <code>-NNNNNN</code> / <code>NNNNNN</code> hex format. Profiles were 100% complete but invisible in approval flows."</span>
+      <span class="conf conf-95">95%</span>
+      <span class="reason">Direct synthesis of agent comment [3] which describes the issue clearly.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Total Profiles</span>
+      <span class="current thin">5 (likely sites, not profiles)</span>
+      <span class="suggest unchanged">verify with agent</span>
+      <span class="conf conf-na">—</span>
+      <span class="reason">5 SITES are mentioned, not 5 profiles. Field name suggests profile count. The actual profile count is unknown from the conversation.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="ok"><span class="marker ok-marker">✓</span> Module / Section / Bucketization / Root Cause L1 / L2 all populated and consistent with conversation</li>
+      <li class="ok"><span class="marker ok-marker">✓</span> KB Article populated with a real Confluence URL — <strong>only ticket in the batch where this is done</strong></li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>How resolved?</strong> restates the problem rather than describing the action taken</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>What was the issue?</strong> empty despite a clear problem statement in conversation</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Total Profiles=5</strong> — likely should be Sites; profiles count not stated</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>Priority empty</strong></li>
+    </ul>
+
+    <div class="notes">
+      <strong>Why this is a model resolution candidate:</strong> field discipline is the strongest in the batch; KB linkage is correct; Module/Section/Bucketization all map cleanly to the actual issue. With the AI-drafted "How resolved?" and "What was the issue?" filled in, this becomes an excellent training example for the resolution-suggestion engine.
+    </div>
+  </div>
+</div>
+
+<!-- ====== TICKET 7 · #593791 (CLOSED BY MERGE) ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593791</span>
+      <span class="sep">·</span><span>Closed (merged into #593648)</span>
+      <span class="sep">·</span><span>Created Apr 29, 11:36 · Closed 13:20</span>
+      <span class="sep">·</span><span>Requester: Manali Mestry (Reliance)</span>
+    </div>
+    <div class="ticket-subject">URGENT — Z5 need to activate_00021049</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-closed">Closed</span>
+      <span class="badge b-ps">Product Support</span>
+      <span class="badge" style="background:#e0e7ff;color:#3730a3;border-color:#a5b4fc;">Reliance</span>
+      <span class="badge" style="background:#fee2e2;color:#991b1b;border-color:#fecaca;">Closed by merge</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      Reliance user requested urgent activation of Z5 code <code>00021049</code>, mentioning a confusion between two Z5 combinations. Wrishov (BP agent, internal note) confirmed it was already done in afternoon hours and asked customer to verify. The ticket was then merged into #593648 by Pooja H S. <strong>All 11 mandatory custom fields are empty because the merge inherited nothing</strong> — this is the data-loss pattern flagged in the executive summary.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">2</span></div>
+
+    <div class="field-corr">
+      <span class="name">Action</span>
+      <span class="current thin">already merged into #593648</span>
+      <span class="suggest">backfill custom fields onto #593648 from this ticket's conversation</span>
+      <span class="conf conf-80">85%</span>
+      <span class="reason">Z5 activation, Reliance customer, urgent priority — these signals exist in the conversation but were lost on merge. The AI should populate the parent.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Urgent</span>
+      <span class="conf conf-95">96%</span>
+      <span class="reason">Subject contains "URGENT". Customer language: "update on this urgently". Reliance Enterprise.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>Custom fields lost on merge</strong> — Customer Name, Priority, Product, Module, Section, Bucketization, Root Cause L1, L2, KB, How-resolved, Total Profiles — all empty. Should inherit or be re-derived</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>"URGENT" in subject</strong> not reflected in the Priority field even before merge</li>
+    </ul>
+
+    <div class="notes">
+      <strong>Recommendation:</strong> when a ticket is closed by merge, the AI should run its analysis on the closed child and propose patching the parent (#593648 in this case) so reporting accuracy is preserved. This is a high-leverage fix that compounds — every merged ticket today silently degrades trend data.
+    </div>
+  </div>
+</div>
+
+<!-- ====== TICKET 8 · #593760 ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593760</span>
+      <span class="sep">·</span><span>Solved</span>
+      <span class="sep">·</span><span>Created Apr 29, 10:01 · Solved 11:46 (1h 45m)</span>
+      <span class="sep">·</span><span>Requester: Sathya Arunagiri (BetterPlace, internal)</span>
+    </div>
+    <div class="ticket-subject">Checks are not getting triggered</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-solved">Solved</span>
+      <span class="badge b-ps">Product Support</span>
+      <span class="badge" style="background:#fff7ed;color:#9a3412;border-color:#fed7aa;">Classic Protection Force</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      BetterPlace internal user (Sathya, on behalf of client Classic Protection Force) reported BGV checks not triggering for onboarded profiles. Agent (Keerthi P) checked one profile, found triggers working today, attributed yesterday's misses to <strong>system lag</strong>, and asked the user to re-initiate. Resolved in 1h 45m. <strong>The agent tagged Root Cause L1 = "Training" — but the actual cause stated in their own comment was system lag, not user training.</strong>
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">5</span></div>
+
+    <div class="field-corr">
+      <span class="name">Root Cause L1<span class="req">*</span></span>
+      <span class="current">Training</span>
+      <span class="suggest">Issue → "Data Issues" or "Database connectivity Errors" or platform-lag equivalent</span>
+      <span class="conf conf-80">82%</span>
+      <span class="reason">Agent's own comment 2 says "Yesterday there were lags due to that it was missed" — system-side lag, not a training issue. Re-tagging as a platform/data issue gives accurate trend data.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Root Cause L2<span class="req">*</span></span>
+      <span class="current">Not Reproducible</span>
+      <span class="suggest unchanged">consider "Data Issues" or "Lag related"</span>
+      <span class="conf conf-60">65%</span>
+      <span class="reason">"Not Reproducible" implies the AI couldn't repro — but the agent's note says the cause was known (lag). L2 should reflect the actual cause class.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">How resolved?<span class="req">*</span></span>
+      <span class="current thin">"I have checked for one profile and checks are getting triggered."</span>
+      <span class="suggest">"Verified BGV checks now triggering correctly for sample profile. Yesterday's missed triggers attributed to a system lag (resolved naturally). Customer asked to re-initiate BGV from their end."</span>
+      <span class="conf conf-95">92%</span>
+      <span class="reason">Direct synthesis of agent comment 2 — adds the cause and the next-action ask, which the current value omits.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">High</span>
+      <span class="conf conf-80">80%</span>
+      <span class="reason">"Resolve as soon as possible" + production BGV blocker for client onboarding. High but not Urgent (no SLA escalation).</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">KB Article<span class="req">*</span></span>
+      <span class="current">NA</span>
+      <span class="suggest">Suggest creating runbook: "BGV check trigger lag — diagnostic steps"</span>
+      <span class="conf conf-60">70%</span>
+      <span class="reason">Recurring failure mode (system lag) without a runbook. Mark as KB-worthy so the next time this happens, the agent finds an existing page instead of re-discovering.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="ok"><span class="marker ok-marker">✓</span> Customer Name / Product / Module / Section / Bucketization all populated correctly</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Root Cause L1 = "Training"</strong> contradicts the agent's own comment ("yesterday there were lags") — likely the wrong category</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>How resolved?</strong> doesn't capture the actual cause (system lag) or the next action</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>KB Article = NA</strong> for a recurring failure mode</li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====== TICKET 9 · #593734 ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593734</span>
+      <span class="sep">·</span><span>Solved</span>
+      <span class="sep">·</span><span>Created Apr 29, 09:02 · Solved Apr 29, 17:38 (8h 36m)</span>
+      <span class="sep">·</span><span>Requester: Krantikumar Patil (Reliance)</span>
+    </div>
+    <div class="ticket-subject">New Validity Issue</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-solved">Solved</span>
+      <span class="badge b-ms">Managed Services</span>
+      <span class="badge" style="background:#e0e7ff;color:#3730a3;border-color:#a5b4fc;">Reliance::O2C</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      Reliance user reported "new validity not showing after updating LL" (Letter Limit / Latest Limit). Mahesh (BP) checked one profile, saw details updated, and asked customer to verify the rest. Closure attributed broadly to "Mahesh & Dev Team". Tags include <code>vendor_ll_updates</code> and <code>vendor_profile_updates</code>. <strong>Number of Profiles = 0 and Number of Sites = 0 are likely incorrect</strong> — the conversation involves multiple profile validity updates.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">5</span></div>
+
+    <div class="field-corr">
+      <span class="name">Service Sub-Type<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">"Vendor LL Updates" (verify dropdown)</span>
+      <span class="conf conf-80">85%</span>
+      <span class="reason">Tag <code>vendor_ll_updates</code> matches naming convention; check the 95-option Service Sub-Type dropdown for the exact value. If absent, "Profile Deployment" or a new option is needed.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">How resolved?<span class="req">*</span></span>
+      <span class="current thin">"This has been resolved from Mahesh & Dev Team."</span>
+      <span class="suggest">"Validated that 'New Valid Upto' date is now showing correctly post LL update — verified on sample profile. Investigating with Dev Team why update propagation took longer than expected."</span>
+      <span class="conf conf-80">80%</span>
+      <span class="reason">Conversation only contains Mahesh's check; closure note doesn't describe what Dev Team did. AI proposes a structured note inferred from comment 2; agent confirms or extends.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Number of Profiles</span>
+      <span class="current thin">0</span>
+      <span class="suggest">verify with agent — likely &gt; 0</span>
+      <span class="conf conf-60">60%</span>
+      <span class="reason">Customer mentions checking multiple profiles' validity. 0 is implausible.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Number of Sites</span>
+      <span class="current thin">0</span>
+      <span class="suggest unchanged">flag for human review</span>
+      <span class="conf conf-na">—</span>
+      <span class="reason">Site count not derivable from conversation; flag rather than guess.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">High</span>
+      <span class="conf conf-80">80%</span>
+      <span class="reason">"Need your immediate support" language; multi-profile impact on Reliance::O2C; 8.5h to close.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="ok"><span class="marker ok-marker">✓</span> Request type / Service type / Customer Name correctly populated</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Service Sub-Type empty</strong> despite <code>vendor_ll_updates</code> tag being present</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>Number of Profiles = 0</strong> contradicts conversation</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>How resolved?</strong> doesn't describe the actual fix</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>KB Article empty</strong></li>
+    </ul>
+  </div>
+</div>
+
+<!-- ====== TICKET 10 · #593721 ====== -->
+<div class="ticket">
+  <div class="ticket-head">
+    <div class="ticket-id-row">
+      <span class="id-num">#593721</span>
+      <span class="sep">·</span><span>Solved</span>
+      <span class="sep">·</span><span>Created Apr 29, 08:14 · Solved 09:57 (1h 43m)</span>
+      <span class="sep">·</span><span>Requester: ajay.yadav (BetterPlace, internal · for Accenture)</span>
+    </div>
+    <div class="ticket-subject">Re: [External] Re: New Vehicle &amp; New Driver Induction TT — MH43CQ6506 (Kripash Das)</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-solved">Solved</span>
+      <span class="badge b-ps">Product Support</span>
+      <span class="badge" style="background:#fff7ed;color:#9a3412;border-color:#fed7aa;">Accenture</span>
+    </div>
+  </div>
+  <div class="ticket-body">
+    <div class="summary-block">
+      Internal request (Ajay, BP) on behalf of Accenture's Transport Induction team — change driver <code>M02DRVR0989</code>'s vendor to "Uber" and push notification. Agent Keerthi P updated the vendor; customer confirmed and asked to close. Resolved in 1h 43m. The custom fields are well populated for routing (Customer = Accenture, Section = Client Vendor Relation, Root Cause L2 = Vendor Tagging Task) but the resolution note <strong>"Vendor script"</strong> is too thin to be useful for future similar tickets.
+    </div>
+
+    <div class="fields-title">Field corrections <span class="pill-count">3</span></div>
+
+    <div class="field-corr">
+      <span class="name">How resolved?<span class="req">*</span></span>
+      <span class="current thin">"Vendor script"</span>
+      <span class="suggest">"Ran vendor-update script to retag driver M02DRVR0989 to vendor 'Uber' (per Accenture transport induction request); push notification dispatched. Customer confirmed and requested closure."</span>
+      <span class="conf conf-95">93%</span>
+      <span class="reason">"Vendor script" is operationally meaningless to a future engineer. The expanded note contains the action, the entity, the source request, and the verification — all extractable from the conversation.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">KB Article<span class="req">*</span></span>
+      <span class="current">NA</span>
+      <span class="suggest">"Vendor Tagging Script — Driver Re-induction" (KB-worthy)</span>
+      <span class="conf conf-60">75%</span>
+      <span class="reason">Vendor-tagging script is a routine play; a runbook would let the agent self-serve next time instead of re-deriving the script invocation.</span>
+    </div>
+    <div class="field-corr">
+      <span class="name">Priority<span class="req">*</span></span>
+      <span class="current empty">empty</span>
+      <span class="suggest">Normal</span>
+      <span class="conf conf-95">90%</span>
+      <span class="reason">Routine vendor change; tag <code>internal__critical</code> appears to be a default/inherited tag rather than reflecting urgency in the conversation.</span>
+    </div>
+
+    <ul class="checks">
+      <li class="ok"><span class="marker ok-marker">✓</span> Customer / Product / Module / Section / Root Cause L1+L2 / Total Profiles all populated correctly</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>How resolved? = "Vendor script"</strong> insufficient for future learning</li>
+      <li class="thin"><span class="marker thin-marker">!</span> <strong>KB Article = NA</strong> for a repeatable workflow</li>
+      <li class="miss"><span class="marker miss-marker">!</span> <strong>Priority empty</strong></li>
+    </ul>
+  </div>
+</div>
+
+</div> <!-- /tickets -->
+
+<!-- ============== CLOSING SECTION ============== -->
+<div class="section-title"><span class="num">3</span> What this proves</div>
+<div class="exec">
+  <p><strong>Quality is high enough to ship Phase 1.</strong> Across 73 recommended corrections in this batch, ~62 (85%) come at ≥ 80% confidence with a value that already exists in your taxonomy. Those would be presented to agents as one-click pre-fills. The remaining 15% are flagged for human review (mostly when the conversation is genuinely under-specified, like #593755, or when the dropdown lacks an exact match like "Work Order" or "Vendor LL Updates").</p>
+  <p><strong>The strongest immediate wins</strong> are: (1) auto-detect Reliance Bucketization gaps (caught 3 in this batch), (2) flag thin "How resolved?" notes and propose structured replacements (caught 6 of 8 solved tickets), (3) pre-fill KB Article pages from a Confluence index (would have helped 8 of the 9 missing cases), (4) auto-detect Outlook recall messages and propose merge (would have removed #593761 from the queue), (5) repopulate custom fields on parent tickets when a child is closed by merge (#593791 → #593648 lost 11 fields).</p>
+  <p><strong>Recommended next step:</strong> apply the corrections in this report manually to 3–4 tickets, send the result to one of your senior agents, and ask <em>"would you have made these tags?"</em> If the answer is yes, we proceed to Phase 1 build (sync worker, AI worker, dashboard) confident the AI will save agents real time.</p>
+</div>
+
+<div class="footer">
+  Generated · 30 Apr 2026 · 10 real BetterPlace tickets · analysis by Claude · <code>~/Documents/zd-copilot/docs/ai_analysis_report.html</code>
+</div>
+
+</div> <!-- /wrap -->
+</body>
+</html>

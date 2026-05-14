@@ -1,0 +1,105 @@
+{% extends "_base.html" %}
+{% block title %}Agents · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Native agents &amp; availability</h1>
+    <div class="admin-detail-summary">
+      Promote a Zendesk-synced agent to a "native agent" — set availability,
+      max parallel load, group memberships. Only native agents are eligible for
+      the round-robin assignment engine.
+    </div>
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin-top:18px;padding:0;">
+    <table class="admin-table">
+      <thead><tr><th>Agent</th><th>Availability</th><th>Groups</th><th>Load</th><th>Max</th><th>Active</th><th></th></tr></thead>
+      <tbody>
+        {% for a in agents %}
+        <tr data-uid="{{ a.user_id }}">
+          <td><strong>{{ a.display_name or a.user_name }}</strong><div style="font-size:11px;color:#64748b;">{{ a.user_email }}</div></td>
+          <td>
+            <select class="ag-avail" style="padding:4px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+              {% for av in ['online','away','busy','offline'] %}
+              <option value="{{ av }}" {% if a.availability==av %}selected{% endif %}>{{ av }}</option>
+              {% endfor %}
+            </select>
+          </td>
+          <td>
+            <div style="display:flex;flex-wrap:wrap;gap:4px;max-width:280px;">
+            {% for g in groups %}
+              <label style="font-size:11px;background:#f1f5f9;padding:2px 6px;border-radius:10px;cursor:pointer;">
+                <input type="checkbox" class="ag-grp" value="{{ g.id }}" {% if g.id in a.group_ids %}checked{% endif %} style="margin-right:3px;"> {{ g.name }}
+              </label>
+            {% endfor %}
+            </div>
+          </td>
+          <td style="text-align:center;font-family:'JetBrains Mono',monospace;">{{ a.current_load }}</td>
+          <td><input type="number" class="ag-max" value="{{ a.max_open_tickets }}" style="width:60px;padding:4px;border:1px solid var(--border);border-radius:6px;font-size:12px;"></td>
+          <td><input type="checkbox" class="ag-active" {% if a.active %}checked{% endif %}></td>
+          <td style="white-space:nowrap;">
+            <button type="button" class="admin-card-btn" onclick="saveAgent(this)">Save</button>
+            <button type="button" class="admin-card-btn" onclick="removeAgent({{ a.user_id }}, '{{ (a.display_name or a.user_name)|e }}')"
+                    title="Drop from native agents roster (ZD user stays)"
+                    style="color:#be123c;border-color:#fecdd3;background:#fff1f2;margin-left:4px;">Remove</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    <div style="padding:8px 10px;font-size:11px;color:var(--muted);border-top:1px solid var(--border);background:#fafbff;">
+      <strong>Load</strong> = open tickets currently assigned (status <code>new</code> + <code>open</code> only).
+      Tickets on <code>pending</code> or <code>hold</code> aren't counted — they're waiting on customer / engineering, not the agent.
+    </div>
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Add an agent from Zendesk</div>
+    <form onsubmit="return addAgent(event)" style="display:flex;gap:8px;align-items:end;margin-top:8px;">
+      <label style="font-size:12px;flex:1;"><span style="color:var(--muted);">Pick a user</span>
+        <select name="user_id" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+          {% for u in all_agents %}<option value="{{ u.id }}">{{ u.name }} &lt;{{ u.email }}&gt; · {{ u.role }}</option>{% endfor %}
+        </select></label>
+      <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Promote to native agent</button>
+    </form>
+    <span id="add-status" style="font-size:12px;color:var(--muted);margin-left:8px;"></span>
+  </div>
+</main>
+<script>
+async function saveAgent(btn) {
+  const row = btn.closest('tr');
+  const fd = new FormData();
+  fd.append('user_id', row.dataset.uid);
+  fd.append('availability', row.querySelector('.ag-avail').value);
+  fd.append('max_open_tickets', row.querySelector('.ag-max').value);
+  fd.append('active', row.querySelector('.ag-active').checked ? 1 : 0);
+  const gids = Array.from(row.querySelectorAll('.ag-grp:checked')).map(i => i.value);
+  fd.append('group_ids', gids.join(','));
+  const r = await fetch('/api/admin/agents', { method: 'POST', body: fd });
+  btn.textContent = r.ok ? '✓ Saved' : '✗';
+  setTimeout(() => btn.textContent = 'Save', 1500);
+}
+async function removeAgent(uid, name) {
+  if (!confirm(`Remove "${name}" from the native-agents roster?\n\nThe ZD user stays — only the availability + load tracking goes away.`)) return;
+  const r = await fetch(`/api/admin/agents/${uid}/delete`, { method: 'POST' });
+  if (r.ok) location.reload();
+  else alert('Failed: ' + (await r.text()));
+}
+
+async function addAgent(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  fd.append('user_id', f.user_id.value);
+  fd.append('availability', 'offline');
+  fd.append('max_open_tickets', 20);
+  fd.append('active', 1);
+  const r = await fetch('/api/admin/agents', { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+  else document.getElementById('add-status').textContent = 'Failed';
+  return false;
+}
+</script>
+{% endblock %}

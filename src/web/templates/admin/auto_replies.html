@@ -1,0 +1,117 @@
+{% extends "_base.html" %}
+{% block title %}Auto-replies · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <button type="button" class="admin-card-btn" onclick="newReply()">+ New auto-reply</button>
+  </div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Auto-replies</h1>
+    <div class="admin-detail-summary">
+      Templates fired when a ticket is created (or other events). Scope by group
+      or customer. Optionally gate on business hours (fire only after-hours, for
+      example). Body supports placeholders: <code>{{ '{{customer}}' }}</code>,
+      <code>{{ '{{ticket_id}}' }}</code>, <code>{{ '{{requester_name}}' }}</code>.
+    </div>
+  </div>
+
+  <div id="replies" style="margin-top:18px;display:flex;flex-direction:column;gap:12px;">
+    {% for r in replies %}
+    <div class="admin-card admin-card-done" data-id="{{ r.id }}">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <strong>{{ r.name }}</strong>
+        <span class="admin-status admin-status-{% if r.active %}done{% else %}pending{% endif %}">{% if r.active %}● Active{% else %}○ Off{% endif %}</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+        group {{ r.scope_group_id or '— any —' }} · customer {{ r.scope_customer_value or '— any —' }} ·
+        fires <strong>{{ r.fire_on }}</strong> · hours <strong>{{ r.after_hours }}</strong> ·
+        sent {{ r.sent_count or 0 }} times
+      </div>
+      <pre style="margin-top:6px;font-size:11.5px;background:#f8fafc;padding:8px;border-radius:6px;white-space:pre-wrap;">{{ r.body }}</pre>
+    </div>
+    {% else %}
+    <div class="admin-stub-banner admin-stub-pending">
+      <div class="ass-icon">○</div>
+      <div><strong>No auto-replies yet.</strong> Click <strong>+ New auto-reply</strong> above.</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div id="modal-bg" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100;" onclick="closeModal(event)">
+    <div style="background:#fff;max-width:680px;margin:50px auto;padding:24px;border-radius:12px;box-shadow:var(--shadow-lg);" onclick="event.stopPropagation()">
+      <h2 style="margin-bottom:14px;">New auto-reply</h2>
+      <form onsubmit="return saveReply(event)">
+        <input type="hidden" name="reply_id" value="0">
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Name
+          <input name="name" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <label style="font-size:12px;">Group (scope)
+            <select name="scope_group_id" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+              <option value="0">— any —</option>
+              {% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+            </select></label>
+          <label style="font-size:12px;">Customer value (scope)
+            <input name="scope_customer_value" placeholder="e.g. reliance_jio" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        </div>
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Body (Markdown) — type <code>{{ '{{' }}</code> for placeholders
+          <textarea name="body" required rows="6" class="ph-autocomplete"
+            placeholder="Hi {{ '{{ticket.requester.first_name}}' }}, we've received your ticket {{ '{{ticket.display_id}}' }} …"
+            style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:inherit;"></textarea></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:8px;">
+          <label style="font-size:12px;">Fires on
+            <select name="fire_on" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+              <option value="create">Ticket created</option>
+              <option value="first_response_late">First response late</option>
+              <option value="business_open">Business hours start</option>
+            </select></label>
+          <label style="font-size:12px;">Hours filter
+            <select name="after_hours" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+              <option value="always">Always</option>
+              <option value="business_only">Business hours only</option>
+              <option value="after_hours_only">After hours only</option>
+            </select></label>
+          <label style="font-size:12px;">Business hours schedule
+            <select name="business_hours_id" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+              <option value="0">— default —</option>
+              {% for b in business_hours %}<option value="{{ b.id }}">{{ b.name }}</option>{% endfor %}
+            </select></label>
+        </div>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" name="active" checked> Active
+        </label>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+          <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Save</button>
+          <button type="button" class="admin-card-btn" onclick="closeModal()">Cancel</button>
+          <span id="ar-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</main>
+<script>
+function newReply() { document.getElementById('modal-bg').style.display = 'block'; }
+function closeModal(ev) {
+  if (ev && ev.target.id !== 'modal-bg') return;
+  document.getElementById('modal-bg').style.display = 'none';
+}
+async function saveReply(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'checkbox') fd.append(el.name, el.checked ? 1 : 0);
+    else fd.append(el.name, el.value);
+  }
+  const st = document.getElementById('ar-status'); st.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/admin/auto-replies', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Saved'; setTimeout(() => location.reload(), 400);
+  } catch (e) { st.textContent = '✗ ' + e.message; }
+  return false;
+}
+</script>
+{% endblock %}

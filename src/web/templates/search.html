@@ -1,0 +1,207 @@
+{% extends "_base.html" %}
+{% block title %}{% if q %}{{ q }} · Search{% else %}Search{% endif %}{% endblock %}
+{% block main %}
+<main class="main-pane">
+  <div class="list-header">
+    <div class="list-header-row">
+      <div>
+        <div class="list-title">
+          {% if q %}Search · "<em>{{ q }}</em>"{% else %}Search tickets{% endif %}
+        </div>
+        <div class="list-sub">
+          {% if tickets %}
+            {{ tickets|length }}{% if has_more %}+{% endif %} result{{ '' if tickets|length == 1 else 's' }}
+            {% if page > 1 %} · page {{ page }}{% endif %}
+          {% elif q %}
+            no matches
+          {% else %}
+            Type a query above to search across all tickets — ID, BP-#, subject, requester, customer, Jira, KB
+          {% endif %}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Search form — every filter is in the URL so results are shareable -->
+  <form id="search-form" method="get" action="/search" style="background:#fff;border:1px solid var(--border);border-radius:12px;padding:14px 16px;margin:12px 16px;display:grid;grid-template-columns:2fr 1fr 1fr 1fr 1fr auto;gap:8px;align-items:end;">
+    <label style="font-size:11px;">
+      <span style="color:var(--muted);">Query</span>
+      <input name="q" value="{{ q }}" placeholder="anything that might be in the ticket…"
+             style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:13px;">
+    </label>
+    <label style="font-size:11px;">
+      <span style="color:var(--muted);">Status</span>
+      <select name="status" multiple size="1" id="f-status"
+              style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:11px;">
+        {% for s in ['new','open','pending','hold','solved','closed'] %}
+        <option value="{{ s }}" {% if s in filters.status %}selected{% endif %}>{{ s }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:11px;">
+      <span style="color:var(--muted);">Priority</span>
+      <select name="priority" multiple size="1" id="f-priority"
+              style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:11px;">
+        {% for p in ['low','normal','high','urgent'] %}
+        <option value="{{ p }}" {% if p in filters.priority %}selected{% endif %}>{{ p }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:11px;">
+      <span style="color:var(--muted);">Group</span>
+      <select name="group" multiple size="1"
+              style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:11px;">
+        {% for g in groups_all %}
+        <option value="{{ g.id }}" {% if g.id in filters.group %}selected{% endif %}>{{ g.name }}</option>
+        {% endfor %}
+      </select>
+    </label>
+    <label style="font-size:11px;">
+      <span style="color:var(--muted);">Sort</span>
+      <select name="sort"
+              style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:11px;">
+        <option value="updated_desc" {% if filters.sort == 'updated_desc' %}selected{% endif %}>Updated (newest)</option>
+        <option value="updated_asc"  {% if filters.sort == 'updated_asc' %}selected{% endif %}>Updated (oldest)</option>
+        <option value="created_desc" {% if filters.sort == 'created_desc' %}selected{% endif %}>Created (newest)</option>
+        <option value="created_asc"  {% if filters.sort == 'created_asc' %}selected{% endif %}>Created (oldest)</option>
+        <option value="customer"     {% if filters.sort == 'customer' %}selected{% endif %}>Customer A→Z</option>
+      </select>
+    </label>
+    <button type="submit" class="admin-card-btn"
+            style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;height:32px;">
+      Search
+    </button>
+  </form>
+
+  <!-- Advanced filters (collapsed by default) -->
+  <details style="margin:0 16px 12px;background:#f8fafc;border:1px solid var(--border);border-radius:10px;">
+    <summary style="cursor:pointer;list-style:none;padding:8px 14px;font-size:11px;color:#475569;font-weight:600;">
+      ▸ Advanced filters
+    </summary>
+    <form method="get" action="/search" style="padding:0 14px 12px;display:grid;grid-template-columns:repeat(4,1fr);gap:8px;font-size:11px;">
+      <input type="hidden" name="q" value="{{ q }}">
+      {% for s in filters.status %}<input type="hidden" name="status" value="{{ s }}">{% endfor %}
+      {% for p in filters.priority %}<input type="hidden" name="priority" value="{{ p }}">{% endfor %}
+      {% for g in filters.group %}<input type="hidden" name="group" value="{{ g }}">{% endfor %}
+      <input type="hidden" name="sort" value="{{ filters.sort }}">
+      <label>
+        <span style="color:var(--muted);">Customer</span>
+        <select name="customer"
+                style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:3px;font-size:11px;">
+          <option value="">— any —</option>
+          {% for cu in customers_top %}
+          <option value="{{ cu.value }}" {% if filters.customer == cu.value %}selected{% endif %}>{{ cu.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label>
+        <span style="color:var(--muted);">AI insights</span>
+        <select name="has_ai" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:3px;font-size:11px;">
+          <option value=""   {% if not filters.has_ai %}selected{% endif %}>— any —</option>
+          <option value="yes" {% if filters.has_ai == 'yes' %}selected{% endif %}>has AI insights</option>
+          <option value="no"  {% if filters.has_ai == 'no'  %}selected{% endif %}>no AI insights</option>
+        </select>
+      </label>
+      <label>
+        <span style="color:var(--muted);">Within last (days)</span>
+        <div style="display:flex;gap:4px;margin-top:3px;">
+          <select name="date_field" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:11px;">
+            <option value="updated_at" {% if filters.date_field == 'updated_at' %}selected{% endif %}>Updated</option>
+            <option value="created_at" {% if filters.date_field == 'created_at' %}selected{% endif %}>Created</option>
+            <option value="solved_at"  {% if filters.date_field == 'solved_at' %}selected{% endif %}>Solved</option>
+          </select>
+          <input type="number" name="days" min="0" max="3650" value="{{ filters.days or '' }}"
+                 placeholder="0 = any"
+                 style="width:80px;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:11px;">
+        </div>
+      </label>
+      <label style="display:flex;align-items:flex-end;gap:6px;padding-bottom:4px;cursor:pointer;">
+        <input type="checkbox" name="include_comments" value="1"
+               {% if filters.include_comments %}checked{% endif %}>
+        <span><strong>Search comment bodies</strong> <span style="color:var(--muted);">(slower)</span></span>
+      </label>
+      <div style="grid-column:span 4;display:flex;justify-content:space-between;align-items:center;margin-top:4px;">
+        <a href="/search?q={{ q }}" style="font-size:11px;color:var(--accent);">Clear advanced filters</a>
+        <button type="submit" class="admin-card-btn"
+                style="background:#0ea5e9;color:#fff;border:none;padding:6px 14px;">Apply</button>
+      </div>
+    </form>
+  </details>
+
+  <!-- Results table -->
+  {% if tickets %}
+  <div class="ticket-table-wrap" style="margin:0 16px;">
+    <table class="ticket-table">
+      <thead>
+        <tr>
+          <th class="th-id">ID</th>
+          <th class="th-status">Status</th>
+          <th class="th-customer">Customer</th>
+          <th class="th-subject">Subject</th>
+          <th>Requester</th>
+          <th class="th-jira">Jira</th>
+          <th class="th-priority">Priority</th>
+          <th class="th-grp">Group</th>
+          <th class="th-date">Updated</th>
+          <th class="th-ai">AI</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tickets %}
+        <tr class="ticket-table-row" onclick="location.href='/tickets/{{ t.local_id or t.id }}'">
+          <td class="td-id">
+            {% if t.source == 'native' and t.local_id %}<span class="td-id-native">{{ t.local_id }}</span>
+            {% else %}#{{ t.id }}{% endif %}
+          </td>
+          <td><span class="badge b-{{ t.status }}" title="{{ t.status }}">{{ t.custom_status_label or t.status }}</span></td>
+          <td class="td-customer" title="{{ t.customer }}">{{ t.customer }}</td>
+          <td class="td-subject" title="{{ t.subject }}">{{ t.subject }}</td>
+          <td style="font-size:11px;color:#475569;">{{ t.requester_name or '—' }}</td>
+          <td class="td-jira">{% if t.jira_id %}<span class="jira-chip" title="{{ t.jira_id }}">{{ t.jira_id }}</span>{% else %}—{% endif %}</td>
+          <td class="td-priority">{{ t.priority }}</td>
+          <td>{% if t.group_name %}<span class="badge {% if 'managed' in t.group_name|lower %}b-ms{% else %}b-ps{% endif %}">{{ t.group_name }}</span>{% else %}—{% endif %}</td>
+          <td class="td-date" title="{{ t.updated_at }} UTC">{{ t.updated_at | ist('%d %b %Y, %H:%M') }}</td>
+          <td class="td-ai">{% if t.has_ai %}<span class="ai-chip">✦ {{ t.ai_count }}</span>{% else %}<span class="ai-chip-muted">—</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Pagination — uses has_more so we don't need a separate COUNT(*) query -->
+  {% if prev_url or next_url %}
+  <div style="display:flex;justify-content:center;gap:6px;padding:16px;font-size:12px;">
+    {% if prev_url %}<a href="{{ prev_url }}" class="admin-card-btn" style="text-decoration:none;">← Prev</a>{% endif %}
+    <span style="padding:6px 10px;color:#64748b;">Page {{ page }}</span>
+    {% if next_url %}<a href="{{ next_url }}" class="admin-card-btn" style="text-decoration:none;">Next →</a>{% endif %}
+  </div>
+  {% endif %}
+
+  {% elif q %}
+  <div class="empty-state" style="margin:16px;">
+    <div style="font-size:14px;color:#64748b;">No tickets match "<em>{{ q }}</em>"</div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:8px;">
+      Try: a ticket ID, a BP-# (e.g. BP-000123), a customer name, an agent's email,
+      a Jira ID, or part of the subject. Tick "Search comment bodies" in
+      Advanced filters to scan conversation text too.
+    </div>
+  </div>
+  {% else %}
+  <div class="empty-state" style="margin:16px;">
+    <div style="font-size:14px;color:#64748b;">Search across every ticket — no view filter applied.</div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:8px;">
+      Matches: ticket ID · BP-# · subject · description · requester name/email · customer · Jira ID · KB article. Tick the comments-body option in Advanced filters to scan conversation text.
+    </div>
+  </div>
+  {% endif %}
+</main>
+
+<script>
+// Multi-select fields default to size=1 to look like a single-select. Resize
+// when the user clicks so they can pick multiples cleanly.
+document.querySelectorAll('select[multiple]').forEach(sel => {
+  sel.addEventListener('focus', () => { sel.size = Math.max(4, Math.min(8, sel.options.length)); });
+  sel.addEventListener('blur', () => { sel.size = 1; });
+});
+</script>
+{% endblock %}

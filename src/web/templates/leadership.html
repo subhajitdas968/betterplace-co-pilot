@@ -1,0 +1,236 @@
+{% extends "_base.html" %}
+{% block title %}Leadership · BetterPlace Co-Pilot{% endblock %}
+{% block main %}
+
+<main class="main-pane">
+  <div class="leadership-head">
+    <div>
+      <div class="list-title">Leadership dashboard</div>
+      <div class="list-sub">{{ widgets|length }} widget(s) · click ✎ to edit · drag to reorder (coming soon) · last sync {{ last_sync }}</div>
+    </div>
+    <button class="btn btn-primary" onclick="openWidgetDialog()">+ Add widget</button>
+  </div>
+
+  <div class="widgets-grid">
+    {% for w in widgets %}
+    <div class="widget widget-{{ w.widget_type }}" data-widget-id="{{ w.id }}" data-config='{{ w.config }}'>
+      <div class="widget-head">
+        <h3 class="widget-title">{{ w.title }}</h3>
+        <div class="widget-actions">
+          <button type="button" class="widget-btn" onclick="openWidgetDialog({{ w.id }})" title="Edit">✎</button>
+          <button type="button" class="widget-btn" onclick="deleteWidget({{ w.id }})" title="Remove">×</button>
+        </div>
+      </div>
+      <div class="widget-body">
+        {% set d = w.data %}
+        {% if d.type == 'kpi' %}
+          <div class="kpi-value">{{ d.value }}</div>
+          <div class="kpi-label">{{ d.label }}</div>
+        {% elif d.type == 'group_table' %}
+          <div class="widget-meta">{{ d.group_by_label }} · {{ d.status_label }}</div>
+          <table class="widget-table">
+            {% for row in d.rows %}
+            <tr><td class="wt-key">{{ row.key }}</td><td class="wt-count">{{ row.count }}</td></tr>
+            {% else %}
+            <tr><td colspan="2" class="wt-empty">No tickets matching</td></tr>
+            {% endfor %}
+          </table>
+        {% elif d.type == 'list' %}
+          <div class="widget-meta">{{ d.status_label }}</div>
+          {% for row in d.rows %}
+          <a href="/tickets/{{ row.id }}" class="widget-list-row">
+            <span class="wlr-id">#{{ row.id }}</span>
+            <span class="wlr-subject">{{ row.subject }}</span>
+            <span class="wlr-status badge b-{{ row.status }}">{{ row.status }}</span>
+          </a>
+          {% else %}
+          <div class="wt-empty">No tickets matching</div>
+          {% endfor %}
+        {% else %}
+          <div class="wt-empty">Unknown widget · {{ d.error or '' }}</div>
+        {% endif %}
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+</main>
+
+<!-- ============== EDIT / ADD WIDGET DIALOG ============== -->
+<div class="widget-dialog-backdrop" id="widget-dialog-backdrop" style="display:none;" onclick="closeWidgetDialog()"></div>
+<div class="widget-dialog" id="widget-dialog" style="display:none;">
+  <h2 id="wd-title">Add widget</h2>
+  <form id="widget-form" onsubmit="return saveWidget(event)">
+    <input type="hidden" name="widget_id" id="wd-id" value="">
+
+    <label class="wd-field">
+      <span>Title</span>
+      <input type="text" name="title" id="wd-title-input" required>
+    </label>
+
+    <label class="wd-field">
+      <span>Type</span>
+      <select name="widget_type" id="wd-type" onchange="syncWidgetConfigFields()">
+        <option value="kpi">KPI · single number</option>
+        <option value="group_table">Group table · count by …</option>
+        <option value="list">List · top N tickets</option>
+      </select>
+    </label>
+
+    <!-- KPI config -->
+    <div class="wd-kpi" id="wd-kpi-cfg">
+      <label class="wd-field">
+        <span>Metric</span>
+        <select id="wd-metric">
+          {% for k, m in kpi_metrics.items() %}
+          <option value="{{ k }}">{{ m.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+    </div>
+
+    <!-- Group table config -->
+    <div class="wd-gt" id="wd-gt-cfg" style="display:none;">
+      <label class="wd-field">
+        <span>Group by</span>
+        <select id="wd-group-by">
+          {% for k, gb in group_by_options.items() %}
+          <option value="{{ k }}">{{ gb.label }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="wd-field">
+        <span>Status filter</span>
+        <select id="wd-gt-status">
+          {% for k, sf in status_filters.items() %}
+          <option value="{{ k }}">{{ sf[0] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="wd-field">
+        <span>Limit (rows)</span>
+        <input type="number" id="wd-gt-limit" min="1" max="50" value="10">
+      </label>
+    </div>
+
+    <!-- List config -->
+    <div class="wd-list" id="wd-list-cfg" style="display:none;">
+      <label class="wd-field">
+        <span>Status filter</span>
+        <select id="wd-list-status">
+          {% for k, sf in status_filters.items() %}
+          <option value="{{ k }}">{{ sf[0] }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="wd-field">
+        <span>Sort by</span>
+        <select id="wd-list-sort">
+          {% for k in sort_keys.keys() %}
+          <option value="{{ k }}">{{ k }}</option>
+          {% endfor %}
+        </select>
+      </label>
+      <label class="wd-field">
+        <span>Limit (rows)</span>
+        <input type="number" id="wd-list-limit" min="1" max="50" value="10">
+      </label>
+    </div>
+
+    <div class="wd-actions">
+      <button type="submit" class="btn btn-primary">Save</button>
+      <button type="button" class="btn btn-secondary" onclick="closeWidgetDialog()">Cancel</button>
+    </div>
+  </form>
+</div>
+
+<script>
+function openWidgetDialog(id) {
+  const dlg = document.getElementById('widget-dialog');
+  const back = document.getElementById('widget-dialog-backdrop');
+  const titleEl = document.getElementById('wd-title');
+  const idEl = document.getElementById('wd-id');
+  const titleInput = document.getElementById('wd-title-input');
+  const typeSel = document.getElementById('wd-type');
+  if (id) {
+    titleEl.textContent = 'Edit widget';
+    const card = document.querySelector(`.widget[data-widget-id="${id}"]`);
+    const cfg = JSON.parse(card.dataset.config || '{}');
+    idEl.value = id;
+    titleInput.value = card.querySelector('.widget-title').textContent.trim();
+    typeSel.value = card.classList.contains('widget-kpi') ? 'kpi' :
+                    card.classList.contains('widget-group_table') ? 'group_table' : 'list';
+    syncWidgetConfigFields();
+    if (cfg.metric) document.getElementById('wd-metric').value = cfg.metric;
+    if (cfg.group_by) document.getElementById('wd-group-by').value = cfg.group_by;
+    if (cfg.status && document.getElementById('wd-gt-status')) document.getElementById('wd-gt-status').value = cfg.status;
+    if (cfg.status && document.getElementById('wd-list-status')) document.getElementById('wd-list-status').value = cfg.status;
+    if (cfg.sort) document.getElementById('wd-list-sort').value = cfg.sort;
+    if (cfg.limit) {
+      if (document.getElementById('wd-gt-limit')) document.getElementById('wd-gt-limit').value = cfg.limit;
+      if (document.getElementById('wd-list-limit')) document.getElementById('wd-list-limit').value = cfg.limit;
+    }
+  } else {
+    titleEl.textContent = 'Add widget';
+    idEl.value = '';
+    titleInput.value = '';
+    typeSel.value = 'kpi';
+    syncWidgetConfigFields();
+  }
+  dlg.style.display = 'block';
+  back.style.display = 'block';
+  titleInput.focus();
+}
+
+function closeWidgetDialog() {
+  document.getElementById('widget-dialog').style.display = 'none';
+  document.getElementById('widget-dialog-backdrop').style.display = 'none';
+}
+
+function syncWidgetConfigFields() {
+  const t = document.getElementById('wd-type').value;
+  document.getElementById('wd-kpi-cfg').style.display  = t === 'kpi' ? 'block' : 'none';
+  document.getElementById('wd-gt-cfg').style.display   = t === 'group_table' ? 'block' : 'none';
+  document.getElementById('wd-list-cfg').style.display = t === 'list' ? 'block' : 'none';
+}
+
+async function saveWidget(ev) {
+  ev.preventDefault();
+  const id = document.getElementById('wd-id').value;
+  const title = document.getElementById('wd-title-input').value;
+  const type = document.getElementById('wd-type').value;
+  let cfg = {};
+  if (type === 'kpi') {
+    cfg.metric = document.getElementById('wd-metric').value;
+  } else if (type === 'group_table') {
+    cfg.group_by = document.getElementById('wd-group-by').value;
+    cfg.status = document.getElementById('wd-gt-status').value;
+    cfg.limit = parseInt(document.getElementById('wd-gt-limit').value, 10);
+  } else if (type === 'list') {
+    cfg.status = document.getElementById('wd-list-status').value;
+    cfg.sort = document.getElementById('wd-list-sort').value;
+    cfg.limit = parseInt(document.getElementById('wd-list-limit').value, 10);
+  }
+  const fd = new FormData();
+  fd.append('title', title);
+  fd.append('config', JSON.stringify(cfg));
+  if (!id) fd.append('widget_type', type);
+  const url = id ? `/api/dashboard/widgets/${id}` : '/api/dashboard/widgets';
+  const method = id ? 'PUT' : 'POST';
+  const r = await fetch(url, { method, body: fd });
+  if (!r.ok) {
+    alert('Failed: ' + (await r.text()));
+    return false;
+  }
+  location.reload();
+  return false;
+}
+
+async function deleteWidget(id) {
+  if (!confirm('Remove this widget?')) return;
+  const r = await fetch(`/api/dashboard/widgets/${id}`, { method: 'DELETE' });
+  if (!r.ok) { alert('Failed: ' + (await r.text())); return; }
+  location.reload();
+}
+</script>
+
+{% endblock %}

@@ -1,0 +1,189 @@
+{% extends "_base.html" %}
+{% block title %}Business hours · Admin{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <button type="button" class="admin-card-btn" onclick="newSchedule()">+ New schedule</button>
+  </div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Business hours</h1>
+    <div class="admin-detail-summary">
+      Define when the SLA clock ticks. Each schedule has a timezone, weekly
+      intervals, and a holiday calendar. The <strong>default</strong> schedule is
+      used by any SLA policy that doesn't pick one explicitly. Customer-specific
+      overrides are set on <a href="/admin/sla" style="color:var(--indigo);font-weight:600;">/admin/sla</a>.
+    </div>
+    <div style="margin-top:10px;padding:10px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;font-size:12.5px;color:#4338ca;">
+      💡 <strong>Create as many schedules as you need.</strong> One per timezone, one per shift,
+      one for each customer that runs different hours. Then link them on the SLA page
+      (per-policy default) or per-customer (override on /admin/sla → bottom card).
+      Click <strong>+ New schedule</strong> at the top right.
+    </div>
+  </div>
+
+  <div id="schedules" style="margin-top:18px;display:flex;flex-direction:column;gap:18px;">
+    {% for bh in business_hours %}
+    <div class="admin-card admin-card-done bh-card" data-id="{{ bh.id }}">
+      <div style="display:flex;justify-content:space-between;align-items:center;">
+        <div>
+          <span class="admin-block">#{{ bh.id }}</span>
+          {% if bh.is_default %}<span class="admin-status admin-status-done">★ Default</span>{% endif %}
+        </div>
+        <button type="button" class="admin-card-btn" onclick="deleteSched({{ bh.id }})"
+                style="color:#be123c;border-color:#fecdd3;background:#fff1f2;">Delete</button>
+      </div>
+      <form onsubmit="return saveSched(event, {{ bh.id }})" class="bh-form" style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:8px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Name</span>
+          <input name="name" required value="{{ bh.name }}"
+                 style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Timezone (IANA)</span>
+          <input name="timezone" value="{{ bh.timezone }}"
+                 style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:12px;">
+        </label>
+        <label style="font-size:12px;grid-column:1/3;">
+          <span style="color:var(--muted);">Description</span>
+          <input name="description" value="{{ bh.description }}"
+                 style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:8px;grid-column:1/3;">
+          <input type="checkbox" name="is_default" {% if bh.is_default %}checked{% endif %}>
+          <span>Use as default schedule</span>
+        </label>
+
+        <div style="grid-column:1/3;">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Weekly intervals</div>
+          <div class="weekly-grid" data-intervals='{{ bh.weekly_intervals | tojson }}'></div>
+          <button type="button" class="admin-card-btn" onclick="addInterval(this)">+ interval</button>
+        </div>
+
+        <label style="font-size:12px;grid-column:1/3;">
+          <span style="color:var(--muted);">Holidays (one per line, YYYY-MM-DD)</span>
+          <textarea name="holidays" rows="3"
+                 style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:12px;">{{ bh.holidays | join('\n') }}</textarea>
+        </label>
+
+        <div style="grid-column:1/3;display:flex;gap:8px;align-items:center;">
+          <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Save</button>
+          <span class="save-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+      </form>
+    </div>
+    {% endfor %}
+  </div>
+
+</main>
+
+<script>
+const DAY_LABELS = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+
+function renderWeekly(grid, intervals) {
+  grid.innerHTML = (intervals || []).map((iv, idx) => `
+    <div class="iv-row" data-idx="${idx}" style="display:grid;grid-template-columns:90px 100px 100px 32px;gap:6px;margin-bottom:4px;align-items:center;">
+      <select class="iv-day" style="padding:4px;border:1px solid var(--border);border-radius:6px;">
+        ${DAY_LABELS.map((d,i) => `<option value="${i}" ${i==iv.day?'selected':''}>${d}</option>`).join('')}
+      </select>
+      <input class="iv-start" type="time" value="${iv.start}" style="padding:4px;border:1px solid var(--border);border-radius:6px;">
+      <input class="iv-end" type="time" value="${iv.end}" style="padding:4px;border:1px solid var(--border);border-radius:6px;">
+      <button type="button" onclick="this.closest('.iv-row').remove()" style="border:1px solid #fecdd3;background:#fff;color:#be123c;border-radius:6px;cursor:pointer;">×</button>
+    </div>`).join('');
+}
+
+document.querySelectorAll('.weekly-grid').forEach(g => {
+  try { renderWeekly(g, JSON.parse(g.dataset.intervals || '[]')); } catch (e) { renderWeekly(g, []); }
+});
+
+function addInterval(btn) {
+  const grid = btn.previousElementSibling;
+  const existing = collectIntervals(grid);
+  existing.push({day: 1, start: '09:00', end: '18:00'});
+  renderWeekly(grid, existing);
+}
+
+function collectIntervals(grid) {
+  return Array.from(grid.querySelectorAll('.iv-row')).map(row => ({
+    day: parseInt(row.querySelector('.iv-day').value),
+    start: row.querySelector('.iv-start').value,
+    end: row.querySelector('.iv-end').value,
+  }));
+}
+
+async function saveSched(ev, bhId) {
+  ev.preventDefault();
+  const form = ev.target;
+  const fd = new FormData();
+  fd.append('bh_id', bhId);
+  fd.append('name', form.name.value);
+  fd.append('description', form.description.value);
+  fd.append('timezone', form.timezone.value);
+  fd.append('is_default', form.is_default.checked ? 1 : 0);
+  const grid = form.querySelector('.weekly-grid');
+  fd.append('weekly_intervals_json', JSON.stringify(collectIntervals(grid)));
+  const holidays = form.holidays.value.split('\n').map(s => s.trim()).filter(Boolean);
+  fd.append('holidays_json', JSON.stringify(holidays));
+  const st = form.querySelector('.save-status');
+  st.textContent = 'Saving…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/business-hours', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Saved'; st.style.color = '#047857';
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c';
+  }
+  return false;
+}
+
+function newSchedule() {
+  const wrap = document.getElementById('schedules');
+  const div = document.createElement('div');
+  div.className = 'admin-card admin-card-done bh-card';
+  div.dataset.id = '0';
+  div.innerHTML = `
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <span class="admin-block">NEW</span>
+      <button type="button" class="admin-card-btn" onclick="this.closest('.bh-card').remove()">Cancel</button>
+    </div>
+    <form onsubmit="return saveSched(event, 0)" class="bh-form" style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:8px;">
+      <label style="font-size:12px;"><span style="color:var(--muted);">Name</span>
+        <input name="name" required placeholder="e.g. India Mon–Fri 9–18"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;"><span style="color:var(--muted);">Timezone</span>
+        <input name="timezone" value="Asia/Kolkata"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:12px;"></label>
+      <label style="font-size:12px;grid-column:1/3;"><span style="color:var(--muted);">Description</span>
+        <input name="description" style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;display:flex;align-items:center;gap:8px;grid-column:1/3;">
+        <input type="checkbox" name="is_default"><span>Use as default schedule</span></label>
+      <div style="grid-column:1/3;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Weekly intervals</div>
+        <div class="weekly-grid" data-intervals="[]"></div>
+        <button type="button" class="admin-card-btn" onclick="addInterval(this)">+ interval</button>
+      </div>
+      <label style="font-size:12px;grid-column:1/3;"><span style="color:var(--muted);">Holidays (YYYY-MM-DD per line)</span>
+        <textarea name="holidays" rows="3"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:12px;"></textarea></label>
+      <div style="grid-column:1/3;display:flex;gap:8px;align-items:center;">
+        <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Create</button>
+        <span class="save-status" style="font-size:12px;color:var(--muted);"></span>
+      </div>
+    </form>`;
+  wrap.prepend(div);
+  renderWeekly(div.querySelector('.weekly-grid'), []);
+}
+
+async function deleteSched(id) {
+  if (!confirm('Delete this schedule? Any SLA policy referencing it will fall back to the default.')) return;
+  const r = await fetch(`/api/admin/business-hours/${id}/delete`, { method: 'POST' });
+  if (r.ok) location.reload(); else alert(await r.text());
+}
+</script>
+
+{% endblock %}

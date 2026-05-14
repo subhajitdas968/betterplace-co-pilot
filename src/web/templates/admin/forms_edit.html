@@ -1,0 +1,487 @@
+{% extends "_base.html" %}
+{% block title %}{% if form %}Edit form: {{ form.name }}{% else %}New form{% endif %} · Admin{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin/forms" class="back-link">← Back to forms</a>
+    {% if form %}
+    <button type="button" class="admin-card-btn" onclick="deleteForm()" style="color:#be123c;border-color:#fecdd3;background:#fff1f2;">
+      Delete form
+    </button>
+    {% endif %}
+  </div>
+
+  <div class="admin-detail-head">
+    <h1 class="admin-detail-title">
+      {% if form %}{{ form.name }}{% else %}New form{% endif %}
+    </h1>
+    <div class="admin-detail-summary">
+      Pick which fields appear, which are required, and which groups this form
+      applies to. Add conditional rules to hide fields until a precondition is met.
+    </div>
+  </div>
+
+  <form id="form-edit" onsubmit="return submitForm(event)" style="display:flex;flex-direction:column;gap:18px;margin-top:18px;">
+
+    <!-- Basics -->
+    <div class="admin-card admin-card-done">
+      <div class="admin-card-title">Basics</div>
+      <div style="display:grid;grid-template-columns:2fr 1fr;gap:14px;margin-top:8px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Name</span>
+          <input name="name" required value="{{ form.name if form else '' }}"
+                 placeholder="e.g. Reliance::Jio support form"
+                 style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:13px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Active</span>
+          <select name="active" style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:13px;">
+            <option value="1" {% if not form or form.active %}selected{% endif %}>Yes</option>
+            <option value="0" {% if form and not form.active %}selected{% endif %}>No</option>
+          </select>
+        </label>
+      </div>
+      <label style="font-size:12px;margin-top:10px;display:block;">
+        <span style="color:var(--muted);">Description</span>
+        <input name="description" value="{{ form.description if form else '' }}"
+               placeholder="What this form is for — shown to agents only"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-size:13px;">
+      </label>
+    </div>
+
+    <!-- Group binding -->
+    <div class="admin-card admin-card-done">
+      <div class="admin-card-title">Apply to groups</div>
+      <div class="admin-card-summary">Tickets in any of these groups will use this form (lowest position wins on tie).</div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px;">
+        {% set selected_gids = (form.group_ids if form else []) %}
+        {% for g in all_groups %}
+        <label style="display:flex;gap:8px;align-items:center;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:12.5px;background:#fff;">
+          <input type="checkbox" name="g_{{ g.id }}" value="{{ g.id }}" {% if g.id in selected_gids %}checked{% endif %}>
+          <span>{{ g.name }}</span>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Fields picker — split into selected (ordered) + available (searchable) -->
+    <div class="admin-card admin-card-done">
+      <div class="admin-card-title">Fields on this form</div>
+      <div class="admin-card-summary">
+        Selected fields appear in the order shown below. Use the ↑↓ buttons to
+        reorder. Mark <strong>required</strong> for fields the agent must fill
+        before moving the ticket to "Solved".
+      </div>
+
+      <!-- Selected (ordered) -->
+      <div style="margin-top:14px;">
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-bottom:6px;">
+          On this form · <span id="sel-count">0</span> fields (order matters)
+        </div>
+        <div id="selected-fields" style="display:flex;flex-direction:column;gap:4px;border:1px dashed var(--border);border-radius:8px;padding:8px;min-height:60px;background:#fafbff;">
+          <!-- rows injected by JS -->
+        </div>
+      </div>
+
+      <!-- Available (searchable) -->
+      <div style="margin-top:14px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;">
+            Available fields · <span id="avail-count">0</span> not on form
+          </div>
+          <input id="avail-search" placeholder="Search field name…" autocomplete="off"
+                 style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12px;width:240px;">
+        </div>
+        <div id="available-fields" style="display:flex;flex-direction:column;gap:2px;max-height:380px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:#fff;">
+          <!-- rows injected by JS -->
+        </div>
+      </div>
+    </div>
+
+    <!-- Conditions -->
+    <div class="admin-card admin-card-done">
+      <div class="admin-card-title">Conditional visibility</div>
+      <div class="admin-card-summary">
+        Hide a field until another field has a specific value. Rules are OR'd —
+        if any rule for a target field passes, the field is shown. Field pickers
+        are searchable; the <strong>value</strong> input automatically becomes a
+        dropdown when the source field has predefined options.
+      </div>
+      <div id="cond-rows" style="margin-top:10px;display:flex;flex-direction:column;gap:8px;"></div>
+      <button type="button" class="admin-card-btn" onclick="addCondRow()" style="margin-top:8px;">+ Add rule</button>
+    </div>
+
+    <div style="display:flex;gap:10px;align-items:center;">
+      <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 16px;">
+        {% if form %}Save changes{% else %}Create form{% endif %}
+      </button>
+      <a href="/admin/forms" class="admin-card-btn">Cancel</a>
+      <span id="save-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </form>
+</main>
+
+<script>
+// ============================================================================
+// State
+// ============================================================================
+const ALL_FIELDS = {{ all_fields | tojson }};           // [{id, title, type, required, options:[{name,value}]}]
+const FIELDS_BY_ID = Object.fromEntries(ALL_FIELDS.map(f => [String(f.id), f]));
+let SELECTED_IDS = {{ (form.field_ids if form else []) | tojson }};   // ordered list of int
+let REQUIRED_IDS = new Set(({{ (form.required_field_ids if form else []) | tojson }}).map(String));
+const EXISTING_CONDS = {{ (form.conditions if form else []) | tojson }};
+const FORM_ID = {{ form_id if form_id else 'null' }};
+
+// ============================================================================
+// Selected (ordered) field list
+// ============================================================================
+// Drag-and-drop state — tracks the row being dragged so dragover knows where
+// to draw the insertion indicator.
+let DRAG_FROM_IDX = null;
+
+function renderSelected() {
+  const host = document.getElementById('selected-fields');
+  host.innerHTML = '';
+  if (SELECTED_IDS.length === 0) {
+    host.innerHTML = '<div style="color:#94a3b8;font-size:12px;padding:8px;text-align:center;">No fields yet — add some from the list below.</div>';
+  }
+  SELECTED_IDS.forEach((fid, idx) => {
+    const f = FIELDS_BY_ID[String(fid)];
+    if (!f) return;
+    const isReq = REQUIRED_IDS.has(String(fid));
+    const row = document.createElement('div');
+    row.draggable = true;
+    row.dataset.idx = String(idx);
+    row.className = 'sf-row';
+    row.style.cssText = 'display:grid;grid-template-columns:18px 30px 1fr 110px 80px 90px 30px;gap:8px;align-items:center;background:#fff;border:1px solid var(--border);border-radius:6px;padding:6px 8px;cursor:grab;transition:background .12s,border-color .12s;';
+    row.innerHTML = `
+      <span class="sf-handle" title="Drag to reorder" style="color:#94a3b8;text-align:center;font-size:14px;line-height:1;cursor:grab;user-select:none;">⋮⋮</span>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);text-align:center;">${idx + 1}</div>
+      <div style="font-size:12.5px;">
+        <strong>${escapeHtml(f.title)}</strong>
+        <div style="font-size:10.5px;color:var(--muted);">${f.type}</div>
+      </div>
+      <label style="font-size:11.5px;display:flex;align-items:center;gap:6px;color:${isReq ? '#be123c' : 'var(--muted)'};">
+        <input type="checkbox" data-fid="${fid}" class="row-required" ${isReq ? 'checked' : ''}>
+        Required
+      </label>
+      <div style="display:flex;gap:2px;">
+        <button type="button" class="admin-card-btn" data-act="up" data-idx="${idx}" style="font-size:11px;padding:3px 6px;" ${idx === 0 ? 'disabled style="opacity:.4;"' : ''}>↑</button>
+        <button type="button" class="admin-card-btn" data-act="down" data-idx="${idx}" style="font-size:11px;padding:3px 6px;" ${idx === SELECTED_IDS.length - 1 ? 'disabled style="opacity:.4;"' : ''}>↓</button>
+      </div>
+      <div style="display:flex;gap:2px;">
+        <button type="button" class="admin-card-btn" data-act="top" data-idx="${idx}" style="font-size:11px;padding:3px 6px;" title="Move to top">⤒</button>
+        <button type="button" class="admin-card-btn" data-act="bot" data-idx="${idx}" style="font-size:11px;padding:3px 6px;" title="Move to bottom">⤓</button>
+      </div>
+      <button type="button" data-act="remove" data-idx="${idx}" title="Remove from form"
+              style="border:1px solid #fecdd3;background:#fff;color:#be123c;border-radius:6px;padding:3px 8px;cursor:pointer;">×</button>
+    `;
+
+    // Native HTML5 drag-and-drop
+    row.addEventListener('dragstart', (ev) => {
+      DRAG_FROM_IDX = idx;
+      row.style.opacity = '0.4';
+      ev.dataTransfer.effectAllowed = 'move';
+      // Required by Firefox for the drag to actually fire
+      try { ev.dataTransfer.setData('text/plain', String(idx)); } catch (e) {}
+    });
+    row.addEventListener('dragend', () => {
+      DRAG_FROM_IDX = null;
+      Array.from(host.children).forEach(c => {
+        c.style.opacity = '';
+        c.style.borderTop = '';
+        c.style.borderBottom = '';
+      });
+    });
+    row.addEventListener('dragover', (ev) => {
+      if (DRAG_FROM_IDX === null) return;
+      ev.preventDefault();
+      ev.dataTransfer.dropEffect = 'move';
+      // Show an insertion indicator: above the row if cursor in top half, below if bottom
+      const r = row.getBoundingClientRect();
+      const above = (ev.clientY - r.top) < (r.height / 2);
+      row.style.borderTop    = above ? '2px solid var(--indigo)' : '';
+      row.style.borderBottom = above ? '' : '2px solid var(--indigo)';
+    });
+    row.addEventListener('dragleave', () => {
+      row.style.borderTop = ''; row.style.borderBottom = '';
+    });
+    row.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      if (DRAG_FROM_IDX === null) return;
+      const from = DRAG_FROM_IDX;
+      let to = idx;
+      const r = row.getBoundingClientRect();
+      const below = (ev.clientY - r.top) > (r.height / 2);
+      if (below) to += 1;
+      // Adjust for removal-then-insert shift
+      if (from < to) to -= 1;
+      if (from === to) { renderSelected(); return; }
+      const moved = SELECTED_IDS.splice(from, 1)[0];
+      SELECTED_IDS.splice(to, 0, moved);
+      renderSelected();
+    });
+
+    host.appendChild(row);
+  });
+  document.getElementById('sel-count').textContent = SELECTED_IDS.length;
+  refreshCondTargets();
+}
+
+document.getElementById('selected-fields').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  const idx = parseInt(btn.dataset.idx);
+  const act = btn.dataset.act;
+  if (act === 'up' && idx > 0)            { [SELECTED_IDS[idx-1], SELECTED_IDS[idx]] = [SELECTED_IDS[idx], SELECTED_IDS[idx-1]]; }
+  else if (act === 'down' && idx < SELECTED_IDS.length-1) { [SELECTED_IDS[idx+1], SELECTED_IDS[idx]] = [SELECTED_IDS[idx], SELECTED_IDS[idx+1]]; }
+  else if (act === 'top')                 { const x = SELECTED_IDS.splice(idx, 1)[0]; SELECTED_IDS.unshift(x); }
+  else if (act === 'bot')                 { const x = SELECTED_IDS.splice(idx, 1)[0]; SELECTED_IDS.push(x); }
+  else if (act === 'remove')              { const removed = SELECTED_IDS.splice(idx, 1)[0]; REQUIRED_IDS.delete(String(removed)); renderAvailable(); }
+  renderSelected();
+});
+
+document.getElementById('selected-fields').addEventListener('change', (ev) => {
+  const cb = ev.target.closest('input.row-required');
+  if (!cb) return;
+  if (cb.checked) REQUIRED_IDS.add(cb.dataset.fid);
+  else REQUIRED_IDS.delete(cb.dataset.fid);
+});
+
+// ============================================================================
+// Available (searchable) field list
+// ============================================================================
+function renderAvailable() {
+  const host = document.getElementById('available-fields');
+  const q = (document.getElementById('avail-search').value || '').trim().toLowerCase();
+  const selectedSet = new Set(SELECTED_IDS.map(String));
+  host.innerHTML = '';
+  let count = 0;
+  for (const f of ALL_FIELDS) {
+    if (selectedSet.has(String(f.id))) continue;
+    if (q && !(f.title || '').toLowerCase().includes(q) && !(f.type || '').toLowerCase().includes(q)) continue;
+    count += 1;
+    const row = document.createElement('div');
+    row.style.cssText = 'display:grid;grid-template-columns:1fr 100px 70px;gap:8px;align-items:center;padding:5px 10px;border-bottom:1px solid #f1f5f9;font-size:12.5px;';
+    row.innerHTML = `
+      <div>${escapeHtml(f.title)}</div>
+      <div><code style="background:#f1f5f9;padding:1px 6px;border-radius:4px;font-size:10.5px;">${f.type}</code></div>
+      <button type="button" data-fid="${f.id}" class="admin-card-btn add-btn" style="font-size:11px;padding:3px 8px;">+ Add</button>
+    `;
+    host.appendChild(row);
+  }
+  if (count === 0) {
+    host.innerHTML = `<div style="color:#94a3b8;font-size:12px;padding:14px;text-align:center;">${q ? 'No matches for "' + escapeHtml(q) + '"' : 'All fields are on the form already.'}</div>`;
+  }
+  document.getElementById('avail-count').textContent = count;
+}
+
+document.getElementById('available-fields').addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.add-btn');
+  if (!btn) return;
+  SELECTED_IDS.push(parseInt(btn.dataset.fid));
+  renderSelected(); renderAvailable();
+});
+
+document.getElementById('avail-search').addEventListener('input', renderAvailable);
+
+// ============================================================================
+// Conditional rules — searchable target/source + dynamic value picker
+// ============================================================================
+function makeFieldDatalist(idSuffix) {
+  // <input list> + <datalist> gives free search out of the box; the user types
+  // to narrow, picks a title, and we resolve the title back to a field id on save.
+  return `<datalist id="dl-${idSuffix}">${
+    ALL_FIELDS.map(f => `<option value="${escapeAttr(f.title)}" data-fid="${f.id}">`).join('')
+  }</datalist>`;
+}
+
+function fieldByTitle(title) {
+  return ALL_FIELDS.find(f => (f.title || '').toLowerCase() === (title || '').toLowerCase());
+}
+
+function makeValuePicker(sourceField, currentValue) {
+  // If the source field has options (tagger / multiselect), render a select of
+  // those options. Otherwise render a text input.
+  if (sourceField && Array.isArray(sourceField.options) && sourceField.options.length > 0) {
+    const opts = sourceField.options.map(o =>
+      `<option value="${escapeAttr(o.value)}" ${String(o.value) === String(currentValue || '') ? 'selected' : ''}>${escapeHtml(o.name || o.value)}</option>`
+    ).join('');
+    return `<select class="cf-val" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+      <option value="">— pick value —</option>${opts}
+    </select>`;
+  }
+  return `<input class="cf-val" value="${escapeAttr(currentValue || '')}" placeholder="(any text)"
+            style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">`;
+}
+
+let condRowSeq = 0;
+function makeCondRow(cond) {
+  condRowSeq += 1;
+  const seq = condRowSeq;
+  const c = cond || {target_field_id: '', source_field_id: '', op: 'eq', source_value: '', target_required: null};
+  const targetField = FIELDS_BY_ID[String(c.target_field_id)];
+  const sourceField = FIELDS_BY_ID[String(c.source_field_id)];
+  // target_required is tri-state: null = no change, 1 = required, 0 = optional
+  const tr = (c.target_required === undefined || c.target_required === null || c.target_required === '') ? '' : String(c.target_required);
+  const div = document.createElement('div');
+  div.className = 'cond-row';
+  div.dataset.seq = seq;
+  div.style.cssText = 'display:grid;grid-template-columns:1.2fr 1.2fr 110px 1fr 130px 32px;gap:6px;align-items:end;font-size:12.5px;border:1px solid var(--border);border-radius:8px;padding:8px;background:#fff;';
+  div.innerHTML = `
+    <div>
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;">Show field</div>
+      <input class="cf-target" list="dl-target-${seq}" autocomplete="off"
+             value="${escapeAttr(targetField ? targetField.title : '')}"
+             placeholder="Search…"
+             style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+      ${makeFieldDatalist('target-' + seq)}
+    </div>
+    <div>
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;">when field</div>
+      <input class="cf-source" list="dl-source-${seq}" autocomplete="off"
+             value="${escapeAttr(sourceField ? sourceField.title : '')}"
+             placeholder="Search…"
+             style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+      ${makeFieldDatalist('source-' + seq)}
+    </div>
+    <div>
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;">op</div>
+      <select class="cf-op" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+        <option value="eq" ${c.op === 'eq' ? 'selected' : ''}>equals</option>
+        <option value="neq" ${c.op === 'neq' ? 'selected' : ''}>not equals</option>
+        <option value="set" ${c.op === 'set' ? 'selected' : ''}>is set</option>
+        <option value="unset" ${c.op === 'unset' ? 'selected' : ''}>is empty</option>
+      </select>
+    </div>
+    <div class="cf-val-wrap">
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;">value</div>
+      ${makeValuePicker(sourceField, c.source_value)}
+    </div>
+    <div>
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;" title="When the rule fires, also force the target field to required or optional">also make target</div>
+      <select class="cf-req" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+        <option value=""   ${tr === ''  ? 'selected' : ''}>no change</option>
+        <option value="1"  ${tr === '1' ? 'selected' : ''}>required ★</option>
+        <option value="0"  ${tr === '0' ? 'selected' : ''}>optional</option>
+      </select>
+    </div>
+    <div>
+      <button type="button" onclick="this.closest('.cond-row').remove()"
+              style="border:1px solid #fecdd3;background:#fff;color:#be123c;border-radius:6px;padding:6px 8px;cursor:pointer;">×</button>
+    </div>
+  `;
+  document.getElementById('cond-rows').appendChild(div);
+
+  // When the source-field input changes (user picked or typed), swap the value picker.
+  const opSel = div.querySelector('.cf-op');
+  const sourceInp = div.querySelector('.cf-source');
+  const valWrap = div.querySelector('.cf-val-wrap');
+  function rebuildValue() {
+    const f = fieldByTitle(sourceInp.value);
+    const op = opSel.value;
+    if (op === 'set' || op === 'unset') {
+      valWrap.innerHTML = `<div style="color:#64748b;font-size:11px;margin-bottom:2px;">value</div>
+        <div style="font-size:11px;color:#94a3b8;padding:6px;">(not used)</div>`;
+    } else {
+      const cur = valWrap.querySelector('.cf-val');
+      const curVal = cur ? cur.value : '';
+      valWrap.innerHTML = `<div style="color:#64748b;font-size:11px;margin-bottom:2px;">value</div>${makeValuePicker(f, curVal)}`;
+    }
+  }
+  sourceInp.addEventListener('change', rebuildValue);
+  sourceInp.addEventListener('input', rebuildValue);
+  opSel.addEventListener('change', rebuildValue);
+}
+
+function addCondRow() { makeCondRow(null); }
+
+function refreshCondTargets() {
+  // Datalist contents are fixed — no work needed. Kept as a hook for future
+  // when we may want to restrict targets to selected fields only.
+}
+
+EXISTING_CONDS.forEach(c => makeCondRow(c));
+
+// ============================================================================
+// Submit
+// ============================================================================
+async function submitForm(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  fd.append('form_id', FORM_ID || 0);
+  fd.append('name', f.name.value);
+  fd.append('description', f.description.value);
+  fd.append('active', f.active.value);
+  const gids = Array.from(f.querySelectorAll('input[name^="g_"]:checked')).map(i => i.value);
+  fd.append('group_ids', gids.join(','));
+  fd.append('field_ids', SELECTED_IDS.join(','));
+  // required only counts for fields that are actually on the form
+  const req = Array.from(REQUIRED_IDS).filter(rid => SELECTED_IDS.map(String).includes(String(rid)));
+  fd.append('required_field_ids', req.join(','));
+
+  // Conditions
+  const conds = [];
+  document.querySelectorAll('.cond-row').forEach(row => {
+    const targetTitle = row.querySelector('.cf-target').value;
+    const sourceTitle = row.querySelector('.cf-source').value;
+    const targetField = fieldByTitle(targetTitle);
+    const sourceField = fieldByTitle(sourceTitle);
+    const op = row.querySelector('.cf-op').value;
+    const valEl = row.querySelector('.cf-val');
+    const val = valEl ? valEl.value : '';
+    const reqSel = row.querySelector('.cf-req');
+    const trVal = reqSel ? reqSel.value : '';
+    if (targetField && sourceField) {
+      conds.push({
+        target_field_id: targetField.id,
+        source_field_id: sourceField.id,
+        op,
+        source_value: val,
+        target_required: trVal === '' ? null : trVal,
+      });
+    }
+  });
+  fd.append('conditions_json', JSON.stringify(conds));
+
+  const st = document.getElementById('save-status');
+  st.textContent = 'Saving…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/forms', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = `✓ Saved (form #${out.id} · ${out.conditions} rules · ${SELECTED_IDS.length} fields)`;
+    st.style.color = '#047857';
+    if (!FORM_ID) setTimeout(() => location.href = `/admin/forms/${out.id}`, 700);
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c';
+  }
+  return false;
+}
+
+async function deleteForm() {
+  if (!confirm('Delete this form? Tickets using it will fall back to the imported ZD form or hard-coded list.')) return;
+  const r = await fetch(`/api/admin/forms/${FORM_ID}/delete`, { method: 'POST' });
+  if (r.ok) location.href = '/admin/forms';
+  else alert(await r.text());
+}
+
+// ============================================================================
+// Helpers
+// ============================================================================
+function escapeHtml(s) {
+  return String(s || '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+function escapeAttr(s) { return escapeHtml(s); }
+
+// ============================================================================
+// Initial render
+// ============================================================================
+renderSelected();
+renderAvailable();
+</script>
+
+{% endblock %}

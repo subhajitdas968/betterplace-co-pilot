@@ -1,0 +1,97 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BetterPlace · Co-Pilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css">
+<script src="https://unpkg.com/htmx.org@2.0.3"></script>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div class="brand-text">
+      <div class="name">BetterPlace · Co-Pilot</div>
+      <div class="sub">Live · {{ tickets|length }} open / pending in queue</div>
+    </div>
+    <span class="live-pill" style="margin-left:12px;"><span class="live-dot"></span> Synced live</span>
+  </div>
+  <form class="search-wrap" method="get" action="/">
+    <svg width="14" height="14" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#94a3b8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input name="q" placeholder="Paste ticket ID, customer, subject…" value="{{ search }}" />
+  </form>
+  <div class="user-pill">
+    <div class="avatar">{{ user.name[0]|upper if user.name else '?' }}</div>
+    <div>
+      <div class="name">{{ user.name }}</div>
+      <div class="role">${{ '%.4f'|format(spend) }} / ${{ '%.0f'|format(budget) }} this month</div>
+    </div>
+    <form method="post" action="/auth/logout" style="margin-left:8px;"><button class="pill-btn" style="background:white;border:1px solid #e2e8f0;color:#64748b;font-size:11px;">Sign out</button></form>
+  </div>
+</div>
+
+<div class="layout">
+
+  <aside class="nav">
+    <div class="nav-hero">
+      <h4>Workspace</h4>
+      <div class="scope-toggle">
+        <a href="/?view=all_open" class="opt {{ 'active' if view=='all_open' else '' }}">All open</a>
+        <a href="/?view=untouched" class="opt {{ 'active' if view=='untouched' else '' }}">Untouched</a>
+      </div>
+    </div>
+
+    <div class="nav-scroll">
+      <div class="nav-section tickets">
+        <h4><span class="stripe"></span> Tickets · {{ tickets|length }}</h4>
+        {% for t in tickets %}
+        <div class="ticket-row {% if selected and t.id == selected.id %}active{% endif %}"
+             hx-get="/tickets/{{ t.id }}" hx-target="#ticket-panel" hx-swap="innerHTML"
+             hx-on:click="document.querySelectorAll('.ticket-row').forEach(r=>r.classList.remove('active')); this.classList.add('active');">
+          <div class="stat-bar s-{{ t.status }}"></div>
+          <div class="meta">
+            <div class="id-row">
+              <span class="id-num">#{{ t.id }}</span><span>·</span>
+              <span>{{ t.status }}</span>
+              {% if t.pickup %}<span class="pickup-tag">PICKUP</span>{% endif %}
+            </div>
+            <div class="subject">{{ t.subject }}</div>
+            <span class="cust-pill">{{ t.customer }} · {{ t.group }}</span>
+          </div>
+        </div>
+        {% endfor %}
+        {% if not tickets %}
+        <div style="padding:14px;color:#64748b;font-size:12px;">No tickets in this view yet. Run <code>make sync</code> first.</div>
+        {% endif %}
+      </div>
+
+      <div class="nav-section flags">
+        <h4><span class="stripe"></span> Quick filters</h4>
+        <a href="/?view=all_open" class="nav-item">All open</a>
+        <a href="/?view=untouched" class="nav-item flag">Untouched (unassigned)</a>
+        <a href="/?view=solved_24h" class="nav-item match">Solved last 24h</a>
+      </div>
+    </div>
+  </aside>
+
+  <div id="ticket-panel">
+    {% if selected %}
+      {% include "ticket_panel.html" with context %}
+    {% else %}
+      <div class="ticket"><div class="ticket-header"><div class="ticket-subject">No ticket selected</div></div></div>
+    {% endif %}
+  </div>
+
+</div>
+
+<div class="footer-note">
+  BetterPlace Co-Pilot · sync every {{ 300 }}s · model claude-haiku · MTD spend ${{ '%.4f'|format(spend) }} of ${{ '%.0f'|format(budget) }}
+</div>
+
+</body>
+</html>

@@ -1,0 +1,107 @@
+{% extends "_base.html" %}
+{% block title %}Create ticket · BetterPlace Co-Pilot{% endblock %}
+{% block main %}
+
+<main class="main-pane">
+  <div class="list-header">
+    <div>
+      <div class="list-title">Create a native ticket</div>
+      <div class="list-sub">Stays entirely in this tool · Zendesk is not contacted · gets a <code>BP-NNNNNN</code> id</div>
+    </div>
+  </div>
+
+  <div class="create-wrap">
+    <form id="create-form" onsubmit="return submitCreate(event)">
+      <div class="cf-row">
+        <label class="cf-field">
+          <span>Subject <em>required</em></span>
+          <input type="text" name="subject" required placeholder="One-line summary of the issue or request">
+        </label>
+      </div>
+
+      <div class="cf-row">
+        <label class="cf-field">
+          <span>Description <em>required</em></span>
+          <textarea name="description" rows="6" placeholder="The first message that lands on the conversation. Plain text. The customer's reported issue, in their voice if possible."></textarea>
+        </label>
+      </div>
+
+      <div class="cf-row cf-row-cols">
+        <label class="cf-field">
+          <span>Requester email <em>required</em></span>
+          <input type="email" name="requester_email" required placeholder="who.is@reporting.com">
+        </label>
+        <label class="cf-field">
+          <span>Requester name</span>
+          <input type="text" name="requester_name" placeholder="Display name (optional)">
+        </label>
+      </div>
+
+      <div class="cf-row cf-row-cols">
+        <label class="cf-field">
+          <span>Customer</span>
+          <select name="customer_value">
+            <option value="">— none —</option>
+            {% for c in customers %}
+            <option value="{{ c.value }}">{{ c.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="cf-field">
+          <span>Group <em>required</em></span>
+          <select name="group_id" required>
+            {% for g in groups %}
+            <option value="{{ g.id }}">{{ g.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="cf-field">
+          <span>Priority</span>
+          <select name="priority">
+            <option value="low">Low</option>
+            <option value="normal" selected>Normal</option>
+            <option value="high">High</option>
+            <option value="urgent">Urgent</option>
+          </select>
+        </label>
+      </div>
+
+      <div class="cf-actions">
+        <button type="submit" class="btn btn-primary">Create ticket</button>
+        <a href="/" class="btn btn-secondary">Cancel</a>
+        <span class="cf-status" id="cf-status"></span>
+      </div>
+
+      <div class="cf-note">
+        <strong>What happens:</strong> a new ticket is created with a fresh <code>BP-NNNNNN</code> id and
+        <code>source = native</code>. It appears in the Open view immediately. The AI worker
+        (<code>make ai-claude-loop</code>) will pick it up on the next cycle and generate insights.
+        Nothing is sent to Zendesk.
+      </div>
+    </form>
+  </div>
+</main>
+
+<script>
+async function submitCreate(ev) {
+  ev.preventDefault();
+  const form = document.getElementById('create-form');
+  const fd = new FormData(form);
+  const status = document.getElementById('cf-status');
+  status.textContent = 'Creating…'; status.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/tickets/create', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    status.textContent = `Created ${out.local_id} — opening…`;
+    status.style.color = '#047857';
+    setTimeout(() => { window.location.href = out.url; }, 400);
+  } catch (e) {
+    status.textContent = 'Failed: ' + e.message;
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+</script>
+
+{% endblock %}

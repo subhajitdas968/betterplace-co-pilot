@@ -1,0 +1,315 @@
+{% extends "_base.html" %}
+{% block title %}Custom fields · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <div style="display:flex;gap:8px;">
+      <button type="button" class="admin-card-btn" onclick="resyncFields()" title="Re-pull all ticket_fields from Zendesk and refresh required flags + options">
+        ⟳ Resync from Zendesk
+      </button>
+      <button type="button" class="admin-card-btn" onclick="newField()">+ New native field</button>
+      <span id="resync-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
+    </div>
+  </div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Custom fields</h1>
+    <div class="admin-detail-summary">
+      Native fields live in this tool only. Zendesk-synced fields are shown
+      below read-only for reference. Native field IDs start at 9 billion so they
+      never collide with ZD's 14-digit IDs.
+    </div>
+  </div>
+
+  <h3 style="margin-top:18px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--indigo);">Native fields</h3>
+  <div class="admin-card admin-card-done" style="margin-top:8px;padding:0;">
+    {% if native_fields %}
+    <table class="admin-table">
+      <thead><tr><th>ID</th><th>Title</th><th>Type</th><th>Required</th><th>Options</th><th>Active</th></tr></thead>
+      <tbody>
+        {% for f in native_fields %}
+        <tr><td><code>{{ f.id }}</code></td><td>{{ f.title }}</td>
+          <td><code>{{ f.type }}</code></td>
+          <td>{% if f.required %}✓{% endif %}</td>
+          <td>{{ f.options|length if f.options else 0 }}</td>
+          <td>{% if f.active %}✓{% else %}—{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:14px;color:var(--muted);font-size:12px;">No native fields yet.</div>
+    {% endif %}
+  </div>
+
+  <!-- Custom statuses — both ZD-synced and native. Native ids ≥ 9_500_000_000. -->
+  <h3 style="margin-top:18px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--indigo);">Custom statuses</h3>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">
+    These map to the "Custom status" field on every ticket (e.g. "With Dev", "Need More Info").
+    Click <strong>⟳ Resync from Zendesk</strong> to pull fresh from ZD. Use
+    <strong>+ New native status</strong> to add one that doesn't exist in ZD.
+  </div>
+  <div style="display:flex;gap:8px;margin-bottom:8px;">
+    <button type="button" class="admin-card-btn" onclick="resyncCustomStatuses()">⟳ Resync custom statuses from Zendesk</button>
+    <button type="button" class="admin-card-btn" onclick="newCustomStatus()" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">+ New native status</button>
+    <span id="cs-resync-status" style="font-size:12px;color:var(--muted);align-self:center;"></span>
+  </div>
+  <div class="admin-card" style="padding:0;">
+    <table class="admin-table">
+      <thead><tr>
+        <th>ID</th><th>Category</th><th>Agent label</th>
+        <th>End-user label</th><th>Active</th><th>Source</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for s in custom_statuses %}
+        <tr data-cs-id="{{ s.id }}">
+          <td><code>{{ s.id }}</code></td>
+          <td><span class="admin-block">{{ s.status_category }}</span></td>
+          <td><strong>{{ s.agent_label }}</strong></td>
+          <td>{{ s.end_user_label or '—' }}</td>
+          <td>{% if s.active %}<span class="admin-status admin-status-done">● Active</span>{% else %}<span class="admin-status admin-status-pending">○ Off</span>{% endif %}</td>
+          <td><code>{% if s.id >= 9500000000 %}native{% else %}ZD{% endif %}</code></td>
+          <td style="white-space:nowrap;">
+            <button type="button" class="admin-card-btn" onclick="editCustomStatus({{ s.id }})">Edit</button>
+            <button type="button" class="admin-card-btn" onclick="deleteCustomStatus({{ s.id }}, '{{ s.agent_label|e }}')"
+                    style="color:#be123c;border-color:#fecdd3;background:#fff1f2;margin-left:4px;">×</button>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <!-- Custom status edit modal -->
+  <div id="cs-modal-bg" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100;" onclick="closeCsModal(event)">
+    <div style="background:#fff;max-width:560px;margin:60px auto;padding:24px;border-radius:12px;box-shadow:var(--shadow-lg);" onclick="event.stopPropagation()">
+      <h2 id="cs-modal-title" style="margin-bottom:14px;">New custom status</h2>
+      <form onsubmit="return saveCustomStatus(event)">
+        <input type="hidden" name="status_id" value="0">
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Agent label <em style="color:#be123c;">required</em>
+          <input name="agent_label" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        <label style="font-size:12px;display:block;margin-bottom:8px;">End-user label
+          <input name="end_user_label" placeholder="What the customer sees" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Status category
+          <select name="status_category" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+            <option value="new">new</option>
+            <option value="open" selected>open</option>
+            <option value="pending">pending</option>
+            <option value="hold">hold</option>
+            <option value="solved">solved</option>
+            <option value="closed">closed</option>
+          </select></label>
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Description
+          <input name="description" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" name="active" checked> Active
+        </label>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+          <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Save</button>
+          <button type="button" class="admin-card-btn" onclick="closeCsModal()">Cancel</button>
+          <span id="cs-save-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  <h3 style="margin-top:18px;font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);">Zendesk-synced fields</h3>
+  <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">
+    The required flag is the only thing editable here — toggling it stays local
+    (never pushed to Zendesk). Click <strong>ZD</strong> to fall back to Zendesk's
+    own flag, <strong>required</strong> / <strong>optional</strong> to override.
+  </div>
+  <div class="admin-card" style="margin-top:4px;padding:0;">
+    <table class="admin-table">
+      <thead><tr>
+        <th>ID</th><th>Title</th><th>Type</th>
+        <th>ZD says</th><th>Effective</th><th>Override</th>
+      </tr></thead>
+      <tbody>
+        {% for f in zd_fields %}
+        <tr data-fid="{{ f.id }}">
+          <td><code>{{ f.id }}</code></td>
+          <td>{{ f.title }}</td>
+          <td><code>{{ f.type }}</code></td>
+          <td>{% if f.required %}<span class="admin-status admin-status-done">✓</span>{% else %}<span style="color:#94a3b8;">—</span>{% endif %}</td>
+          <td>
+            {% if f.effective_required %}<span class="admin-status admin-status-done">● required</span>
+            {% else %}<span class="admin-status admin-status-pending">○ optional</span>{% endif %}
+          </td>
+          <td>
+            <div style="display:inline-flex;gap:4px;">
+              <button type="button" class="req-tog" data-val="-1"
+                  style="font-size:11px;padding:3px 8px;border:1px solid var(--border);background:{% if f.required_override is none %}#e0e7ff{% else %}#fff{% endif %};color:var(--indigo);border-radius:6px;cursor:pointer;">ZD</button>
+              <button type="button" class="req-tog" data-val="1"
+                  style="font-size:11px;padding:3px 8px;border:1px solid var(--border);background:{% if f.required_override == 1 %}#d1fae5{% else %}#fff{% endif %};color:#065f46;border-radius:6px;cursor:pointer;">required</button>
+              <button type="button" class="req-tog" data-val="0"
+                  style="font-size:11px;padding:3px 8px;border:1px solid var(--border);background:{% if f.required_override == 0 %}#fee2e2{% else %}#fff{% endif %};color:#be123c;border-radius:6px;cursor:pointer;">optional</button>
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div id="modal-bg" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.4);z-index:100;" onclick="closeModal(event)">
+    <div style="background:#fff;max-width:600px;margin:60px auto;padding:24px;border-radius:12px;box-shadow:var(--shadow-lg);" onclick="event.stopPropagation()">
+      <h2 style="margin-bottom:14px;">New native field</h2>
+      <form onsubmit="return saveField(event)">
+        <input type="hidden" name="field_id" value="0">
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Title
+          <input name="title" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:8px;">
+          <label style="font-size:12px;">Type
+            <select name="type_" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+              {% for t in field_types %}<option value="{{ t }}">{{ t }}</option>{% endfor %}
+            </select></label>
+          <label style="font-size:12px;display:flex;align-items:center;gap:6px;padding-top:18px;">
+            <input type="checkbox" name="required"> Required
+          </label>
+        </div>
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Description
+          <input name="description" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        <label style="font-size:12px;display:block;margin-bottom:8px;">Options (only for tagger/multiselect — JSON array of {name, value})
+          <textarea name="options_json" rows="3" placeholder='[{"name":"Low","value":"low"},{"name":"High","value":"high"}]'
+            style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11px;">[]</textarea></label>
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" name="active" checked> Active
+        </label>
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+          <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Create</button>
+          <button type="button" class="admin-card-btn" onclick="closeModal()">Cancel</button>
+          <span id="fl-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+      </form>
+    </div>
+  </div>
+</main>
+<script>
+// Per-row required override on ZD-synced fields
+document.addEventListener('click', async (ev) => {
+  const btn = ev.target.closest('.req-tog');
+  if (!btn) return;
+  const row = btn.closest('tr');
+  const fid = row.dataset.fid;
+  const val = btn.dataset.val;
+  const fd = new FormData(); fd.append('required', val);
+  btn.disabled = true;
+  try {
+    const r = await fetch(`/api/admin/fields/${fid}/required-override`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    location.reload();   // simplest: re-render so all buttons show their new state correctly
+  } catch (e) {
+    alert('Failed: ' + e.message);
+    btn.disabled = false;
+  }
+});
+
+const ALL_CUSTOM_STATUSES = {{ custom_statuses | tojson }};
+
+async function resyncCustomStatuses() {
+  const st = document.getElementById('cs-resync-status');
+  st.textContent = '⏳ Pulling from Zendesk…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/resync-custom-statuses', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = `✓ ${out.custom_statuses} synced`;
+    st.style.color = '#047857';
+    setTimeout(() => location.reload(), 800);
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c';
+  }
+}
+
+function newCustomStatus() {
+  document.getElementById('cs-modal-title').textContent = 'New custom status';
+  const f = document.querySelector('#cs-modal-bg form');
+  f.reset();
+  f.status_id.value = 0;
+  f.active.checked = true;
+  document.getElementById('cs-modal-bg').style.display = 'block';
+}
+
+function editCustomStatus(id) {
+  const cs = ALL_CUSTOM_STATUSES.find(x => x.id === id);
+  if (!cs) return;
+  document.getElementById('cs-modal-title').textContent = 'Edit: ' + cs.agent_label;
+  const f = document.querySelector('#cs-modal-bg form');
+  f.status_id.value = cs.id;
+  f.agent_label.value = cs.agent_label || '';
+  f.end_user_label.value = cs.end_user_label || '';
+  f.status_category.value = cs.status_category || 'open';
+  f.description.value = cs.description || '';
+  f.active.checked = !!cs.active;
+  document.getElementById('cs-modal-bg').style.display = 'block';
+}
+
+function closeCsModal(ev) {
+  if (ev && ev.target.id !== 'cs-modal-bg') return;
+  document.getElementById('cs-modal-bg').style.display = 'none';
+}
+
+async function saveCustomStatus(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'checkbox') fd.append(el.name, el.checked ? 1 : 0);
+    else fd.append(el.name, el.value);
+  }
+  const st = document.getElementById('cs-save-status');
+  st.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/admin/custom-statuses', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Saved'; st.style.color = '#047857';
+    setTimeout(() => location.reload(), 400);
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  return false;
+}
+
+async function deleteCustomStatus(id, label) {
+  if (!confirm(`Delete custom status "${label}"?\n\nTickets currently using it will keep the value but it won't be selectable anymore.`)) return;
+  const r = await fetch(`/api/admin/custom-statuses/${id}/delete`, { method: 'POST' });
+  if (r.ok) location.reload();
+  else alert('Failed: ' + (await r.text()));
+}
+
+async function resyncFields() {
+  const st = document.getElementById('resync-status');
+  st.textContent = '⏳ Pulling from Zendesk…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/resync-fields', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = `✓ ${out.fields} fields · ${out.forms} forms · ${out.custom_statuses} statuses`;
+    st.style.color = '#047857';
+    setTimeout(() => location.reload(), 800);
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c';
+  }
+}
+function newField() { document.getElementById('modal-bg').style.display = 'block'; }
+function closeModal(ev) { if (ev && ev.target.id !== 'modal-bg') return; document.getElementById('modal-bg').style.display = 'none'; }
+async function saveField(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'checkbox') fd.append(el.name, el.checked ? 1 : 0);
+    else fd.append(el.name, el.value);
+  }
+  const st = document.getElementById('fl-status'); st.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/admin/fields', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Saved'; setTimeout(() => location.reload(), 400);
+  } catch (e) { st.textContent = '✗ ' + e.message; }
+  return false;
+}
+</script>
+{% endblock %}

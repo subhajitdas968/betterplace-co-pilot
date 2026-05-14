@@ -1,0 +1,51 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.egg-info/
+.pytest_cache/
+.coverage
+.mypy_cache/
+
+# Virtualenv
+myenv/
+venv/
+env/
+
+# Secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# Data — huge files, not source
+data/copilot.db
+data/copilot.db-*
+data/copilot.db.broken
+data/copilot.db.also-broken
+data/copilot.db.totally-broken
+data/backups/
+data/*.log
+data/*.heartbeat
+data/*.pid
+data/*.sql
+data/recovered.sql
+data/recover.log
+data/web.log
+data/attachments/
+data/kb_drafts/
+*.json
+!.env.example
+
+# Editor cruft
+.DS_Store
+.vscode/
+.idea/
+*.swp
+*.swo
+.env.swp
+
+# Build artifacts
+dist/
+build/
+*.egg

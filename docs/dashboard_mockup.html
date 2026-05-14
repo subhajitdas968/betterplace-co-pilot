@@ -1,0 +1,1596 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BetterPlace · Zendesk Co-Pilot</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-1: #f6f7fb;
+    --bg-2: #eef0fa;
+    --ink: #0f172a;
+    --muted: #64748b;
+    --border: #e2e8f0;
+    --card: #ffffff;
+    --indigo: #4f46e5;
+    --indigo-soft: #eef2ff;
+    --violet: #7c3aed;
+    --fuchsia: #d946ef;
+    --emerald: #10b981;
+    --emerald-soft: #ecfdf5;
+    --amber: #f59e0b;
+    --amber-soft: #fffbeb;
+    --rose: #f43f5e;
+    --rose-soft: #fff1f2;
+    --sky: #0ea5e9;
+    --teal: #14b8a6;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+    --shadow-md: 0 2px 4px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.08);
+    --shadow-lg: 0 8px 24px rgba(15,23,42,0.08), 0 24px 48px rgba(76,29,149,0.12);
+    --radius: 14px;
+    --radius-sm: 8px;
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: var(--bg-1);
+    background-image:
+      radial-gradient(circle at 0% 0%, rgba(124,58,237,0.10) 0, transparent 40%),
+      radial-gradient(circle at 100% 0%, rgba(14,165,233,0.10) 0, transparent 40%),
+      radial-gradient(circle at 50% 100%, rgba(217,70,239,0.06) 0, transparent 50%),
+      linear-gradient(180deg, #f6f7fb 0%, #eef0fa 100%);
+    color: var(--ink);
+    font-size: 13.5px;
+    line-height: 1.55;
+    min-height: 100vh;
+    -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: '';
+    position: fixed;
+    inset: 0;
+    background-image: radial-gradient(circle, rgba(15,23,42,0.045) 1px, transparent 1px);
+    background-size: 22px 22px;
+    pointer-events: none;
+    z-index: 0;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.15));
+  }
+  .container { position: relative; z-index: 1; }
+
+  /* ============== TOP BAR ============== */
+  .topbar {
+    backdrop-filter: blur(18px);
+    -webkit-backdrop-filter: blur(18px);
+    background: rgba(255,255,255,0.75);
+    border-bottom: 1px solid rgba(226,232,240,0.7);
+    padding: 14px 28px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    position: sticky;
+    top: 0;
+    z-index: 50;
+  }
+  .brand {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .brand-mark {
+    width: 32px; height: 32px;
+    border-radius: 9px;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed 60%, #d946ef);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 800; font-size: 16px;
+    box-shadow: 0 6px 16px rgba(124,58,237,0.35);
+  }
+  .brand-text { display: flex; flex-direction: column; }
+  .brand-text .name {
+    font-size: 15px; font-weight: 700;
+    background: linear-gradient(135deg, #4f46e5, #d946ef);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    background-clip: text;
+    letter-spacing: -0.01em;
+  }
+  .brand-text .sub { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px;
+    border-radius: 20px;
+    background: var(--emerald-soft);
+    color: #047857;
+    font-size: 11px;
+    font-weight: 600;
+    border: 1px solid #a7f3d0;
+  }
+  .live-dot {
+    width: 6px; height: 6px; border-radius: 50%;
+    background: #10b981;
+    box-shadow: 0 0 0 0 rgba(16,185,129,0.8);
+    animation: livePulse 1.6s infinite;
+  }
+  @keyframes livePulse {
+    0%   { box-shadow: 0 0 0 0 rgba(16,185,129,0.7); }
+    70%  { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  }
+
+  .search-wrap {
+    flex: 1;
+    max-width: 520px;
+    position: relative;
+  }
+  .search-wrap input {
+    width: 100%;
+    padding: 10px 14px 10px 38px;
+    border-radius: 10px;
+    border: 1px solid var(--border);
+    background: rgba(255,255,255,0.9);
+    font-size: 13px;
+    color: var(--ink);
+    font-family: inherit;
+    transition: all 0.18s;
+  }
+  .search-wrap input:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 4px rgba(79,70,229,0.12); background: white; }
+  .search-wrap input::placeholder { color: #94a3b8; }
+  .search-wrap .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
+  .search-wrap kbd {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: var(--indigo-soft); color: var(--indigo);
+    border: 1px solid #c7d2fe;
+  }
+
+  .user-pill {
+    display: flex; align-items: center; gap: 10px;
+    padding: 5px 12px 5px 6px;
+    border-radius: 100px;
+    background: rgba(255,255,255,0.8);
+    border: 1px solid var(--border);
+  }
+  .avatar {
+    width: 26px; height: 26px;
+    border-radius: 50%;
+    background: linear-gradient(135deg, #f59e0b, #ef4444);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 11px; font-weight: 700;
+  }
+  .user-pill .name { font-size: 12px; font-weight: 600; color: var(--ink); }
+  .user-pill .role { font-size: 10px; color: var(--muted); }
+
+  /* ============== KPI BAR ============== */
+  .kpi-bar {
+    display: grid;
+    grid-template-columns: repeat(6, 1fr);
+    gap: 14px;
+    padding: 18px 28px 4px;
+  }
+  .kpi-card {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 14px;
+    box-shadow: var(--shadow-sm);
+    position: relative;
+    overflow: hidden;
+    border: 1px solid var(--border);
+    transition: all 0.18s;
+  }
+  .kpi-card::before {
+    content: '';
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 3px;
+  }
+  .kpi-card.indigo::before  { background: linear-gradient(90deg, #4f46e5, #7c3aed); }
+  .kpi-card.violet::before  { background: linear-gradient(90deg, #7c3aed, #d946ef); }
+  .kpi-card.amber::before   { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+  .kpi-card.emerald::before { background: linear-gradient(90deg, #10b981, #14b8a6); }
+  .kpi-card.rose::before    { background: linear-gradient(90deg, #f43f5e, #ec4899); }
+  .kpi-card.sky::before     { background: linear-gradient(90deg, #0ea5e9, #4f46e5); }
+  .kpi-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+
+  .kpi-card .label {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--muted);
+    font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .kpi-card .label-icon {
+    width: 18px; height: 18px;
+    border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .kpi-card.indigo .label-icon { background: var(--indigo-soft); color: var(--indigo); }
+  .kpi-card.violet .label-icon { background: #f5f3ff; color: var(--violet); }
+  .kpi-card.amber .label-icon { background: var(--amber-soft); color: var(--amber); }
+  .kpi-card.emerald .label-icon { background: var(--emerald-soft); color: var(--emerald); }
+  .kpi-card.rose .label-icon { background: var(--rose-soft); color: var(--rose); }
+  .kpi-card.sky .label-icon { background: #f0f9ff; color: var(--sky); }
+
+  .kpi-card .value {
+    font-size: 26px;
+    font-weight: 800;
+    color: var(--ink);
+    margin-top: 8px;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+  }
+  .kpi-card .row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-top: 4px;
+  }
+  .delta {
+    display: inline-flex; align-items: center; gap: 3px;
+    font-size: 11px; font-weight: 600;
+  }
+  .delta.up { color: #dc2626; }
+  .delta.down { color: #047857; }
+  .delta.flat { color: var(--muted); }
+  .spark { width: 60px; height: 22px; }
+
+  /* ============== LAYOUT ============== */
+  .layout {
+    display: grid;
+    grid-template-columns: 240px 1fr 380px;
+    gap: 18px;
+    padding: 18px 28px 36px;
+    max-width: 1700px;
+    margin: 0 auto;
+  }
+
+  /* ============== LEFT NAV ============== */
+  .nav {
+    background: var(--card);
+    border-radius: var(--radius);
+    padding: 0;
+    height: fit-content;
+    position: sticky;
+    top: 80px;
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+  }
+  .nav-hero {
+    padding: 14px 16px 14px;
+    background:
+      radial-gradient(circle at 100% 0%, rgba(217,70,239,0.35), transparent 60%),
+      linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #c026d3 100%);
+    color: white;
+    position: relative;
+    overflow: hidden;
+  }
+  .nav-hero::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: radial-gradient(circle, rgba(255,255,255,0.10) 1px, transparent 1px);
+    background-size: 14px 14px;
+    pointer-events: none;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.6), transparent);
+  }
+  .nav-hero h4 {
+    font-size: 10px; letter-spacing: 0.10em; text-transform: uppercase;
+    color: rgba(255,255,255,0.7); font-weight: 700; margin-bottom: 8px;
+    position: relative;
+  }
+  .scope-toggle {
+    display: flex;
+    background: rgba(0,0,0,0.20);
+    border-radius: 8px;
+    padding: 3px;
+    font-size: 11px;
+    font-weight: 600;
+    position: relative;
+  }
+  .scope-toggle .opt {
+    flex: 1;
+    text-align: center;
+    padding: 5px 8px;
+    border-radius: 6px;
+    cursor: pointer;
+    color: rgba(255,255,255,0.65);
+    transition: all 0.16s;
+  }
+  .scope-toggle .opt.active {
+    background: white;
+    color: var(--indigo);
+    box-shadow: 0 1px 3px rgba(0,0,0,0.20);
+  }
+
+  .nav-section { padding: 12px 14px; border-top: 1px solid var(--border); }
+  .nav-section:first-of-type { border-top: none; }
+  .nav-section h4 {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: var(--muted);
+    margin: 0 0 8px;
+    font-weight: 700;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .nav-section h4 .stripe {
+    width: 12px; height: 3px; border-radius: 2px;
+  }
+  .nav-section.views .stripe { background: linear-gradient(90deg, #4f46e5, #7c3aed); }
+  .nav-section.flags .stripe { background: linear-gradient(90deg, #f43f5e, #f59e0b); }
+  .nav-section.buckets .stripe { background: linear-gradient(90deg, #0ea5e9, #14b8a6); }
+  .nav-section.customers .stripe { background: linear-gradient(90deg, #10b981, #4f46e5); }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12.5px;
+    font-weight: 500;
+    color: #334155;
+    transition: all 0.14s;
+  }
+  .nav-item:hover { background: var(--indigo-soft); color: var(--indigo); transform: translateX(2px); }
+  .nav-item.active {
+    background: linear-gradient(135deg, rgba(79,70,229,0.10), rgba(124,58,237,0.10));
+    color: var(--indigo);
+    font-weight: 600;
+  }
+  .nav-icon {
+    width: 24px; height: 24px;
+    border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    color: white;
+  }
+  .ico-indigo  { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+  .ico-violet  { background: linear-gradient(135deg, #7c3aed, #d946ef); }
+  .ico-emerald { background: linear-gradient(135deg, #10b981, #14b8a6); }
+  .ico-amber   { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+  .ico-rose    { background: linear-gradient(135deg, #f43f5e, #ec4899); }
+  .ico-sky     { background: linear-gradient(135deg, #0ea5e9, #4f46e5); }
+  .ico-teal    { background: linear-gradient(135deg, #14b8a6, #0ea5e9); }
+  .ico-slate   { background: linear-gradient(135deg, #64748b, #475569); }
+
+  .nav-item .count {
+    margin-left: auto;
+    font-size: 11px;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    padding: 2px 9px;
+    border-radius: 12px;
+    background: #f1f5f9;
+    color: var(--muted);
+  }
+  .nav-item.active .count { background: white; color: var(--indigo); box-shadow: 0 1px 2px rgba(79,70,229,0.18); }
+  .nav-item.flag .count { background: var(--rose-soft); color: #be123c; }
+  .nav-item.kb .count { background: var(--amber-soft); color: #92400e; }
+  .nav-item.match .count { background: var(--emerald-soft); color: #047857; }
+
+  /* Bucket rows with mini-bars */
+  .bucket-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 8px;
+    align-items: center;
+    padding: 6px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 12px;
+    transition: background 0.14s;
+  }
+  .bucket-row:hover { background: #f8fafc; }
+  .bucket-row .b-name { font-weight: 500; color: #334155; }
+  .bucket-row .b-bar { grid-column: 1 / -1; height: 4px; border-radius: 2px; background: #f1f5f9; overflow: hidden; }
+  .bucket-row .b-bar-fill { height: 100%; border-radius: 2px; }
+  .bucket-row .b-count { font-size: 11px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+
+  .b-bar-1 { background: linear-gradient(90deg, #0ea5e9, #6366f1); }
+  .b-bar-2 { background: linear-gradient(90deg, #14b8a6, #0ea5e9); }
+  .b-bar-3 { background: linear-gradient(90deg, #f59e0b, #f43f5e); }
+  .b-bar-4 { background: linear-gradient(90deg, #7c3aed, #d946ef); }
+  .b-bar-5 { background: linear-gradient(90deg, #10b981, #14b8a6); }
+
+  /* Customer rows */
+  .cust-row {
+    display: grid;
+    grid-template-columns: 28px 1fr auto auto;
+    gap: 10px;
+    align-items: center;
+    padding: 7px 8px;
+    border-radius: 8px;
+    cursor: pointer;
+    transition: background 0.14s;
+  }
+  .cust-row:hover { background: #f8fafc; }
+  .cust-logo {
+    width: 28px; height: 28px;
+    border-radius: 8px;
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 700; font-size: 11px;
+    box-shadow: 0 2px 6px rgba(15,23,42,0.10);
+  }
+  .cust-row .name { font-size: 12.5px; font-weight: 600; color: var(--ink); }
+  .cust-row .count { font-size: 11.5px; font-weight: 700; color: var(--muted); font-variant-numeric: tabular-nums; }
+  .cust-row .trend {
+    font-size: 10px; font-weight: 700;
+    padding: 2px 7px; border-radius: 10px;
+  }
+  .trend-up { background: var(--rose-soft); color: #be123c; }
+  .trend-down { background: var(--emerald-soft); color: #047857; }
+  .trend-flat { background: #f1f5f9; color: var(--muted); }
+
+  /* ============== TICKET (CENTER) ============== */
+  .ticket {
+    background: var(--card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-md);
+    overflow: hidden;
+  }
+  .ticket-header {
+    padding: 18px 22px 16px;
+    background: linear-gradient(135deg, #fafbff 0%, #ffffff 100%);
+    border-bottom: 1px solid var(--border);
+  }
+  .ticket-id-row {
+    display: flex; align-items: center; gap: 8px;
+    font-size: 11.5px; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace;
+  }
+  .ticket-id-row .id-num { color: var(--indigo); font-weight: 700; }
+  .ticket-id-row .sep { color: #cbd5e1; }
+  .ticket-subject {
+    font-size: 19px;
+    font-weight: 700;
+    color: var(--ink);
+    margin: 6px 0 12px;
+    letter-spacing: -0.012em;
+  }
+  .ticket-meta {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 8px;
+    font-size: 12px;
+    color: var(--muted);
+  }
+  .ticket-meta .item { display: flex; align-items: center; gap: 6px; }
+  .ticket-meta .item strong { color: var(--ink); font-weight: 600; }
+  .ticket-meta .dot { width: 3px; height: 3px; border-radius: 50%; background: #cbd5e1; }
+
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px;
+    border-radius: 20px;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.01em;
+    border: 1px solid;
+  }
+  .badge-open {
+    background: linear-gradient(135deg, #fef3c7, #fde68a);
+    color: #92400e; border-color: #fcd34d;
+  }
+  .badge-urgent {
+    background: linear-gradient(135deg, #fecaca, #fca5a5);
+    color: #991b1b; border-color: #f87171;
+  }
+  .badge-pending {
+    background: var(--indigo-soft);
+    color: var(--indigo); border-color: #c7d2fe;
+  }
+  .badge-solved {
+    background: var(--emerald-soft);
+    color: #047857; border-color: #6ee7b7;
+  }
+
+  .conversation {
+    padding: 18px 22px;
+    max-height: 540px;
+    overflow-y: auto;
+  }
+  .conversation::-webkit-scrollbar { width: 6px; }
+  .conversation::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+  .comment {
+    border-radius: 10px;
+    padding: 14px 16px;
+    margin-bottom: 12px;
+    border: 1px solid var(--border);
+    transition: all 0.12s;
+  }
+  .comment:hover { box-shadow: var(--shadow-sm); }
+  .comment.public { background: white; }
+  .comment.internal {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border-color: #fcd34d;
+    border-left: 3px solid var(--amber);
+  }
+  .comment-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+    font-size: 11.5px;
+    color: var(--muted);
+  }
+  .comment-author {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--ink);
+    font-weight: 600;
+    font-size: 12.5px;
+  }
+  .comment-author .a { width: 22px; height: 22px; border-radius: 50%; display: flex; align-items: center; justify-content: center; font-size: 10px; font-weight: 700; color: white; }
+  .a.cust { background: linear-gradient(135deg, #14b8a6, #0ea5e9); }
+  .a.agent { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+  .internal-tag {
+    background: var(--amber);
+    color: white;
+    font-size: 9.5px;
+    padding: 2px 7px;
+    border-radius: 4px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-weight: 700;
+  }
+  .comment-body { font-size: 13px; color: #1e293b; white-space: pre-wrap; }
+  .mention { background: var(--indigo-soft); color: var(--indigo); padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 12px; }
+
+  .reply-box {
+    border-top: 1px solid var(--border);
+    padding: 14px 22px;
+    background: linear-gradient(180deg, #fafbff 0%, white 100%);
+  }
+  .reply-box textarea {
+    width: 100%;
+    min-height: 70px;
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px;
+    font-family: inherit;
+    font-size: 13px;
+    resize: vertical;
+    transition: all 0.18s;
+    background: white;
+  }
+  .reply-box textarea:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 4px rgba(79,70,229,0.10); }
+  .reply-box .actions { display: flex; gap: 8px; margin-top: 10px; }
+
+  .btn {
+    padding: 8px 14px;
+    border-radius: 8px;
+    font-size: 12.5px;
+    cursor: pointer;
+    font-weight: 600;
+    border: 1px solid transparent;
+    transition: all 0.16s;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #4f46e5, #7c3aed);
+    color: white;
+    box-shadow: 0 4px 12px rgba(79,70,229,0.28);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79,70,229,0.36); }
+  .btn-secondary { background: white; color: var(--ink); border-color: var(--border); }
+  .btn-secondary:hover { background: #f8fafc; border-color: #cbd5e1; }
+  .btn-ai {
+    background: linear-gradient(135deg, #7c3aed, #d946ef);
+    color: white;
+    box-shadow: 0 4px 12px rgba(217,70,239,0.28);
+  }
+  .btn-ai:hover { transform: translateY(-1px); box-shadow: 0 6px 18px rgba(217,70,239,0.40); }
+
+  /* ============== RIGHT COL ============== */
+  .right-col { display: flex; flex-direction: column; gap: 16px; position: sticky; top: 80px; align-self: start; max-height: calc(100vh - 96px); overflow-y: auto; padding-right: 2px; }
+  .right-col::-webkit-scrollbar { width: 6px; }
+  .right-col::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+
+  .panel {
+    background: var(--card);
+    border-radius: var(--radius);
+    border: 1px solid var(--border);
+    box-shadow: var(--shadow-sm);
+    overflow: hidden;
+  }
+  .panel-head {
+    padding: 12px 16px;
+    border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: #fafbff;
+  }
+  .panel-head h3 {
+    font-size: 11.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--muted);
+    font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-head .h-icon { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+  .panel-head .right-tag { font-size: 10px; color: var(--muted); font-weight: 500; }
+
+  .panel-body { padding: 12px 16px; }
+
+  /* ============== AI PANEL (HERO) ============== */
+  .ai-panel {
+    background: linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #831843 100%);
+    border-radius: var(--radius);
+    color: white;
+    box-shadow: var(--shadow-lg);
+    overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08);
+    position: relative;
+  }
+  .ai-panel::before {
+    content: '';
+    position: absolute;
+    top: -50%; right: -20%;
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, rgba(217,70,239,0.4), transparent 70%);
+    pointer-events: none;
+  }
+  .ai-panel-head {
+    padding: 16px 18px;
+    display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.08);
+    position: relative;
+  }
+  .ai-panel-head h3 {
+    font-size: 12.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .ai-panel-head .ai-mark {
+    width: 26px; height: 26px;
+    border-radius: 7px;
+    background: linear-gradient(135deg, #d946ef, #f472b6);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(217,70,239,0.45);
+  }
+  .ai-panel-head .meta {
+    font-size: 10.5px;
+    color: rgba(255,255,255,0.65);
+    font-family: 'JetBrains Mono', monospace;
+  }
+
+  .ai-section { padding: 16px 18px; position: relative; }
+  .ai-section + .ai-section { border-top: 1px solid rgba(255,255,255,0.08); }
+  .ai-section .heading {
+    font-size: 10.5px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: rgba(255,255,255,0.7);
+    font-weight: 700;
+    margin-bottom: 10px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .heading-pill {
+    background: rgba(217,70,239,0.20);
+    color: #f9a8d4;
+    padding: 2px 8px;
+    border-radius: 12px;
+    font-size: 10px;
+  }
+
+  .summary-glass {
+    background: rgba(255,255,255,0.07);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    padding: 12px 14px;
+    font-size: 12.5px;
+    line-height: 1.6;
+    color: rgba(255,255,255,0.92);
+    backdrop-filter: blur(8px);
+  }
+  .summary-glass strong { color: white; font-weight: 700; }
+
+  /* Recommendation cards */
+  .rec-card {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 10px;
+    transition: all 0.18s;
+  }
+  .rec-card:hover { background: rgba(255,255,255,0.10); }
+  .rec-card .rec-row {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 8px;
+  }
+  .rec-card .field-name {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: rgba(255,255,255,0.7);
+    font-weight: 600;
+  }
+  .rec-card .change {
+    display: flex; align-items: center; gap: 6px;
+    flex-wrap: wrap;
+    margin-bottom: 6px;
+  }
+  .rec-card .from {
+    text-decoration: line-through;
+    color: rgba(252,165,165,0.85);
+    background: rgba(244,63,94,0.18);
+    padding: 2px 8px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 500;
+  }
+  .rec-card .arrow {
+    color: rgba(255,255,255,0.5);
+    font-size: 13px;
+  }
+  .rec-card .to {
+    background: linear-gradient(135deg, rgba(16,185,129,0.30), rgba(20,184,166,0.30));
+    color: #6ee7b7;
+    padding: 2px 10px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    font-weight: 600;
+    border: 1px solid rgba(16,185,129,0.40);
+  }
+  .rec-card .reason {
+    font-size: 11.5px;
+    color: rgba(255,255,255,0.7);
+    line-height: 1.55;
+    font-style: italic;
+  }
+
+  /* Confidence ring */
+  .ring-wrap {
+    position: relative;
+    width: 36px; height: 36px;
+    flex-shrink: 0;
+  }
+  .ring-bg, .ring-fg { fill: none; stroke-width: 4; }
+  .ring-bg { stroke: rgba(255,255,255,0.10); }
+  .ring-fg { stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; }
+  .ring-text {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: white;
+    font-variant-numeric: tabular-nums;
+  }
+
+  /* Checklist */
+  .checklist { list-style: none; padding: 0; margin: 0; }
+  .checklist li {
+    padding: 9px 12px 9px 38px;
+    position: relative;
+    font-size: 12px;
+    border-radius: 8px;
+    margin-bottom: 4px;
+    line-height: 1.5;
+  }
+  .checklist .marker {
+    position: absolute;
+    left: 12px; top: 9px;
+    width: 18px; height: 18px;
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .checklist .ok-marker { background: rgba(16,185,129,0.20); color: #6ee7b7; }
+  .checklist .miss-marker { background: rgba(244,63,94,0.20); color: #fca5a5; }
+  .checklist li.ok { color: rgba(255,255,255,0.78); }
+  .checklist li.miss {
+    background: rgba(244,63,94,0.10);
+    border: 1px solid rgba(244,63,94,0.20);
+    color: #fecaca;
+  }
+  .checklist li.miss strong { color: white; }
+  .miss-hint { font-size: 11px; color: rgba(255,255,255,0.55); display: block; margin-top: 2px; }
+
+  /* Similar tickets */
+  .sim {
+    background: rgba(255,255,255,0.06);
+    border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px;
+    padding: 12px;
+    margin-bottom: 8px;
+    cursor: pointer;
+    transition: all 0.18s;
+  }
+  .sim:hover {
+    background: rgba(255,255,255,0.12);
+    transform: translateX(2px);
+  }
+  .sim-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 4px;
+  }
+  .sim-id {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 11px;
+    color: rgba(255,255,255,0.65);
+    font-weight: 600;
+  }
+  .sim-match {
+    font-size: 10.5px;
+    font-weight: 700;
+    padding: 2px 8px;
+    border-radius: 12px;
+    background: linear-gradient(135deg, rgba(16,185,129,0.25), rgba(20,184,166,0.25));
+    color: #6ee7b7;
+    border: 1px solid rgba(16,185,129,0.30);
+  }
+  .sim-subj { font-size: 12.5px; font-weight: 600; color: white; margin: 4px 0 4px; line-height: 1.4; }
+  .sim-meta { font-size: 11px; color: rgba(255,255,255,0.65); line-height: 1.5; }
+  .sim-meta strong { color: #f9a8d4; font-weight: 600; }
+
+  /* Resolution suggestion box */
+  .resbox {
+    background: linear-gradient(135deg, rgba(124,58,237,0.18), rgba(217,70,239,0.10));
+    border: 1px solid rgba(217,70,239,0.30);
+    border-radius: 10px;
+    padding: 14px;
+  }
+  .resbox ol { padding-left: 22px; margin: 0; font-size: 12.5px; line-height: 1.65; color: rgba(255,255,255,0.92); }
+  .resbox ol li { margin-bottom: 6px; }
+  .resbox ol li strong { color: #f9a8d4; }
+
+  .actions-bar {
+    padding: 12px 18px;
+    background: rgba(0,0,0,0.18);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .pill {
+    background: rgba(255,255,255,0.10);
+    border: 1px solid rgba(255,255,255,0.15);
+    color: white;
+    border-radius: 16px;
+    padding: 5px 12px;
+    font-size: 11px;
+    cursor: pointer;
+    font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+    transition: all 0.16s;
+  }
+  .pill:hover { background: rgba(255,255,255,0.18); }
+  .pill.primary {
+    background: linear-gradient(135deg, #d946ef, #f472b6);
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(217,70,239,0.35);
+    font-weight: 600;
+  }
+  .pill.primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(217,70,239,0.45); }
+
+  /* ============== FIELDS PANEL ============== */
+  .field-row {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 10px;
+    padding: 9px 0;
+    border-bottom: 1px dashed var(--border);
+    align-items: center;
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-name {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--muted);
+    font-weight: 600;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .field-name .req { color: var(--rose); font-weight: 700; }
+  .field-value {
+    font-size: 12.5px;
+    color: var(--ink);
+    font-weight: 500;
+    text-align: right;
+  }
+  .field-value.empty { color: var(--rose); font-style: italic; }
+  .field-value.flagged { color: #b91c1c; font-weight: 600; }
+  .fix-chip {
+    display: inline-block;
+    background: linear-gradient(135deg, #f43f5e, #ec4899);
+    color: white;
+    font-size: 9.5px;
+    padding: 1px 7px;
+    border-radius: 10px;
+    margin-left: 6px;
+    vertical-align: middle;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    box-shadow: 0 2px 6px rgba(244,63,94,0.30);
+  }
+  .field-pill {
+    display: inline-block;
+    padding: 2px 9px;
+    border-radius: 12px;
+    font-size: 11px;
+    font-weight: 600;
+  }
+  .pill-ok { background: var(--emerald-soft); color: #047857; }
+  .pill-warn { background: var(--amber-soft); color: #92400e; }
+  .pill-info { background: var(--indigo-soft); color: var(--indigo); }
+  .pill-rose { background: var(--rose-soft); color: #be123c; }
+
+  .scope-toggle {
+    display: inline-flex;
+    background: #f1f5f9;
+    border-radius: 8px;
+    padding: 3px;
+    font-size: 10.5px;
+    font-weight: 600;
+  }
+  .scope-toggle .opt { padding: 3px 10px; border-radius: 6px; cursor: pointer; color: var(--muted); }
+  .scope-toggle .opt.active { background: white; color: var(--indigo); box-shadow: 0 1px 3px rgba(0,0,0,0.08); }
+
+  /* ============== MICRO ============== */
+  .footer-note {
+    text-align: center;
+    color: var(--muted);
+    font-size: 11.5px;
+    padding: 24px;
+  }
+  .footer-note code {
+    background: white;
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace;
+    border: 1px solid var(--border);
+  }
+
+  svg.icon { width: 14px; height: 14px; flex-shrink: 0; }
+  svg.icon-sm { width: 12px; height: 12px; }
+  svg.icon-lg { width: 16px; height: 16px; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- ============================ TOP BAR ============================ -->
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div class="brand-text">
+      <span class="name">BetterPlace · Co-Pilot</span>
+      <span class="sub">Zendesk insights for Product Support &amp; Managed Services</span>
+    </div>
+    <span class="live-pill" style="margin-left: 12px;">
+      <span class="live-dot"></span> Synced 2 min ago
+    </span>
+  </div>
+  <div class="search-wrap">
+    <svg class="icon icon-lg" style="color:#94a3b8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input placeholder="Paste ticket ID, customer name, or ask a question…" />
+    <kbd>⌘K</kbd>
+  </div>
+  <div class="user-pill">
+    <div class="avatar">SD</div>
+    <div>
+      <div class="name">Subhajit Das</div>
+      <div class="role">Admin · Support Ops</div>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ KPI BAR ============================ -->
+<div class="kpi-bar">
+  <div class="kpi-card indigo">
+    <div class="label">
+      <span class="label-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+      Open tickets
+    </div>
+    <div class="value">214</div>
+    <div class="row">
+      <span class="delta up">▲ 8 vs yesterday</span>
+      <svg class="spark" viewBox="0 0 60 22" preserveAspectRatio="none"><path d="M0 14 L8 12 L16 16 L24 8 L32 10 L40 6 L48 9 L60 4" fill="none" stroke="#4f46e5" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </div>
+  </div>
+  <div class="kpi-card violet">
+    <div class="label">
+      <span class="label-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 2 L15 9 L22 9 L17 14 L19 21 L12 17 L5 21 L7 14 L2 9 L9 9 Z"/></svg></span>
+      AI re-tags suggested
+    </div>
+    <div class="value">73</div>
+    <div class="row">
+      <span class="delta up">▲ 22</span>
+      <svg class="spark" viewBox="0 0 60 22" preserveAspectRatio="none"><path d="M0 18 L8 16 L16 14 L24 12 L32 10 L40 8 L48 6 L60 4" fill="none" stroke="#7c3aed" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </div>
+  </div>
+  <div class="kpi-card amber">
+    <div class="label">
+      <span class="label-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></span>
+      Field accuracy 7d
+    </div>
+    <div class="value">61%</div>
+    <div class="row">
+      <span class="delta up">▼ 4%</span>
+      <svg class="spark" viewBox="0 0 60 22" preserveAspectRatio="none"><path d="M0 6 L8 7 L16 5 L24 8 L32 11 L40 13 L48 14 L60 16" fill="none" stroke="#f59e0b" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </div>
+  </div>
+  <div class="kpi-card rose">
+    <div class="label">
+      <span class="label-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+      KB Articles missing
+    </div>
+    <div class="value">147</div>
+    <div class="row">
+      <span class="delta up">▲ 23</span>
+      <svg class="spark" viewBox="0 0 60 22" preserveAspectRatio="none"><path d="M0 18 L8 17 L16 15 L24 14 L32 12 L40 9 L48 8 L60 5" fill="none" stroke="#f43f5e" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </div>
+  </div>
+  <div class="kpi-card emerald">
+    <div class="label">
+      <span class="label-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><polyline points="20 6 9 17 4 12"/></svg></span>
+      KB match rate
+    </div>
+    <div class="value">78%</div>
+    <div class="row">
+      <span class="delta down">▲ 6%</span>
+      <svg class="spark" viewBox="0 0 60 22" preserveAspectRatio="none"><path d="M0 14 L8 12 L16 13 L24 10 L32 9 L40 6 L48 5 L60 3" fill="none" stroke="#10b981" stroke-width="1.6" stroke-linecap="round"/></svg>
+    </div>
+  </div>
+  <div class="kpi-card sky">
+    <div class="label">
+      <span class="label-icon"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2"><path d="M12 6v6l4 2"/><circle cx="12" cy="12" r="10"/></svg></span>
+      Top bucket today
+    </div>
+    <div class="value">Login OTP</div>
+    <div class="row">
+      <span class="delta flat">42 tickets · Reliance</span>
+      <svg class="spark" viewBox="0 0 60 22" preserveAspectRatio="none"><rect x="2" y="14" width="6" height="8" rx="1" fill="#0ea5e9"/><rect x="12" y="10" width="6" height="12" rx="1" fill="#0ea5e9"/><rect x="22" y="6" width="6" height="16" rx="1" fill="#0ea5e9"/><rect x="32" y="3" width="6" height="19" rx="1" fill="#0ea5e9"/><rect x="42" y="11" width="6" height="11" rx="1" fill="#0ea5e9"/><rect x="52" y="8" width="6" height="14" rx="1" fill="#0ea5e9"/></svg>
+    </div>
+  </div>
+</div>
+
+<!-- ============================ MAIN LAYOUT ============================ -->
+<div class="layout">
+
+  <!-- ===== LEFT NAV ===== -->
+  <aside class="nav">
+    <div class="nav-hero">
+      <h4>Workspace</h4>
+      <div class="scope-toggle">
+        <span class="opt active">Product Support</span>
+        <span class="opt">Managed Svc</span>
+      </div>
+    </div>
+
+    <div class="nav-section views">
+      <h4><span class="stripe"></span> Views</h4>
+      <div class="nav-item active">
+        <span class="nav-icon ico-indigo"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M3 6h18M3 12h18M3 18h18"/></svg></span>
+        All open <span class="count">214</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon ico-violet"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg></span>
+        Assigned to me <span class="count">12</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon ico-amber"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg></span>
+        Pending customer <span class="count">38</span>
+      </div>
+      <div class="nav-item">
+        <span class="nav-icon ico-emerald"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg></span>
+        Solved 24h <span class="count">61</span>
+      </div>
+    </div>
+
+    <div class="nav-section flags">
+      <h4><span class="stripe"></span> AI flags</h4>
+      <div class="nav-item flag">
+        <span class="nav-icon ico-rose"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg></span>
+        Field mismatch <span class="count">73</span>
+      </div>
+      <div class="nav-item kb">
+        <span class="nav-icon ico-amber"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg></span>
+        Missing KB Article <span class="count">147</span>
+      </div>
+      <div class="nav-item flag">
+        <span class="nav-icon ico-sky"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><path d="M14 2v6h6"/></svg></span>
+        Missing Jira ID <span class="count">52</span>
+      </div>
+      <div class="nav-item flag">
+        <span class="nav-icon ico-teal"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></span>
+        Missing resolution <span class="count">19</span>
+      </div>
+      <div class="nav-item match">
+        <span class="nav-icon ico-emerald"><svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M12 2 L15 9 L22 9 L17 14 L19 21 L12 17 L5 21 L7 14 L2 9 L9 9 Z"/></svg></span>
+        KB match available <span class="count">96</span>
+      </div>
+    </div>
+
+    <div class="nav-section buckets">
+      <h4><span class="stripe"></span> Top buckets · today</h4>
+      <div class="bucket-row">
+        <span class="b-name">Login / OTP</span>
+        <span class="b-count">42</span>
+        <div class="b-bar"><div class="b-bar-fill b-bar-1" style="width: 100%;"></div></div>
+      </div>
+      <div class="bucket-row">
+        <span class="b-name">Profile creation</span>
+        <span class="b-count">31</span>
+        <div class="b-bar"><div class="b-bar-fill b-bar-2" style="width: 74%;"></div></div>
+      </div>
+      <div class="bucket-row">
+        <span class="b-name">Onboarding</span>
+        <span class="b-count">28</span>
+        <div class="b-bar"><div class="b-bar-fill b-bar-3" style="width: 67%;"></div></div>
+      </div>
+      <div class="bucket-row">
+        <span class="b-name">Integration / API</span>
+        <span class="b-count">22</span>
+        <div class="b-bar"><div class="b-bar-fill b-bar-4" style="width: 52%;"></div></div>
+      </div>
+      <div class="bucket-row">
+        <span class="b-name">Bug · backend</span>
+        <span class="b-count">17</span>
+        <div class="b-bar"><div class="b-bar-fill b-bar-5" style="width: 40%;"></div></div>
+      </div>
+    </div>
+
+    <div class="nav-section customers">
+      <h4><span class="stripe"></span> Top customers</h4>
+      <div class="cust-row">
+        <span class="cust-logo" style="background: linear-gradient(135deg, #1e40af, #3b82f6);">RE</span>
+        <span class="name">Reliance</span>
+        <span class="count">68</span>
+        <span class="trend trend-up">▲ 12</span>
+      </div>
+      <div class="cust-row">
+        <span class="cust-logo" style="background: linear-gradient(135deg, #b91c1c, #f97316);">TA</span>
+        <span class="name">Tata Group</span>
+        <span class="count">34</span>
+        <span class="trend trend-flat">— 0</span>
+      </div>
+      <div class="cust-row">
+        <span class="cust-logo" style="background: linear-gradient(135deg, #047857, #10b981);">ZE</span>
+        <span class="name">Zepto</span>
+        <span class="count">28</span>
+        <span class="trend trend-down">▼ 4</span>
+      </div>
+      <div class="cust-row">
+        <span class="cust-logo" style="background: linear-gradient(135deg, #7c3aed, #d946ef);">AC</span>
+        <span class="name">Acme Corp</span>
+        <span class="count">22</span>
+        <span class="trend trend-up">▲ 3</span>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ===== CENTER: TICKET ===== -->
+  <section class="ticket">
+    <div class="ticket-header">
+      <div class="ticket-id-row">
+        <span class="id-num">#48291</span>
+        <span class="sep">·</span>
+        <span>Created Apr 28, 2026 14:32 IST</span>
+        <span class="sep">·</span>
+        <span>Updated 2h ago</span>
+      </div>
+      <div class="ticket-subject">Reliance recruiters unable to receive OTP — login blocked across team</div>
+      <div class="ticket-meta">
+        <span class="badge badge-open">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="9"/></svg>
+          Open
+        </span>
+        <span class="badge badge-urgent">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/><line x1="12" y1="9" x2="12" y2="13"/></svg>
+          Urgent
+        </span>
+        <span class="dot"></span>
+        <span class="item">Requester: <strong>Anita Sharma</strong></span>
+        <span class="dot"></span>
+        <span class="item">Customer: <strong>Reliance</strong></span>
+        <span class="dot"></span>
+        <span class="item">Assignee: <strong>Rahul M.</strong></span>
+        <span class="dot"></span>
+        <span class="item">Product: <strong>BetterPlace Verify</strong></span>
+      </div>
+    </div>
+
+    <div class="conversation">
+      <div class="comment public">
+        <div class="comment-head">
+          <div class="comment-author">
+            <span class="a cust">AS</span> Anita Sharma · Customer
+          </div>
+          <span>Apr 28, 14:32</span>
+        </div>
+        <div class="comment-body">Hi team — I'm trying to log into the BetterPlace Verify dashboard but the OTP never arrives on my mobile. Tried "send OTP" and "resend" 6 times. My number is verified and I logged in fine yesterday. Can you check urgently? I have a candidate verification stuck.</div>
+      </div>
+
+      <div class="comment internal">
+        <div class="comment-head">
+          <div class="comment-author">
+            <span class="a agent">RM</span> Rahul M. · Agent <span class="internal-tag">Internal</span>
+          </div>
+          <span>Apr 28, 14:48</span>
+        </div>
+        <div class="comment-body">Checked — number is on Jio. Looks like our Gupshup SMS gateway has high failure rate for Jio since 13:00 IST. Reaching out to ops. Probably similar to <span class="mention">SMS-1124</span> from March.</div>
+      </div>
+
+      <div class="comment public">
+        <div class="comment-head">
+          <div class="comment-author">
+            <span class="a agent">RM</span> Rahul M. · Agent
+          </div>
+          <span>Apr 28, 14:52</span>
+        </div>
+        <div class="comment-body">Hi Anita, thanks for flagging. We're seeing a partner SMS provider issue on Jio numbers. As a workaround, please use the "Login via Email OTP" option on the same screen. We're working on a fix on the SMS side.</div>
+      </div>
+
+      <div class="comment public">
+        <div class="comment-head">
+          <div class="comment-author">
+            <span class="a cust">AS</span> Anita Sharma · Customer
+          </div>
+          <span>Apr 28, 16:10</span>
+        </div>
+        <div class="comment-body">Email OTP worked, thanks. But my whole team will hit this — we have 40+ recruiters logging in. Is there an ETA?</div>
+      </div>
+
+      <div class="comment internal">
+        <div class="comment-head">
+          <div class="comment-author">
+            <span class="a agent">RM</span> Rahul M. · Agent <span class="internal-tag">Internal</span>
+          </div>
+          <span>Apr 28, 16:30</span>
+        </div>
+        <div class="comment-body"><span class="mention">@priya</span> can engineering give an ETA? Also should we proactively alert other Reliance users? This is the 4th Reliance ticket in the last hour.</div>
+      </div>
+    </div>
+
+    <div class="reply-box">
+      <textarea placeholder="Reply to customer or write internal note…"></textarea>
+      <div class="actions">
+        <button class="btn btn-primary">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+          Reply publicly
+        </button>
+        <button class="btn btn-secondary">Internal note</button>
+        <button class="btn btn-ai">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 2 L13.5 8.5 L20 10 L13.5 11.5 L12 18 L10.5 11.5 L4 10 L10.5 8.5 Z"/></svg>
+          Apply 4 AI suggestions
+        </button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ===== RIGHT COL ===== -->
+  <aside class="right-col">
+
+    <!-- Ticket fields panel -->
+    <div class="panel">
+      <div class="panel-head">
+        <h3>
+          <span class="h-icon" style="background: var(--indigo-soft); color: var(--indigo);">
+            <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </span>
+          Ticket fields
+        </h3>
+        <span class="right-tag">As tagged by agent</span>
+      </div>
+      <div class="panel-body">
+        <div class="field-row">
+          <span class="field-name">Customer Name <span class="req">*</span></span>
+          <span class="field-value"><span class="field-pill pill-info">Reliance</span></span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Priority <span class="req">*</span></span>
+          <span class="field-value flagged">Normal <span class="fix-chip">FIX</span></span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Product <span class="req">*</span></span>
+          <span class="field-value">BetterPlace Verify</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Module <span class="req">*</span></span>
+          <span class="field-value">Authentication</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Section <span class="req">*</span></span>
+          <span class="field-value flagged">— empty <span class="fix-chip">FIX</span></span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Bucketization <span class="req">*</span></span>
+          <span class="field-value flagged">— empty <span class="fix-chip">FIX</span></span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Root Cause L1 <span class="req">*</span></span>
+          <span class="field-value flagged">— empty <span class="fix-chip">FIX</span></span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Root Cause L2 <span class="req">*</span></span>
+          <span class="field-value empty">— empty</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">KB Article <span class="req">*</span></span>
+          <span class="field-value flagged">— empty <span class="fix-chip">FIX</span></span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Jira ID</span>
+          <span class="field-value flagged">— empty <span class="fix-chip">FIX</span></span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">How resolved? <span class="req">*</span></span>
+          <span class="field-value empty">— pending closure</span>
+        </div>
+        <div class="field-row">
+          <span class="field-name">Profiles affected <span class="req">*</span></span>
+          <span class="field-value flagged">1 <span class="fix-chip">FIX</span></span>
+        </div>
+      </div>
+    </div>
+
+    <!-- AI Insights — gradient hero -->
+    <div class="ai-panel">
+      <div class="ai-panel-head">
+        <h3>
+          <span class="ai-mark">
+            <svg class="icon" viewBox="0 0 24 24" fill="white"><path d="M12 2 L13.5 8.5 L20 10 L13.5 11.5 L12 18 L10.5 11.5 L4 10 L10.5 8.5 Z"/></svg>
+          </span>
+          Claude AI Insights
+        </h3>
+        <span class="meta">v1 · sonnet-4-6 · 2.1s</span>
+      </div>
+
+      <!-- Summary -->
+      <div class="ai-section">
+        <div class="heading">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="16" y1="13" x2="8" y2="13"/><line x1="16" y1="17" x2="8" y2="17"/></svg>
+          Conversation summary
+        </div>
+        <div class="summary-glass">
+          <strong>Reliance recruiter (Anita Sharma, Jio mobile)</strong> cannot receive SMS OTP since ~13:00 IST. Agent identified the root cause in an internal note as a <strong>Gupshup SMS gateway failure for Jio MCCs</strong> (similar to past incident SMS-1124). Email-OTP workaround was provided and worked. <strong>Customer flags 40+ recruiters affected</strong>, and three other Reliance tickets exist in the past hour. Engineering response pending.
+        </div>
+      </div>
+
+      <!-- Recommended field corrections -->
+      <div class="ai-section">
+        <div class="heading">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          Recommended field corrections <span class="heading-pill">7</span>
+        </div>
+
+        <!-- Card: Priority -->
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">Priority</span>
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14" stroke="url(#g1)" stroke-dasharray="80.84 87.96"/>
+                <defs><linearGradient id="g1"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient></defs>
+              </svg>
+              <div class="ring-text">92</div>
+            </div>
+          </div>
+          <div class="change">
+            <span class="from">Normal</span>
+            <span class="arrow">→</span>
+            <span class="to">Urgent</span>
+          </div>
+          <div class="reason">Reliance Enterprise · 4 sibling tickets in the past hour · production blocker · explicit team-wide impact (40+ users).</div>
+        </div>
+
+        <!-- Card: Section -->
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">Section</span>
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14" stroke="url(#g2)" stroke-dasharray="84.44 87.96"/>
+                <defs><linearGradient id="g2"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient></defs>
+              </svg>
+              <div class="ring-text">96</div>
+            </div>
+          </div>
+          <div class="change">
+            <span class="from">empty</span>
+            <span class="arrow">→</span>
+            <span class="to">Login / OTP</span>
+          </div>
+          <div class="reason">Conversation describes OTP failure during login. Matches Section enum value "Login / OTP" under Authentication module.</div>
+        </div>
+
+        <!-- Card: Bucketization -->
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">Bucketization · Reliance</span>
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14" stroke="url(#g3)" stroke-dasharray="78.20 87.96"/>
+                <defs><linearGradient id="g3"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient></defs>
+              </svg>
+              <div class="ring-text">89</div>
+            </div>
+          </div>
+          <div class="change">
+            <span class="from">empty</span>
+            <span class="arrow">→</span>
+            <span class="to">Authentication / SMS Failure</span>
+          </div>
+          <div class="reason">Mandatory for Reliance per your taxonomy. Internal note explicitly identifies "Gupshup SMS gateway high failure rate for Jio".</div>
+        </div>
+
+        <!-- Card: Root Cause L1 -->
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">Root Cause L1</span>
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14" stroke="url(#g4)" stroke-dasharray="80.84 87.96"/>
+                <defs><linearGradient id="g4"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient></defs>
+              </svg>
+              <div class="ring-text">92</div>
+            </div>
+          </div>
+          <div class="change">
+            <span class="from">empty</span>
+            <span class="arrow">→</span>
+            <span class="to">Third-party / SMS Gateway</span>
+          </div>
+          <div class="reason">Failure attributed to upstream Gupshup partner. Agent-confirmed in internal note 14:48.</div>
+        </div>
+
+        <!-- Card: KB Article -->
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">KB Article (Confluence)</span>
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14" stroke="url(#g5)" stroke-dasharray="74.69 87.96"/>
+                <defs><linearGradient id="g5"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#10b981"/></linearGradient></defs>
+              </svg>
+              <div class="ring-text">85</div>
+            </div>
+          </div>
+          <div class="change">
+            <span class="to" style="font-size: 11px;">→ OPS / SMS Failover Runbook</span>
+          </div>
+          <div class="reason"><strong style="color:#f9a8d4">Most agents skip this.</strong> Confluence page "OPS / SMS Failover" is the canonical runbook for this scenario — auto-link after agent approval.</div>
+        </div>
+
+        <!-- Card: Jira -->
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">Jira ID</span>
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14" stroke="url(#g6)" stroke-dasharray="83.56 87.96"/>
+                <defs><linearGradient id="g6"><stop offset="0%" stop-color="#10b981"/><stop offset="100%" stop-color="#22d3ee"/></linearGradient></defs>
+              </svg>
+              <div class="ring-text">95</div>
+            </div>
+          </div>
+          <div class="change">
+            <span class="to" style="font-size: 11px;">→ SMS-1124 (detected in conversation)</span>
+          </div>
+          <div class="reason">Internal note from Rahul references "SMS-1124" — auto-detected and ready to link in the Jira ID custom field.</div>
+        </div>
+
+        <!-- Card: Profiles affected -->
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">Profiles affected</span>
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14" stroke="url(#g7)" stroke-dasharray="69.42 87.96"/>
+                <defs><linearGradient id="g7"><stop offset="0%" stop-color="#f59e0b"/><stop offset="100%" stop-color="#10b981"/></linearGradient></defs>
+              </svg>
+              <div class="ring-text">79</div>
+            </div>
+          </div>
+          <div class="change">
+            <span class="from">1</span>
+            <span class="arrow">→</span>
+            <span class="to">~40 (team-wide)</span>
+          </div>
+          <div class="reason">Customer states "40+ recruiters" affected; sibling tickets confirm account-level scope.</div>
+        </div>
+      </div>
+
+      <!-- Resolution completeness -->
+      <div class="ai-section">
+        <div class="heading">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/><path d="M21 12v7a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11"/></svg>
+          Resolution completeness · <span class="heading-pill">2 / 6 done</span>
+        </div>
+        <ul class="checklist">
+          <li class="ok"><span class="marker ok-marker">✓</span> Root cause identified in internal note (Gupshup / Jio)</li>
+          <li class="ok"><span class="marker ok-marker">✓</span> Workaround communicated to customer (email OTP)</li>
+          <li class="miss"><span class="marker miss-marker">!</span> <strong>No KB Article linked</strong> <span class="miss-hint">Mandatory field — "OPS / SMS Failover" runbook is a 96% match.</span></li>
+          <li class="miss"><span class="marker miss-marker">!</span> <strong>No Jira ID linked</strong> <span class="miss-hint">SMS-1124 detected in conversation — one click to attach.</span></li>
+          <li class="miss"><span class="marker miss-marker">!</span> <strong>No ETA committed</strong> <span class="miss-hint">Customer asked at 16:10. Pending engineering response.</span></li>
+          <li class="miss"><span class="marker miss-marker">!</span> <strong>Root Cause L1 + How resolved? empty</strong> <span class="miss-hint">Required before solving per your policy.</span></li>
+        </ul>
+      </div>
+
+      <!-- Similar tickets -->
+      <div class="ai-section">
+        <div class="heading">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+          Similar resolved tickets · top 3
+        </div>
+
+        <div class="sim">
+          <div class="sim-head">
+            <span class="sim-id">#46217 · Mar 12 · 2h 14m</span>
+            <span class="sim-match">94% match</span>
+          </div>
+          <div class="sim-subj">Jio users unable to receive OTP — SMS gateway flap</div>
+          <div class="sim-meta">Resolved by switching <strong>Gupshup → Kaleyra fallback</strong> for Jio MCCs. Linked to <strong>SMS-1124</strong>.</div>
+        </div>
+
+        <div class="sim">
+          <div class="sim-head">
+            <span class="sim-id">#43108 · Jan 30 · 4h 02m</span>
+            <span class="sim-match">87% match</span>
+          </div>
+          <div class="sim-subj">Reliance — bulk login failures on mobile</div>
+          <div class="sim-meta">Workaround via email OTP, full fix via <strong>Gupshup retry config</strong>. Confluence: <strong>OPS / SMS Failover</strong>.</div>
+        </div>
+
+        <div class="sim">
+          <div class="sim-head">
+            <span class="sim-id">#41985 · Dec 18 · 1h 38m</span>
+            <span class="sim-match">81% match</span>
+          </div>
+          <div class="sim-subj">OTP delays for enterprise clients</div>
+          <div class="sim-meta">Telecom carrier maintenance. Resolved when carrier confirmed maintenance ended.</div>
+        </div>
+      </div>
+
+      <!-- Suggested resolution -->
+      <div class="ai-section">
+        <div class="heading">
+          <svg class="icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M13 2 L4 14 L13 14 L11 22 L20 10 L13 10 Z"/></svg>
+          Suggested resolution path
+        </div>
+        <div class="resbox">
+          <ol>
+            <li>Trigger <strong>Kaleyra SMS fallback</strong> for Jio MCCs (per ticket <strong>#46217</strong> playbook).</li>
+            <li>Confirm with engineering and capture under <strong>JIRA SMS-1124</strong> lineage.</li>
+            <li>Apply retry-config from runbook <strong>OPS / SMS Failover</strong> (Confluence).</li>
+            <li>Send proactive alert to <strong>3 other Reliance open tickets</strong> with shared context.</li>
+            <li>Populate <strong>Root Cause L1, KB Article, Jira ID</strong> before solving.</li>
+          </ol>
+        </div>
+      </div>
+
+      <div class="actions-bar">
+        <button class="pill primary">
+          <svg class="icon-sm" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg>
+          Apply all 7 corrections
+        </button>
+        <button class="pill">Open #46217 playbook</button>
+        <button class="pill">Link SMS-1124</button>
+        <button class="pill">Notify #support-ops</button>
+        <button class="pill">Mark KB-worthy</button>
+      </div>
+    </div>
+
+  </aside>
+
+</div>
+
+<div class="footer-note">
+  Mockup · v0.2 · uses fake data · BetterPlace Co-Pilot will pull from your Zendesk via API and write Claude insights to your local DB · <code>betterplace1637.zendesk.com</code>
+</div>
+
+</div>
+</body>
+</html>

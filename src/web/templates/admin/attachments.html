@@ -1,0 +1,256 @@
+{% extends "_base.html" %}
+{% block title %}Attachments · Admin{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <span class="admin-status admin-status-{{ feature.status }}">
+      {% if feature.status == 'done' %}● Live
+      {% elif feature.status == 'partial' %}◐ Partial
+      {% else %}○ Pending — first sync needed
+      {% endif %}
+    </span>
+  </div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Attachments</h1>
+    <div class="admin-detail-summary">
+      {{ feature.summary }} Metadata is captured every sync. Binaries are
+      downloaded lazily — the first time an agent clicks an attachment we fetch
+      it from Zendesk and cache it under <code>data/attachments/</code>.
+    </div>
+  </div>
+
+  <!-- Live stats -->
+  <div class="admin-kpis">
+    <div class="admin-kpi">
+      <div class="akpi-num">{{ '{:,}'.format(summary.count) }}</div>
+      <div class="akpi-lbl">Attachments tracked</div>
+    </div>
+    <div class="admin-kpi">
+      <div class="akpi-num">{{ (summary.total_bytes / 1024 / 1024)|round(1) }} <span class="akpi-unit">MB</span></div>
+      <div class="akpi-lbl">Total size (from Zendesk)</div>
+    </div>
+    <div class="admin-kpi">
+      <div class="akpi-num">{{ '{:,}'.format(summary.downloaded) }}</div>
+      <div class="akpi-lbl">Cached locally</div>
+    </div>
+  </div>
+
+  <!-- Backfill action — runs as a detached subprocess so the web worker
+       stays responsive while it works through 56K tickets. -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Backfill from existing tickets</div>
+    <div class="admin-card-summary">
+      The sync worker now captures attachments on every incremental pass. To pull
+      attachments off tickets we'd already synced before this block landed, run a
+      one-shot backfill. Safe to repeat — uses ON CONFLICT to upsert.
+      <strong>Runs in the background</strong> — closing this page won't stop it.
+    </div>
+    <div class="admin-card-actions" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <label style="font-size:12px;color:#475569;">Limit (0 = all)</label>
+      <input id="bf-limit" type="number" value="0" min="0" step="100"
+             style="width:90px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
+      <label style="font-size:12px;color:#475569;" title="Sleep between tickets — higher = nicer to the rest of the app">Throttle (s)</label>
+      <input id="bf-throttle" type="number" value="0.2" min="0" max="5" step="0.1"
+             style="width:80px;padding:6px 8px;border:1px solid var(--border);border-radius:6px;">
+      <button id="bf-start" type="button" class="admin-card-btn"
+              onclick="startBackfill()"
+              style="background:linear-gradient(135deg,#10b981,#14b8a6);color:#fff;border:none;">
+        ▶ Start backfill
+      </button>
+      <button id="bf-stop" type="button" class="admin-card-btn"
+              onclick="stopBackfill()"
+              style="background:linear-gradient(135deg,#f43f5e,#be123c);color:#fff;border:none;display:none;">
+        ■ Stop backfill
+      </button>
+      <span id="bf-status" style="font-size:12px;color:#475569;"></span>
+    </div>
+
+    <!-- Live progress bar (hidden until running/done) -->
+    <div id="bf-progress-wrap" style="display:none;margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-bottom:4px;">
+        <span id="bf-prog-label">Working…</span>
+        <span id="bf-prog-counts" style="font-family:'JetBrains Mono',monospace;"></span>
+      </div>
+      <div style="height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;">
+        <div id="bf-prog-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#4f46e5,#7c3aed);transition:width .3s;"></div>
+      </div>
+      <div id="bf-prog-meta" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:'JetBrains Mono',monospace;"></div>
+    </div>
+  </div>
+
+  <!-- Top content types -->
+  {% if summary.by_type %}
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Breakdown by content type</div>
+    <table class="admin-table" style="margin-top:8px;">
+      <thead><tr><th>Type</th><th style="text-align:right;">Count</th><th style="text-align:right;">Total size</th></tr></thead>
+      <tbody>
+        {% for r in summary.by_type %}
+        <tr>
+          <td><code>{{ r.content_type or '(unknown)' }}</code></td>
+          <td style="text-align:right;">{{ '{:,}'.format(r.n) }}</td>
+          <td style="text-align:right;font-family:'JetBrains Mono',monospace;">
+            {{ (r.bytes / 1024 / 1024)|round(2) }} MB
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+
+  <!-- Recent attachments -->
+  {% if recent %}
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">20 most recent</div>
+    <table class="admin-table" style="margin-top:8px;">
+      <thead><tr>
+        <th>ID</th><th>Ticket</th><th>File name</th><th>Type</th>
+        <th style="text-align:right;">Size</th><th>Cached?</th><th></th>
+      </tr></thead>
+      <tbody>
+        {% for r in recent %}
+        <tr>
+          <td><code>{{ r.id }}</code></td>
+          <td><a href="/tickets/{{ r.ticket_id }}">#{{ r.ticket_id }}</a></td>
+          <td>{{ r.file_name }}</td>
+          <td><code>{{ r.content_type or '—' }}</code></td>
+          <td style="text-align:right;font-family:'JetBrains Mono',monospace;">
+            {{ ((r.size_bytes or 0) / 1024)|round(1) }} KB
+          </td>
+          <td>{% if r.local_path %}<span class="admin-status admin-status-done">● cached</span>{% else %}<span class="admin-status admin-status-pending">○ on-demand</span>{% endif %}</td>
+          <td><a href="/api/attachments/{{ r.id }}/download" class="admin-card-btn">Open</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="admin-stub-banner admin-stub-pending" style="margin-top:18px;">
+    <div class="ass-icon">○</div>
+    <div>
+      <strong>No attachments captured yet.</strong> Either we haven't run a sync
+      since this block landed, or the tickets in your DB don't have any. Click
+      <strong>Run backfill</strong> above to walk existing tickets.
+    </div>
+  </div>
+  {% endif %}
+
+</main>
+
+<script>
+async function startBackfill() {
+  const limit = document.getElementById('bf-limit').value || 0;
+  const throttle = document.getElementById('bf-throttle').value || '0.2';
+  const status = document.getElementById('bf-status');
+  status.textContent = '⏳ Spawning worker…'; status.style.color = '#475569';
+  try {
+    const fd = new FormData();
+    fd.append('limit', limit);
+    fd.append('throttle', throttle);
+    const r = await fetch('/api/admin/attachments/backfill', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    status.textContent = out.already_running
+      ? `Already running (pid ${out.pid})` : `▶ Started (pid ${out.pid})`;
+    status.style.color = '#047857';
+    pollProgress();
+  } catch (e) {
+    status.textContent = '✗ ' + e.message; status.style.color = '#be123c';
+  }
+}
+
+async function stopBackfill() {
+  if (!confirm('Stop the backfill? Progress so far is saved; you can resume by clicking Start again.')) return;
+  const status = document.getElementById('bf-status');
+  status.textContent = '⏳ Stopping…'; status.style.color = '#475569';
+  try {
+    const r = await fetch('/api/admin/attachments/backfill/stop', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    status.textContent = out.was_running ? `■ Stopped (pid ${out.killed_pid})` : 'Not running.';
+    status.style.color = '#be123c';
+    setTimeout(pollProgress, 600);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message; status.style.color = '#be123c';
+  }
+}
+
+let pollHandle = null;
+async function pollProgress() {
+  try {
+    const r = await fetch('/api/admin/attachments/backfill/status', { cache: 'no-store' });
+    const out = await r.json();
+    renderProgress(out);
+    // If it's running or just finished within the last 30s, keep polling.
+    const keepGoing = out.is_running ||
+                      (out.state === 'done' && (out.age_seconds || 0) < 30) ||
+                      (out.state === 'stopped' && (out.age_seconds || 0) < 30);
+    if (keepGoing) {
+      pollHandle = setTimeout(pollProgress, 2000);
+    } else {
+      pollHandle = null;
+    }
+  } catch (e) {
+    // swallow — retry
+    pollHandle = setTimeout(pollProgress, 5000);
+  }
+}
+
+function renderProgress(out) {
+  const wrap   = document.getElementById('bf-progress-wrap');
+  const bar    = document.getElementById('bf-prog-bar');
+  const label  = document.getElementById('bf-prog-label');
+  const counts = document.getElementById('bf-prog-counts');
+  const meta   = document.getElementById('bf-prog-meta');
+  const start  = document.getElementById('bf-start');
+  const stop   = document.getElementById('bf-stop');
+
+  if (!out.present) {
+    wrap.style.display = 'none';
+    start.style.display = ''; stop.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  const done  = out.processed || 0;
+  const total = out.total || 0;
+  const pct   = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  bar.style.width = pct + '%';
+  counts.textContent = `${done.toLocaleString()} / ${total.toLocaleString()} tickets · ${pct}%`;
+  const fmtState = {
+    booting:  '⏳ Booting…',
+    running:  '▶ Running — pulling attachments from Zendesk',
+    done:     '✓ Completed',
+    stopped:  '■ Stopped by user',
+    error:    '✗ Error',
+  };
+  label.textContent = fmtState[out.state] || out.state;
+  meta.textContent = [
+    out.attachments != null ? `${out.attachments.toLocaleString()} attachments captured` : null,
+    out.errors      != null ? `${out.errors} errors` : null,
+    out.current_ticket      ? `current ticket #${out.current_ticket}` : null,
+    out.pid                 ? `pid ${out.pid}` : null,
+    out.age_seconds != null ? `heartbeat ${out.age_seconds}s ago` : null,
+  ].filter(Boolean).join('  ·  ');
+
+  if (out.is_running) {
+    start.style.display = 'none'; stop.style.display = '';
+  } else {
+    start.style.display = ''; stop.style.display = 'none';
+    if (out.state === 'done') {
+      // Cached summary already updated by the API; refresh the recent attachments table after a beat
+      setTimeout(() => location.reload(), 1500);
+    }
+  }
+}
+
+// Initial poll — if a backfill was started in a previous session, show it immediately
+pollProgress();
+</script>
+
+{% endblock %}

@@ -1,0 +1,549 @@
+{% extends "_base.html" %}
+{% block title %}{% if is_new %}New view{% else %}{{ view.name }}{% endif %}{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row">
+    <a href="javascript:history.back()" class="back-link">← Back</a>
+    {% if not is_new %}<a href="/views/nv_{{ view.id }}" style="margin-left:12px;font-size:12px;color:var(--accent);">View tickets in this view →</a>{% endif %}
+  </div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">F0+</div>
+    <h1 class="admin-detail-title">
+      {% if is_new %}New view{% else %}{{ view.icon or '' }} {{ view.name }}{% endif %}
+    </h1>
+    <div class="admin-detail-summary">
+      Pick a name, build the filter (any standard column or custom field is fair game),
+      choose which columns to show, and decide who else can see it.
+    </div>
+  </div>
+
+  <form id="view-form" onsubmit="return saveView(event)" style="margin-top:18px;">
+
+    <!-- Identity card (icon picker + name + description + color) -->
+    <div class="admin-card admin-card-done">
+      <div class="admin-card-title">Identity</div>
+      <div style="display:grid;grid-template-columns:90px 1fr 2fr;gap:12px;margin-top:10px;align-items:end;">
+        <label style="font-size:12px;min-width:0;">
+          <span style="color:var(--muted);">Icon</span>
+          <input id="icon-input" name="icon" value="{{ view.icon if view else '' }}" maxlength="4" placeholder="—"
+                 style="display:block;width:100%;box-sizing:border-box;padding:8px;border:1px solid var(--border);border-radius:8px;text-align:center;font-size:20px;cursor:pointer;margin-top:4px;min-width:0;"
+                 onclick="toggleIconPicker()" readonly>
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Name</span>
+          <input name="name" required value="{{ view.name if view else '' }}"
+                 placeholder="e.g. My high-priority tickets"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Description (optional)</span>
+          <input name="description" value="{{ view.description if view else '' }}"
+                 placeholder="What this view shows and when to use it"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+      </div>
+
+      <!-- Icon picker grid -->
+      <div id="icon-picker" style="display:none;margin-top:10px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafbff;">
+        <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Pick an icon (or type one in the box above):</div>
+        <div style="display:grid;grid-template-columns:repeat(15,1fr);gap:4px;">
+          {% for emo in ['📋','📌','📍','⭐','🔥','💡','✨','🟢','🟡','🔴','🟠','🔵','🟣','⏰','⏳',
+                          '⏸','▶','◀','✅','❌','⚠','🆘','🔔','📞','💬','📨','📤','📥','📎','🚀',
+                          '🐛','🛠','🔧','⚙','🎯','📊','📈','📉','💰','💼','🏢','👤','👥','🌐','🔒',
+                          '🔓','🔑','📁','📂','🗂','📅','📆','🗓','🕒','🚩','💎','🎉','💯','🆕','🔃'] %}
+          <button type="button" onclick="pickIcon('{{ emo }}')"
+                  style="font-size:18px;padding:6px;background:#fff;border:1px solid var(--border);border-radius:6px;cursor:pointer;line-height:1;">{{ emo }}</button>
+          {% endfor %}
+        </div>
+        <div style="margin-top:8px;display:flex;justify-content:space-between;align-items:center;font-size:11px;color:var(--muted);">
+          <button type="button" onclick="pickIcon('')" style="background:transparent;border:none;color:#be123c;cursor:pointer;text-decoration:underline;">Clear icon</button>
+          <button type="button" onclick="toggleIconPicker()" style="background:transparent;border:none;color:var(--accent);cursor:pointer;">Done</button>
+        </div>
+      </div>
+
+      <!-- Color picker with live preview -->
+      <div style="margin-top:18px;">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:8px;">
+          <strong style="font-size:12px;">Color</strong>
+          <span style="font-size:11px;color:var(--muted);">
+            Adds a colored stripe on the sidebar entry so you can spot this view quickly.
+          </span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(10,1fr);gap:6px;">
+          {% set current_color = (view.color if view else 'indigo') %}
+          {% for c in ['indigo','violet','purple','pink','rose','red','orange','amber','yellow','lime',
+                       'green','emerald','teal','cyan','sky','blue','fuchsia','slate','gray'] %}
+          <label title="{{ c }}"
+                 style="position:relative;height:36px;display:flex;align-items:center;justify-content:center;cursor:pointer;border:2px solid {% if c == current_color %}var(--accent){% else %}transparent{% endif %};border-radius:8px;padding:2px;">
+            <input type="radio" name="color" value="{{ c }}" {% if c == current_color %}checked{% endif %}
+                   style="position:absolute;opacity:0;" onchange="updateColorPreview()">
+            <span class="view-stripe stripe-{{ c }}" style="display:block;width:24px;height:24px;border-radius:6px;"></span>
+          </label>
+          {% endfor %}
+        </div>
+        <!-- Sidebar preview -->
+        <div style="margin-top:14px;padding:10px;background:linear-gradient(180deg,#1e1b4b,#312e81);border-radius:10px;max-width:280px;">
+          <div style="font-size:9px;color:rgba(255,255,255,0.5);text-transform:uppercase;letter-spacing:0.08em;margin-bottom:6px;">Sidebar preview</div>
+          <div id="sidebar-preview" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:rgba(255,255,255,0.05);border-radius:8px;">
+            <span id="preview-stripe" class="view-stripe stripe-{{ current_color }}" style="width:4px;height:22px;border-radius:2px;"></span>
+            <span id="preview-label" style="color:#fff;font-size:12px;flex:1;">{{ (view.icon if view else '') }} {{ view.name if view else 'View name preview' }}</span>
+            <span style="font-size:11px;color:rgba(255,255,255,0.7);background:rgba(255,255,255,0.1);padding:1px 8px;border-radius:8px;">42</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Visibility card -->
+    <div class="admin-card admin-card-done" style="margin-top:18px;">
+      <div class="admin-card-title">Visibility</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+        {% set cur_scope = (view.scope if view else 'personal') %}
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;{% if cur_scope == 'personal' %}border-color:var(--accent);background:#eef2ff;{% endif %}">
+          <input type="radio" name="scope" value="personal" {% if cur_scope == 'personal' %}checked{% endif %} onchange="toggleScope()" style="margin-top:2px;">
+          <div>
+            <strong style="font-size:12px;">Personal — only you</strong>
+            <div style="font-size:11px;color:#64748b;">Saved to your sidebar. Nobody else sees it.</div>
+          </div>
+        </label>
+        {% if has_perm(user, 'views.create_shared') %}
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;{% if cur_scope == 'shared' %}border-color:var(--accent);background:#eef2ff;{% endif %}">
+          <input type="radio" name="scope" value="shared" {% if cur_scope == 'shared' %}checked{% endif %} onchange="toggleScope()" style="margin-top:2px;">
+          <div>
+            <strong style="font-size:12px;">Shared — pick who can see it</strong>
+            <div style="font-size:11px;color:#64748b;">Add specific users or whole groups below. Each gets it in their sidebar.</div>
+          </div>
+        </label>
+        {% endif %}
+        {% if view and view.scope == 'system' and has_perm(user, 'views.manage_all') %}
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;{% if cur_scope == 'system' %}border-color:var(--accent);background:#eef2ff;{% endif %}">
+          <input type="radio" name="scope" value="system" {% if cur_scope == 'system' %}checked{% endif %} onchange="toggleScope()" style="margin-top:2px;">
+          <div>
+            <strong style="font-size:12px;">System — everyone sees it (admin only)</strong>
+            <div style="font-size:11px;color:#64748b;">The seeded default views. Visible to every signed-in user.</div>
+          </div>
+        </label>
+        {% endif %}
+      </div>
+
+      <div id="share-block" style="margin-top:12px;display:{% if cur_scope == 'shared' %}block{% else %}none{% endif %};">
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;">
+          <div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px;">Share with users</div>
+            <input id="user-search" placeholder="Type to filter…" oninput="filterUserShares(this.value)"
+                   style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:11px;margin-bottom:6px;">
+            <div id="user-share-list" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:3px;">
+              {% for u in app_users %}{% if u.email != user.email %}
+              <label data-email="{{ u.email }}" data-name="{{ u.name|e }}" class="user-share-row" style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px;">
+                <input type="checkbox" class="share-user" value="{{ u.email }}" {% if u.email in shared_user_emails %}checked{% endif %}>
+                <span>{{ u.name or u.email.split('@')[0] }}</span>
+                <span style="color:#94a3b8;">&lt;{{ u.email }}&gt;</span>
+              </label>
+              {% endif %}{% endfor %}
+            </div>
+          </div>
+          <div>
+            <div style="font-size:12px;font-weight:600;margin-bottom:6px;">Share with groups</div>
+            <input id="group-search" placeholder="Type to filter…" oninput="filterGroupShares(this.value)"
+                   style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:11px;margin-bottom:6px;">
+            <div id="group-share-list" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:8px;padding:6px;display:flex;flex-direction:column;gap:3px;">
+              {% for g in groups %}
+              <label data-name="{{ g.name|e }}" class="group-share-row" style="display:flex;align-items:center;gap:6px;font-size:11px;padding:3px;">
+                <input type="checkbox" class="share-group" value="{{ g.id }}" {% if g.id in shared_group_ids %}checked{% endif %}>
+                <span>{{ g.name }}</span>
+                {% if g.is_native %}<span style="font-size:9px;background:#ecfdf5;color:#065f46;padding:0 5px;border-radius:6px;">native</span>{% endif %}
+                <span style="color:#94a3b8;margin-left:auto;">{{ g.member_count }}</span>
+              </label>
+              {% endfor %}
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Filter builder card -->
+    <div class="admin-card admin-card-done" style="margin-top:18px;">
+      <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;">
+        Filter
+        <span style="font-size:11px;color:var(--muted);font-weight:400;">— any standard column or custom field</span>
+        <label style="font-size:11px;margin-left:auto;">
+          Match: <select id="match-mode" style="padding:3px;border:1px solid var(--border);border-radius:6px;">
+            <option value="all">all rules (AND)</option>
+            <option value="any">any rule (OR)</option>
+          </select>
+        </label>
+      </div>
+      <div id="filter-rules" style="display:flex;flex-direction:column;gap:6px;margin-top:10px;"></div>
+      <button type="button" onclick="addRule()" class="admin-card-btn" style="margin-top:8px;font-size:11px;">
+        + Add filter rule
+      </button>
+    </div>
+
+    <!-- Columns card -->
+    <div class="admin-card admin-card-done" style="margin-top:18px;">
+      <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;">
+        Columns to show
+        <span style="font-size:11px;color:var(--muted);font-weight:400;">— check anything that should appear; drag to reorder</span>
+      </div>
+
+      <!-- Selected columns — drag-orderable. This is the source of truth for save. -->
+      <div style="margin-top:10px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#475569;margin-bottom:6px;">Selected (drag to reorder)</div>
+        <div id="col-selected" style="display:flex;flex-wrap:wrap;gap:6px;padding:8px;background:#fafbff;border:1px dashed var(--border);border-radius:8px;min-height:42px;">
+          <span id="col-selected-empty" style="font-size:11px;color:#94a3b8;font-style:italic;">No columns selected yet — pick some below.</span>
+        </div>
+      </div>
+
+      <!-- Available columns — click to toggle into Selected. -->
+      <div style="margin-top:14px;display:flex;align-items:center;gap:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#475569;">Available</div>
+        <input id="col-search" placeholder="Filter columns…" oninput="filterColumns(this.value)"
+               style="margin-left:auto;padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;width:200px;">
+      </div>
+      {# Group columns by `group` field — Standard first, then Custom fields #}
+      {% set ns = namespace(seen_groups=[]) %}
+      {% for c in column_choices %}{% if c.group not in ns.seen_groups %}{% set _ = ns.seen_groups.append(c.group) %}{% endif %}{% endfor %}
+      {% for grp in ns.seen_groups %}
+      <div style="margin-top:12px;">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.08em;color:#94a3b8;margin-bottom:6px;">{{ grp }}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:6px;" class="col-group" data-group="{{ grp }}">
+          {% for c in column_choices %}{% if c.group == grp %}
+          <label class="col-item" data-label="{{ c.label|lower }}" data-key="{{ c.key }}" data-name="{{ c.label|e }}" style="display:flex;align-items:center;gap:6px;padding:6px 8px;border:1px solid var(--border);border-radius:8px;font-size:11px;">
+            <input type="checkbox" class="col-cb" value="{{ c.key }}" data-label="{{ c.label|e }}" onchange="onColCbChange(this)">
+            {{ c.label }}
+          </label>
+          {% endif %}{% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Sticky save bar -->
+    <div style="margin-top:24px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+      <span id="save-status" style="font-size:12px;color:var(--muted);"></span>
+      <a href="javascript:history.back()" class="admin-card-btn">Cancel</a>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">
+        {% if is_new %}Create view{% else %}Save changes{% endif %}
+      </button>
+    </div>
+  </form>
+</main>
+
+<script>
+// FILTER_FIELDS comes from the server with EVERY filterable field — standard
+// columns + every custom field. Searchable via the field dropdown.
+const FILTER_FIELDS = {{ filter_fields | tojson }};
+const FILTER_OPS = {{ filter_ops | tojson }};
+const FILTER_OPTIONS = {{ filter_options | tojson }};
+const GROUPS = {{ groups | tojson }};
+const ZD_AGENTS = {{ zd_agents | tojson }};
+const IS_NEW = {{ 'true' if is_new else 'false' }};
+const VIEW_ID = {{ view.id if view else 'null' }};
+
+let initialFilter, initialColumns, initialSort;
+try { initialFilter  = JSON.parse({{ default_filter_json | tojson }}); } catch (e) { initialFilter = {match:'all',rules:[]}; }
+try { initialColumns = JSON.parse({{ default_columns_json | tojson }}); } catch (e) { initialColumns = []; }
+try { initialSort    = JSON.parse({{ default_sort_json | tojson }}); } catch (e) { initialSort = {field:'updated_at',dir:'desc'}; }
+
+function toggleScope() {
+  const scope = document.querySelector('input[name=scope]:checked').value;
+  document.getElementById('share-block').style.display = scope === 'shared' ? 'block' : 'none';
+}
+
+// --- Icon picker ---
+function toggleIconPicker() {
+  const p = document.getElementById('icon-picker');
+  p.style.display = p.style.display === 'none' ? 'block' : 'none';
+}
+function pickIcon(emo) {
+  document.getElementById('icon-input').value = emo;
+  document.getElementById('icon-picker').style.display = 'none';
+  updateColorPreview();
+}
+
+// --- Color preview ---
+function updateColorPreview() {
+  const color = document.querySelector('input[name=color]:checked').value;
+  document.getElementById('preview-stripe').className = 'view-stripe stripe-' + color;
+  const icon = document.getElementById('icon-input').value;
+  const name = document.querySelector('input[name=name]').value || 'View name preview';
+  document.getElementById('preview-label').textContent = (icon ? icon + ' ' : '') + name;
+  // Highlight the chosen color swatch
+  document.querySelectorAll('input[name=color]').forEach(r => {
+    r.parentElement.style.borderColor = r.checked ? 'var(--accent)' : 'transparent';
+  });
+}
+document.querySelector('input[name=name]').addEventListener('input', updateColorPreview);
+
+// --- Filter rules ---
+function fieldMeta(key) { return FILTER_FIELDS.find(f => f[0] === key); }
+
+function addRule(prefill) {
+  const wrap = document.getElementById('filter-rules');
+  const row = document.createElement('div');
+  row.className = 'filter-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1.4fr 0.8fr 2fr auto;gap:6px;align-items:center;';
+  row.innerHTML = `
+    <select class="r-field" onchange="renderRuleValue(this.closest('.filter-row'))" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;">
+      ${FILTER_FIELDS.map(f => `<option value="${f[0]}">${escapeHtml(f[1])}</option>`).join('')}
+    </select>
+    <select class="r-op" onchange="renderRuleValue(this.closest('.filter-row'))" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;"></select>
+    <div class="r-value-cell"></div>
+    <button type="button" onclick="this.closest('.filter-row').remove()" style="background:transparent;border:none;cursor:pointer;font-size:14px;color:#94a3b8;">×</button>
+  `;
+  wrap.appendChild(row);
+  if (prefill && prefill.field) row.querySelector('.r-field').value = prefill.field;
+  else row.querySelector('.r-field').value = FILTER_FIELDS[0][0];
+  renderRuleValue(row);
+  if (prefill && prefill.op) row.querySelector('.r-op').value = prefill.op;
+  renderRuleValue(row, prefill ? prefill.value : undefined);
+}
+
+function escapeHtml(s) { return String(s).replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m])); }
+
+function renderRuleValue(row, prefillValue) {
+  const fieldKey = row.querySelector('.r-field').value;
+  const meta = fieldMeta(fieldKey);
+  if (!meta) return;
+  const [, , type] = meta;
+  const opSel = row.querySelector('.r-op');
+  const currentOp = opSel.value;
+  const ops = FILTER_OPS[type] || ['eq'];
+  opSel.innerHTML = ops.map(o => `<option value="${o}">${o.replace('_', ' ')}</option>`).join('');
+  if (ops.includes(currentOp)) opSel.value = currentOp;
+  const op = opSel.value;
+  const cell = row.querySelector('.r-value-cell');
+
+  // No-value ops
+  if (op === 'is_null' || op === 'not_null' || op === 'is_me') {
+    cell.innerHTML = `<span style="font-size:11px;color:#64748b;font-style:italic;">no value needed</span>`;
+    return;
+  }
+  // Multi-value ops → multiselect when we have a known option set
+  const opts = FILTER_OPTIONS[fieldKey];
+  const isMulti = (op === 'in' || op === 'not_in');
+  if (opts && opts.length) {
+    const optHtml = opts.map(o => `<option value="${escapeHtml(o.value)}">${escapeHtml(o.label)}</option>`).join('');
+    cell.innerHTML = isMulti
+      ? `<select class="r-value" multiple size="3" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">${optHtml}</select>`
+      : `<select class="r-value" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">${optHtml}</select>`;
+  } else if (type === 'select_groups') {
+    const optHtml = GROUPS.map(g => `<option value="${escapeHtml(g.name)}">${escapeHtml(g.name)}</option>`).join('');
+    cell.innerHTML = isMulti
+      ? `<select class="r-value" multiple size="3" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">${optHtml}</select>`
+      : `<select class="r-value" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">${optHtml}</select>`;
+  } else if (type === 'agent_or_me') {
+    const optHtml = ZD_AGENTS.map(a => `<option value="${a.id}">${escapeHtml(a.name || a.email)}</option>`).join('');
+    cell.innerHTML = `<select class="r-value" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">${optHtml}</select>`;
+  } else if (type === 'date_relative') {
+    cell.innerHTML = `<input class="r-value" type="number" min="0" placeholder="number of days" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">`;
+  } else if (type === 'number') {
+    cell.innerHTML = `<input class="r-value" type="number" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">`;
+  } else {
+    cell.innerHTML = `<input class="r-value" type="text" style="padding:6px;border:1px solid var(--border);border-radius:6px;font-size:12px;width:100%;">`;
+  }
+  if (prefillValue !== undefined) {
+    const valEl = cell.querySelector('.r-value');
+    if (valEl) {
+      if (valEl.multiple && Array.isArray(prefillValue)) {
+        Array.from(valEl.options).forEach(o => o.selected = prefillValue.includes(o.value));
+      } else {
+        valEl.value = Array.isArray(prefillValue) ? prefillValue[0] : prefillValue;
+      }
+    }
+  }
+}
+
+function readRules() {
+  const rows = document.querySelectorAll('.filter-row');
+  return Array.from(rows).map(row => {
+    const field = row.querySelector('.r-field').value;
+    const op = row.querySelector('.r-op').value;
+    let value = null;
+    const valEl = row.querySelector('.r-value');
+    if (valEl) {
+      if (valEl.multiple) {
+        value = Array.from(valEl.selectedOptions).map(o => o.value);
+      } else {
+        value = valEl.value;
+      }
+    }
+    return { field, op, value };
+  });
+}
+
+// --- Column selection + drag reorder ---
+function filterColumns(text) {
+  const f = (text || '').toLowerCase().trim();
+  document.querySelectorAll('.col-item').forEach(item => {
+    const lbl = item.dataset.label || '';
+    item.style.display = (!f || lbl.includes(f)) ? '' : 'none';
+  });
+}
+
+function getColumnLabel(key) {
+  const cb = document.querySelector(`.col-cb[value="${CSS.escape(key)}"]`);
+  return cb ? cb.dataset.label : key;
+}
+
+function renderSelectedColumns(order) {
+  const wrap = document.getElementById('col-selected');
+  const empty = document.getElementById('col-selected-empty');
+  // Remove existing chips
+  wrap.querySelectorAll('.col-chip').forEach(c => c.remove());
+  if (!order.length) {
+    empty.style.display = '';
+    return;
+  }
+  empty.style.display = 'none';
+  order.forEach((key, idx) => {
+    const chip = document.createElement('div');
+    chip.className = 'col-chip';
+    chip.draggable = true;
+    chip.dataset.key = key;
+    chip.style.cssText = 'display:inline-flex;align-items:center;gap:6px;padding:5px 10px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:8px;font-size:11px;cursor:grab;user-select:none;';
+    chip.innerHTML = `<span style="opacity:.5;font-size:14px;line-height:1;">⋮⋮</span><span>${idx + 1}. ${escapeHtml(getColumnLabel(key))}</span><button type="button" onclick="removeColumn('${key.replace(/'/g, "\\'")}', event)" style="background:transparent;border:none;color:#64748b;cursor:pointer;font-size:14px;line-height:1;padding:0 0 0 4px;">×</button>`;
+    chip.addEventListener('dragstart', onDragStart);
+    chip.addEventListener('dragover', onDragOver);
+    chip.addEventListener('drop', onDrop);
+    chip.addEventListener('dragend', onDragEnd);
+    wrap.appendChild(chip);
+  });
+}
+
+let draggedKey = null;
+function onDragStart(e) {
+  draggedKey = e.currentTarget.dataset.key;
+  e.currentTarget.style.opacity = '0.4';
+  e.dataTransfer.effectAllowed = 'move';
+}
+function onDragOver(e) {
+  e.preventDefault();
+  const target = e.currentTarget;
+  if (!draggedKey || target.dataset.key === draggedKey) return;
+  // Reorder DOM live as the user drags over neighbors
+  const targetKey = target.dataset.key;
+  const wrap = document.getElementById('col-selected');
+  const chips = Array.from(wrap.querySelectorAll('.col-chip'));
+  const draggedChip = chips.find(c => c.dataset.key === draggedKey);
+  const targetIdx = chips.indexOf(target);
+  const draggedIdx = chips.indexOf(draggedChip);
+  if (draggedIdx < targetIdx) {
+    target.after(draggedChip);
+  } else {
+    target.before(draggedChip);
+  }
+}
+function onDrop(e) {
+  e.preventDefault();
+}
+function onDragEnd(e) {
+  e.currentTarget.style.opacity = '1';
+  draggedKey = null;
+  // After drag, re-number chips by their new DOM order
+  const wrap = document.getElementById('col-selected');
+  const chips = Array.from(wrap.querySelectorAll('.col-chip'));
+  chips.forEach((c, idx) => {
+    const lbl = c.querySelector('span:nth-of-type(2)');
+    if (lbl) lbl.textContent = `${idx + 1}. ${getColumnLabel(c.dataset.key)}`;
+  });
+}
+
+function getSelectedOrder() {
+  const wrap = document.getElementById('col-selected');
+  return Array.from(wrap.querySelectorAll('.col-chip')).map(c => c.dataset.key);
+}
+
+function onColCbChange(cb) {
+  // Toggle the chip — preserves existing order, appends new ones at the end
+  const current = getSelectedOrder();
+  if (cb.checked && !current.includes(cb.value)) {
+    current.push(cb.value);
+  } else if (!cb.checked) {
+    const i = current.indexOf(cb.value);
+    if (i >= 0) current.splice(i, 1);
+  }
+  renderSelectedColumns(current);
+}
+
+function removeColumn(key, e) {
+  e.stopPropagation();
+  const cb = document.querySelector(`.col-cb[value="${CSS.escape(key)}"]`);
+  if (cb) cb.checked = false;
+  const current = getSelectedOrder().filter(k => k !== key);
+  renderSelectedColumns(current);
+}
+
+// --- Share filters ---
+function filterUserShares(text) {
+  const f = (text || '').toLowerCase();
+  document.querySelectorAll('.user-share-row').forEach(r => {
+    const email = (r.dataset.email || '').toLowerCase();
+    const name = (r.dataset.name || '').toLowerCase();
+    r.style.display = (!f || email.includes(f) || name.includes(f)) ? '' : 'none';
+  });
+}
+function filterGroupShares(text) {
+  const f = (text || '').toLowerCase();
+  document.querySelectorAll('.group-share-row').forEach(r => {
+    const name = (r.dataset.name || '').toLowerCase();
+    r.style.display = (!f || name.includes(f)) ? '' : 'none';
+  });
+}
+
+async function saveView(e) {
+  e.preventDefault();
+  const status = document.getElementById('save-status');
+  status.textContent = 'Saving…'; status.style.color = '';
+  const form = e.target;
+  const fd = new FormData();
+  fd.append('name', form.name.value.trim());
+  fd.append('description', form.description.value.trim());
+  fd.append('icon', form.icon.value.trim());
+  fd.append('color', document.querySelector('input[name=color]:checked').value);
+  fd.append('scope', document.querySelector('input[name=scope]:checked').value);
+  const filterObj = { match: document.getElementById('match-mode').value, rules: readRules() };
+  fd.append('filter_json', JSON.stringify(filterObj));
+  // Use the drag-orderable chip list as the source of truth, not checkbox DOM order
+  const cols = getSelectedOrder();
+  fd.append('column_ids_json', JSON.stringify(cols));
+  fd.append('sort_json', JSON.stringify(initialSort));
+  const userEmails = Array.from(document.querySelectorAll('.share-user:checked')).map(cb => cb.value);
+  const groupIds = Array.from(document.querySelectorAll('.share-group:checked')).map(cb => cb.value);
+  fd.append('share_user_emails', userEmails.join(','));
+  fd.append('share_group_ids', groupIds.join(','));
+
+  const url = IS_NEW ? '/api/views' : '/api/views/' + VIEW_ID;
+  const r = await fetch(url, { method: 'POST', body: fd });
+  if (r.ok) {
+    const body = await r.json();
+    status.textContent = '✓ Saved';
+    status.style.color = '#047857';
+    // Navigate immediately — the 400ms delay was eye-candy that just made saving feel slow.
+    location.href = '/views/nv_' + (body.view_id || VIEW_ID);
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = '✗ ' + (body.detail || 'failed');
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+
+// Initialize: prefill rules + columns + match + color radio styling
+(function init() {
+  document.getElementById('match-mode').value = initialFilter.match || 'all';
+  for (const r of (initialFilter.rules || [])) addRule(r);
+  if (!initialFilter.rules || !initialFilter.rules.length) addRule({});
+  // Sensible defaults for brand-new views
+  let orderedCols = (initialColumns && initialColumns.length)
+                     ? initialColumns
+                     : ['id','status','customer','subject','priority','group_name','updated_at','sla_status','ai'];
+  // Drop any keys that don't have a matching checkbox (e.g. removed custom fields)
+  orderedCols = orderedCols.filter(k => document.querySelector(`.col-cb[value="${CSS.escape(k)}"]`));
+  const colSet = new Set(orderedCols);
+  document.querySelectorAll('.col-cb').forEach(cb => cb.checked = colSet.has(cb.value));
+  renderSelectedColumns(orderedCols);
+  updateColorPreview();
+})();
+</script>
+{% endblock %}

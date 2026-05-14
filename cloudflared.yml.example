@@ -1,0 +1,10 @@
+# Cloudflare Tunnel config. Copy to cloudflared.yml and fill in tunnel ID.
+# After running `cloudflared tunnel login` and `cloudflared tunnel create copilot`:
+
+tunnel: <YOUR_TUNNEL_UUID>
+credentials-file: /Users/subhajitdas/.cloudflared/<YOUR_TUNNEL_UUID>.json
+
+ingress:
+  - hostname: BPSSTicketCoPilot.betterplace.co.in
+    service: http://localhost:8000
+  - service: http_status:404

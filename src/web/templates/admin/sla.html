@@ -1,0 +1,133 @@
+{% extends "_base.html" %}
+{% block title %}SLA · Admin{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <button type="button" class="admin-card-btn" onclick="newPolicy()">+ New SLA policy</button>
+  </div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">SLA policies</h1>
+    <div class="admin-detail-summary">
+      Define <strong>first reply</strong>, <strong>next reply</strong>, and
+      <strong>resolution</strong> targets per priority / group / customer.
+      Pick whether the clock follows business hours or calendar hours. Warn fires
+      at 80% of target; breach at 100%. Targets are in minutes.
+    </div>
+  </div>
+
+  <div id="policies" style="margin-top:18px;display:flex;flex-direction:column;gap:18px;">
+    {% for p in policies %}
+    {% include "admin/_sla_policy_card.html" %}
+    {% endfor %}
+  </div>
+
+  <!-- Customer business-hours override -->
+  <div class="admin-card admin-card-done" style="margin-top:24px;">
+    <div class="admin-card-title">Customer business-hours override</div>
+    <div class="admin-card-summary">
+      Pin a specific customer to a different schedule (e.g. Reliance::Jio uses a 24×7 schedule
+      while everyone else uses Mon–Fri 9–18). Overrides win against the policy's default schedule.
+    </div>
+    <form onsubmit="return saveCustOverride(event)" style="margin-top:8px;display:grid;grid-template-columns:2fr 2fr auto;gap:10px;align-items:end;">
+      <label style="font-size:12px;"><span style="color:var(--muted);">Customer</span>
+        <select name="customer_value" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+          <option value="">— pick —</option>
+          {% for c in customers %}
+          <option value="{{ c.value }}">{{ c.name }}</option>
+          {% endfor %}
+        </select></label>
+      <label style="font-size:12px;"><span style="color:var(--muted);">Use schedule</span>
+        <select name="business_hours_id" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+          {% for b in business_hours %}
+          <option value="{{ b.id }}">{{ b.name }}{% if b.is_default %} (default){% endif %}</option>
+          {% endfor %}
+        </select></label>
+      <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Save override</button>
+    </form>
+    <div id="cust-ovr-status" style="font-size:12px;color:var(--muted);margin-top:6px;"></div>
+  </div>
+</main>
+
+<template id="policy-template">
+  {% set p = {'id':0,'name':'New policy','description':'','active':1,'clock_type':'business','business_hours_id':None,'position':100,'applies_to':{},'targets':{}} %}
+  {% include "admin/_sla_policy_card.html" %}
+</template>
+
+<script>
+const GROUPS = {{ groups | tojson }};
+const CUSTOMERS = {{ customers | tojson }};
+const BHS = {{ business_hours | tojson }};
+
+async function savePolicy(ev, pid) {
+  ev.preventDefault();
+  const card = ev.target.closest('.policy-card');
+  const fd = new FormData();
+  fd.append('policy_id', pid);
+  fd.append('name', card.querySelector('[name="name"]').value);
+  fd.append('description', card.querySelector('[name="description"]').value);
+  fd.append('active', card.querySelector('[name="active"]').checked ? 1 : 0);
+  fd.append('clock_type', card.querySelector('[name="clock_type"]').value);
+  fd.append('business_hours_id', card.querySelector('[name="business_hours_id"]').value || 0);
+  fd.append('position', card.querySelector('[name="position"]').value || 100);
+  // applies_to
+  const applies = {};
+  const prio = Array.from(card.querySelectorAll('[name="prio"]:checked')).map(i => i.value);
+  if (prio.length) applies.priority = prio;
+  const gids = Array.from(card.querySelectorAll('[name="grp"]:checked')).map(i => parseInt(i.value));
+  if (gids.length) applies.group_ids = gids;
+  const cv = Array.from(card.querySelectorAll('[name="cust"]:checked')).map(i => i.value);
+  if (cv.length) applies.customer_values = cv;
+  fd.append('applies_to_json', JSON.stringify(applies));
+  // targets
+  const targets = {};
+  ['first_reply','next_reply','resolution'].forEach(k => {
+    const v = parseInt(card.querySelector(`[name="t_${k}"]`).value);
+    if (v > 0) targets[k] = { minutes: v };
+  });
+  fd.append('targets_json', JSON.stringify(targets));
+
+  const st = card.querySelector('.save-status');
+  st.textContent = 'Saving…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/sla', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Saved'; st.style.color = '#047857';
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c';
+  }
+  return false;
+}
+
+async function deletePolicy(id) {
+  if (!confirm('Delete this SLA policy? Tickets it covered will fall back to the legacy heuristic.')) return;
+  const r = await fetch(`/api/admin/sla/${id}/delete`, { method: 'POST' });
+  if (r.ok) location.reload(); else alert(await r.text());
+}
+
+function newPolicy() {
+  const tmpl = document.getElementById('policy-template');
+  const clone = tmpl.content.firstElementChild.cloneNode(true);
+  document.getElementById('policies').prepend(clone);
+}
+
+async function saveCustOverride(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData(f);
+  const st = document.getElementById('cust-ovr-status');
+  st.textContent = 'Saving…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/customer-business-hours', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Override saved'; st.style.color = '#047857';
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  return false;
+}
+</script>
+{% endblock %}

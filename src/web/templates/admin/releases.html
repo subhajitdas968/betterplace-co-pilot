@@ -1,0 +1,205 @@
+{% extends "_base.html" %}
+{% block title %}Releases · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">F9</div>
+    <h1 class="admin-detail-title">Releases &amp; rollback</h1>
+    <div class="admin-detail-summary">
+      Every release tags a known-good state: <code>VERSION</code> bumped,
+      git tag created, DB snapshotted to <code>data/backups/copilot-v&lt;ver&gt;.db</code>.
+      If something breaks, click <strong>Rollback</strong> and the page hands you
+      a copy-paste script to restore that version on your machine.
+    </div>
+  </div>
+
+  <!-- Current state -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:14px;">
+    <div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Current version</div>
+      <div style="font-size:22px;font-weight:700;color:#1e293b;margin-top:4px;">v{{ runtime.version }}</div>
+    </div>
+    <div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Git SHA</div>
+      <div style="font-size:14px;font-family:monospace;color:#1e293b;margin-top:4px;">{{ runtime.git_sha or '—' }}</div>
+    </div>
+    <div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Branch</div>
+      <div style="font-size:14px;font-family:monospace;color:#1e293b;margin-top:4px;">{{ runtime.git_branch or '—' }}</div>
+    </div>
+    <div>
+      <div style="font-size:10px;color:var(--muted);text-transform:uppercase;letter-spacing:0.08em;">Working tree</div>
+      <div style="font-size:14px;margin-top:4px;">
+        {% if runtime.git_clean %}
+          <span style="color:#047857;">✓ clean</span>
+        {% else %}
+          <span style="color:#b45309;">⚠ uncommitted changes</span>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Cut a release -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Cut a new release</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+      Captures the current code + DB as a recoverable point. Tag becomes <code>v{{ runtime.version }}</code> + bump. Commit your changes first.
+    </div>
+    <form onsubmit="return cutRelease(event)" style="display:grid;grid-template-columns:120px 1fr 100px auto;gap:8px;align-items:end;margin-top:12px;">
+      <label style="font-size:11px;">
+        <span style="color:var(--muted);">Bump</span>
+        <select name="part" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:3px;">
+          <option value="patch" selected>Patch (x.x.+1)</option>
+          <option value="minor">Minor (x.+1.0)</option>
+          <option value="major">Major (+1.0.0)</option>
+        </select>
+      </label>
+      <label style="font-size:11px;">
+        <span style="color:var(--muted);">Release notes (markdown ok)</span>
+        <input name="notes" placeholder="What changed in this release?"
+               style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:3px;">
+      </label>
+      <label style="font-size:11px;display:flex;align-items:center;gap:5px;padding-bottom:4px;cursor:pointer;">
+        <input type="checkbox" name="require_clean_tree" value="1" checked>
+        Clean tree
+      </label>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#10b981,#14b8a6);color:#fff;border:none;padding:8px 18px;">
+        🎉 Cut release
+      </button>
+    </form>
+    <div id="release-status" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+
+  <!-- History -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;padding:0;">
+    <div style="padding:10px 16px;font-size:13px;font-weight:600;border-bottom:1px solid var(--border);">Release history</div>
+    {% if releases %}
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th style="width:10%;">Version</th>
+          <th style="width:10%;">SHA</th>
+          <th style="width:18%;">When</th>
+          <th style="width:10%;">By</th>
+          <th style="width:7%;text-align:center;">Files</th>
+          <th>Notes</th>
+          <th style="width:14%;text-align:right;">Actions</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in releases %}
+        <tr style="{% if r.is_current %}background:#ecfdf5;{% endif %}">
+          <td>
+            <strong>v{{ r.version }}</strong>
+            {% if r.is_current %}<span style="font-size:10px;background:#10b981;color:#fff;padding:1px 6px;border-radius:10px;margin-left:4px;">CURRENT</span>{% endif %}
+            {% if r.rolled_back_at %}<div style="font-size:10px;color:#b45309;">rolled back {{ r.rolled_back_at[:10] }}</div>{% endif %}
+          </td>
+          <td><code style="font-size:11px;">{{ r.git_sha or '—' }}</code></td>
+          <td style="font-size:11px;color:#64748b;">{{ r.created_at | ist('%d %b %Y, %H:%M') }}</td>
+          <td style="font-size:11px;color:#64748b;">{{ r.created_by or '—' }}</td>
+          <td style="text-align:center;font-family:monospace;font-size:11px;">{{ r.code_files_changed or 0 }}</td>
+          <td style="font-size:12px;color:#475569;">{{ r.notes or '—' }}</td>
+          <td style="text-align:right;white-space:nowrap;">
+            {% if not r.is_current %}
+            <button type="button" onclick="showRollback('{{ r.version }}')" class="admin-card-btn"
+                    style="color:#b45309;border-color:#fde68a;background:#fef9c3;">↶ Rollback</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:30px;text-align:center;color:#94a3b8;font-size:13px;">
+      No releases yet. Cut your first one above — it'll snapshot the current state as v{{ runtime.version|replace('.0.0', '.0.1') if runtime.version.endswith('.0.0') else runtime.version }}.
+    </div>
+    {% endif %}
+  </div>
+</main>
+
+<!-- Rollback modal -->
+<div id="rb-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.6);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:24px;max-width:640px;width:92%;max-height:80vh;overflow-y:auto;">
+    <h2 style="margin:0 0 10px 0;font-size:18px;">Rollback to <span id="rb-version"></span></h2>
+    <div style="font-size:12px;color:#64748b;margin-bottom:12px;">
+      Run these commands in your terminal. The rollback overwrites the running
+      DB, so it can't auto-execute from this page.
+    </div>
+    <pre id="rb-script" style="background:#0f172a;color:#e2e8f0;padding:14px;border-radius:8px;font-size:11px;font-family:'JetBrains Mono',monospace;overflow-x:auto;white-space:pre-wrap;line-height:1.5;"></pre>
+    <div style="display:flex;justify-content:space-between;gap:8px;margin-top:14px;">
+      <button type="button" onclick="copyRollbackScript()" class="admin-card-btn"
+              style="background:#3b82f6;color:#fff;border:none;">📋 Copy script</button>
+      <div style="display:flex;gap:8px;">
+        <button type="button" onclick="markRolledBack()" class="admin-card-btn"
+                style="background:#fff1f2;color:#b91c1c;border:1px solid #fecdd3;">I've run it · mark this version restored</button>
+        <button type="button" onclick="closeRollback()" class="admin-card-btn">Close</button>
+      </div>
+    </div>
+    <div id="rb-status" style="font-size:11px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+</div>
+
+<script>
+async function cutRelease(e) {
+  e.preventDefault();
+  const status = document.getElementById('release-status');
+  status.textContent = '⏳ Creating release…'; status.style.color = '';
+  const fd = new FormData(e.target);
+  if (!fd.has('require_clean_tree')) fd.append('require_clean_tree', '0');
+  try {
+    const r = await fetch('/api/admin/releases', { method: 'POST', body: fd });
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.detail || 'failed');
+    status.textContent = `✓ Released v${out.version} · git tag ${out.git_tag} · backup at ${out.db_backup_path}. Reloading…`;
+    status.style.color = '#047857';
+    setTimeout(() => location.reload(), 1500);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+
+let _rbVersion = null;
+async function showRollback(version) {
+  _rbVersion = version;
+  document.getElementById('rb-version').textContent = 'v' + version;
+  document.getElementById('rb-script').textContent = 'Loading…';
+  document.getElementById('rb-status').textContent = '';
+  document.getElementById('rb-modal').style.display = 'flex';
+  try {
+    const r = await fetch('/api/admin/releases/' + version + '/rollback-script');
+    const out = await r.json();
+    if (!r.ok) throw new Error(out.detail || 'no rollback path');
+    document.getElementById('rb-script').textContent = out.script;
+  } catch (e) {
+    document.getElementById('rb-script').textContent = '✗ ' + e.message;
+  }
+}
+function closeRollback() {
+  document.getElementById('rb-modal').style.display = 'none';
+  _rbVersion = null;
+}
+function copyRollbackScript() {
+  const text = document.getElementById('rb-script').textContent;
+  navigator.clipboard.writeText(text).then(() => {
+    document.getElementById('rb-status').textContent = '✓ Copied — paste into your terminal';
+    document.getElementById('rb-status').style.color = '#047857';
+  });
+}
+async function markRolledBack() {
+  if (!_rbVersion) return;
+  if (!confirm("Mark v" + _rbVersion + " as restored? Only do this AFTER running the rollback script.")) return;
+  const r = await fetch('/api/admin/releases/' + _rbVersion + '/mark-rolled-back', { method: 'POST' });
+  if (r.ok) {
+    document.getElementById('rb-status').textContent = '✓ Marked. The CURRENT chip will update once you restart uvicorn and the VERSION file reflects v' + _rbVersion;
+    document.getElementById('rb-status').style.color = '#047857';
+  }
+}
+document.getElementById('rb-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'rb-modal') closeRollback();
+});
+</script>
+{% endblock %}

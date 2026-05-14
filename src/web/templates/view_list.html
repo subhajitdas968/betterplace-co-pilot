@@ -1,0 +1,120 @@
+{% extends "_base.html" %}
+{% block title %}{{ current_view_label }} · BetterPlace Co-Pilot{% endblock %}
+{% block main %}
+
+<main class="main-pane">
+  <div class="list-header">
+    <div class="list-header-row">
+      <div>
+        <div class="list-title">{{ current_view_label }}</div>
+        <div class="list-sub">{{ tickets|length }} ticket(s)</div>
+      </div>
+
+      <form class="list-controls" method="get" action="/views/{{ current_view }}">
+        {% if search %}<input type="hidden" name="q" value="{{ search }}">{% endif %}
+        <label class="ctrl">
+          <span>Sort</span>
+          <select name="sort" onchange="this.form.submit()">
+            <option value="updated_desc"  {% if sort == 'updated_desc' %}selected{% endif %}>Updated (newest)</option>
+            <option value="updated_asc"   {% if sort == 'updated_asc' %}selected{% endif %}>Updated (oldest)</option>
+            <option value="created_desc"  {% if sort == 'created_desc' %}selected{% endif %}>Created (newest)</option>
+            <option value="created_asc"   {% if sort == 'created_asc' %}selected{% endif %}>Created (oldest)</option>
+            <option value="customer"      {% if sort == 'customer' %}selected{% endif %}>Customer (A→Z)</option>
+          </select>
+        </label>
+        <label class="ctrl">
+          <span>Customer</span>
+          <select name="customer" onchange="this.form.submit()">
+            <option value="">— any —</option>
+            {% for cu in customer_buckets %}
+            <option value="{{ cu.value }}" {% if filter_customer == cu.value %}selected{% endif %}>{{ cu.label }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="ctrl">
+          <span>Jira</span>
+          <select name="jira" onchange="this.form.submit()">
+            <option value=""        {% if filter_jira == '' %}selected{% endif %}>— any —</option>
+            <option value="present" {% if filter_jira == 'present' %}selected{% endif %}>Has Jira ID</option>
+            <option value="absent"  {% if filter_jira == 'absent' %}selected{% endif %}>No Jira ID</option>
+          </select>
+        </label>
+        <label class="ctrl">
+          <span>Root cause L1</span>
+          <select name="rc1" onchange="this.form.submit()">
+            <option value="">— any —</option>
+            {% for o in rc1_options %}
+            <option value="{{ o.value }}" {% if filter_rc1 == o.value %}selected{% endif %}>{{ o.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label class="ctrl">
+          <span>Group</span>
+          <select name="group" onchange="this.form.submit()">
+            <option value="">— any —</option>
+            {% for g in groups %}
+            <option value="{{ g.name }}" {% if filter_group == g.name %}selected{% endif %}>{{ g.name }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        {% if sort != 'updated_desc' or filter_customer or filter_jira or filter_rc1 or filter_group %}
+        <a href="/views/{{ current_view }}" class="ctrl-clear">Clear filters</a>
+        {% endif %}
+      </form>
+    </div>
+  </div>
+
+  {% if tickets %}
+  <div class="ticket-table-wrap">
+    <table class="ticket-table">
+      <thead>
+        <tr>
+          {% for col in view_columns %}
+          <th class="{{ col.th }}">{{ col.label }}</th>
+          {% endfor %}
+        </tr>
+      </thead>
+      <tbody>
+        {% for t in tickets %}
+        <tr class="ticket-table-row" onclick="location.href='/tickets/{{ t.local_id or t.id }}?view={{ current_view }}'">
+          {% for col in view_columns %}
+            {% if col.kind == 'id' %}
+              <td class="{{ col.td }}">
+                {% if t.source == 'native' and t.local_id %}<span class="td-id-native">{{ t.local_id }}</span>
+                {% else %}#{{ t.id }}{% endif %}
+                {% if t.pickup %}<span class="pickup-tag">PICKUP</span>{% endif %}
+              </td>
+            {% elif col.kind == 'status' %}
+              <td class="{{ col.td }}"><span class="badge b-{{ t.status }}" title="{{ t.status }}">{{ t.custom_status_label or t.status }}</span></td>
+            {% elif col.kind == 'subject' %}
+              <td class="{{ col.td }}" title="{{ t.subject }}">{{ t.subject }}</td>
+            {% elif col.kind == 'jira' %}
+              <td class="{{ col.td }}">{% if t.jira_id %}<span class="jira-chip" title="{{ t.jira_id }}">{{ t.jira_id }}</span>{% else %}—{% endif %}</td>
+            {% elif col.kind == 'group' %}
+              <td class="{{ col.td }}">{% if t.group_name %}<span class="badge {% if 'managed' in t.group_name|lower %}b-ms{% else %}b-ps{% endif %}" title="{{ t.group_name }}">{{ t.group_name }}</span>{% else %}—{% endif %}</td>
+            {% elif col.kind == 'date' %}
+              {% set v = t[col.key] %}
+              <td class="{{ col.td }}" title="{{ v }} UTC">{% if v %}{{ v | ist('%d %b %Y, %H:%M') }}{% else %}—{% endif %}</td>
+            {% elif col.kind == 'sla' %}
+              <td class="{{ col.td }}"><span class="sla-chip sla-{{ t.sla_level }}">{{ t.sla_label }}</span></td>
+            {% elif col.kind == 'ai' %}
+              <td class="{{ col.td }}">{% if t.has_ai %}<span class="ai-chip">✦ {{ t.ai_count }}</span>{% else %}<span class="ai-chip-muted">—</span>{% endif %}</td>
+            {% else %}
+              {% set v = t[col.key] %}
+              <td class="{{ col.td }}" title="{{ v or '' }}">{{ v if v not in (None, '', '—') else '—' }}</td>
+            {% endif %}
+          {% endfor %}
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div style="font-size:14px;color:#64748b;">No tickets in this view.</div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:8px;">If filters are too tight, click "Clear filters". If the database is fresh, run <code>make sync</code>.</div>
+  </div>
+  {% endif %}
+</main>
+
+{% endblock %}

@@ -1,0 +1,151 @@
+{% extends "_base.html" %}
+{% block title %}Forms · Admin{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button type="button" class="admin-card-btn" onclick="importFromZd()"
+              title="Pull every Zendesk ticket_form and create a native, editable copy here">
+        ⤓ Import from Zendesk
+      </button>
+      <a href="/admin/forms/new" class="admin-card-btn">+ New form</a>
+      <span id="imp-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </div>
+  <script>
+  async function importFromZd() {
+    const st = document.getElementById('imp-status');
+    st.textContent = '⏳ Pulling forms from Zendesk…'; st.style.color = '#64748b';
+    try {
+      const r = await fetch('/api/admin/forms/import-from-zd', { method: 'POST' });
+      if (!r.ok) throw new Error(await r.text());
+      const out = await r.json();
+      st.textContent = `✓ ${out.created} created · ${out.updated} updated · ${out.total} total`;
+      st.style.color = '#047857';
+      setTimeout(() => location.reload(), 900);
+    } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  }
+  </script>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Forms engine</h1>
+    <div class="admin-detail-summary">
+      Native forms own the field set a ticket displays. Link a form to one or
+      more groups; pick which fields appear; mark which are required; add
+      conditional visibility rules (<em>show Jira ID only when Status = On hold</em>).
+      Zendesk's imported forms are still respected as a fallback if no native
+      form matches.
+    </div>
+  </div>
+
+  {% if forms %}
+  <div style="margin-top:18px;display:flex;gap:10px;align-items:center;justify-content:space-between;">
+    <input id="forms-search" placeholder="Filter by name…" autocomplete="off"
+           style="padding:6px 10px;border:1px solid var(--border);border-radius:8px;font-size:12.5px;width:280px;">
+    <div style="font-size:11px;color:var(--muted);">Click any column header to sort. Click again to reverse.</div>
+  </div>
+  <div class="admin-card admin-card-done" style="margin-top:8px;padding:0;">
+    <table class="admin-table" id="forms-table">
+      <thead><tr>
+        <th class="sortable" data-key="name"        data-type="str">Name <span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="groups"      data-type="str">Groups <span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="fields"      data-type="num">Fields <span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="required"    data-type="num">Required <span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="conditions"  data-type="num">Conditions <span class="sort-arrow"></span></th>
+        <th class="sortable" data-key="active"      data-type="num">Active <span class="sort-arrow"></span></th>
+        <th></th>
+      </tr></thead>
+      <tbody>
+        {% for f in forms %}
+        <tr data-name="{{ f.name|lower }}"
+            data-groups="{{ (f.groups_labels|join(', '))|lower }}"
+            data-fields="{{ f.field_count }}"
+            data-required="{{ f.required_count }}"
+            data-conditions="{{ f.condition_count }}"
+            data-active="{% if f.active %}1{% else %}0{% endif %}">
+          <td>
+            <a href="/admin/forms/{{ f.id }}"><strong>{{ f.name }}</strong></a>
+            {% if f.description %}<div style="font-size:11px;color:#64748b;">{{ f.description }}</div>{% endif %}
+          </td>
+          <td>
+            {% if f.groups_labels %}
+              {% for g in f.groups_labels %}<span class="admin-block">{{ g }}</span> {% endfor %}
+            {% else %}<span style="color:#94a3b8;">— any —</span>{% endif %}
+          </td>
+          <td style="text-align:center;">{{ f.field_count }}</td>
+          <td style="text-align:center;">{{ f.required_count }}</td>
+          <td style="text-align:center;">{{ f.condition_count }}</td>
+          <td>{% if f.active %}<span class="admin-status admin-status-done">● Active</span>{% else %}<span class="admin-status admin-status-pending">○ Off</span>{% endif %}</td>
+          <td><a href="/admin/forms/{{ f.id }}" class="admin-card-btn">Edit →</a></td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <style>
+    #forms-table th.sortable { cursor: pointer; user-select: none; }
+    #forms-table th.sortable:hover { background: #e0e7ff; color: var(--indigo); }
+    #forms-table th.sortable .sort-arrow { font-size: 10px; color: var(--muted); margin-left: 4px; }
+  </style>
+  <script>
+  (function() {
+    const tbody = document.querySelector('#forms-table tbody');
+    const rows  = Array.from(tbody.querySelectorAll('tr'));
+    let sortKey = 'name', sortDir = 1;
+
+    function applySort() {
+      rows.sort((a, b) => {
+        const ta = a.dataset[sortKey] || '';
+        const tb = b.dataset[sortKey] || '';
+        const isNum = document.querySelector(`th[data-key="${sortKey}"]`).dataset.type === 'num';
+        const va = isNum ? Number(ta) : ta;
+        const vb = isNum ? Number(tb) : tb;
+        if (va < vb) return -1 * sortDir;
+        if (va > vb) return  1 * sortDir;
+        return 0;
+      });
+      tbody.innerHTML = '';
+      rows.forEach(r => tbody.appendChild(r));
+      document.querySelectorAll('#forms-table th .sort-arrow').forEach(a => a.textContent = '');
+      const arr = document.querySelector(`th[data-key="${sortKey}"] .sort-arrow`);
+      if (arr) arr.textContent = sortDir === 1 ? '▲' : '▼';
+      applyFilter();
+    }
+
+    function applyFilter() {
+      const q = (document.getElementById('forms-search').value || '').trim().toLowerCase();
+      for (const r of rows) {
+        const match = !q || (r.dataset.name.includes(q) || r.dataset.groups.includes(q));
+        r.style.display = match ? '' : 'none';
+      }
+    }
+
+    document.querySelectorAll('#forms-table th.sortable').forEach(th => {
+      th.addEventListener('click', () => {
+        const key = th.dataset.key;
+        if (sortKey === key) sortDir *= -1;
+        else { sortKey = key; sortDir = 1; }
+        applySort();
+      });
+    });
+    document.getElementById('forms-search').addEventListener('input', applyFilter);
+    applySort();
+  })();
+  </script>
+  {% else %}
+  <div class="admin-stub-banner admin-stub-pending" style="margin-top:18px;">
+    <div class="ass-icon">○</div>
+    <div>
+      <strong>No native forms yet.</strong> Click <strong>+ New form</strong> above
+      to scaffold one. Until you do, tickets fall back to ZD's imported forms (or
+      the per-group hard-coded list).
+    </div>
+  </div>
+  {% endif %}
+
+</main>
+{% endblock %}

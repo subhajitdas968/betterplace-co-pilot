@@ -1,0 +1,316 @@
+{% extends "_base.html" %}
+{% block title %}Profile · {{ user.name }}{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">F5</div>
+    <h1 class="admin-detail-title">Your profile</h1>
+    <div class="admin-detail-summary">
+      Update your name, work hours, timezone, notification preferences, and
+      availability. Some fields (email, roles, groups, Zendesk mapping) are
+      managed by an admin — they're shown here for reference.
+    </div>
+  </div>
+
+  <form id="profile-form" onsubmit="return saveProfile(event)" style="margin-top:18px;">
+
+    <!-- Identity -->
+    <div class="admin-card admin-card-done">
+      <div class="admin-card-title">Identity</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Display name</span>
+          <input name="name" value="{{ profile.name or '' }}" placeholder="How others see you"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Job title</span>
+          <input name="title" value="{{ profile.title or '' }}" placeholder="e.g. Engineering Manager · Onboarding"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <div style="font-size:12px;">
+          <span style="color:var(--muted);">Email <span style="font-size:10px;">(managed by admin)</span></span>
+          <div style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px;background:#f8fafc;font-family:monospace;font-size:12px;">{{ profile.email }}</div>
+        </div>
+        <div style="font-size:12px;">
+          <span style="color:var(--muted);">Roles <span style="font-size:10px;">(managed by admin)</span></span>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px;background:#f8fafc;min-height:32px;">
+            {% for r in user.roles %}
+              <span style="font-size:11px;background:#fff;border:1px solid var(--border);padding:2px 8px;border-radius:10px;">{{ r }}</span>
+            {% else %}
+              <span style="font-size:11px;color:#94a3b8;font-style:italic;">no roles assigned</span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:14px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Phone</span>
+          <input name="phone" value="{{ profile.phone or '' }}" placeholder="+91 …"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Slack handle</span>
+          <input name="slack_handle" value="{{ profile.slack_handle or '' }}" placeholder="@yourname"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+      </div>
+      <label style="font-size:12px;display:block;margin-top:14px;">
+        <span style="color:var(--muted);">Bio</span>
+        <textarea name="bio" rows="2" placeholder="A short note about you — what you handle, what hours you're sharpest, etc."
+                  style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:inherit;font-size:12px;">{{ profile.bio or '' }}</textarea>
+      </label>
+    </div>
+
+    <!-- Availability -->
+    <div class="admin-card admin-card-done" style="margin-top:14px;">
+      <div class="admin-card-title">Availability</div>
+      <div style="margin-top:10px;font-size:12px;color:#475569;">
+        Quick-change available from the avatar in the top-right of every page.
+        Custom statuses (emoji + free text) still map to one of the four buckets
+        so any availability-aware automation has a clean signal.
+      </div>
+      <div style="display:flex;gap:8px;margin-top:14px;flex-wrap:wrap;">
+        {% set cur_av = profile.availability or 'offline' %}
+        {% for av, lbl in [('online','🟢 Online'),('away','🟡 Away'),('busy','🔴 Busy'),('offline','⚫ Offline')] %}
+        <button type="button" onclick="quickSetAvail('{{ av }}')"
+                class="admin-card-btn"
+                style="padding:8px 16px;background:{% if cur_av == av %}#eef2ff;border-color:var(--accent){% else %}#fff{% endif %};">
+          {{ lbl }}{% if cur_av == av %} · current{% endif %}
+        </button>
+        {% endfor %}
+      </div>
+      {% if profile.availability_emoji or profile.availability_label %}
+      <div style="margin-top:14px;padding:10px 14px;background:#fef9c3;border:1px solid #fde68a;border-radius:8px;font-size:12px;">
+        <strong>Custom status:</strong>
+        {{ profile.availability_emoji or '' }} {{ profile.availability_label or '' }}
+        (maps to <strong>{{ cur_av }}</strong>)
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- On Leave -->
+    <div class="admin-card {% if profile.on_leave %}admin-card-done{% else %}admin-card-done{% endif %}" style="margin-top:14px;{% if profile.on_leave %}background:#fef9c3;border-color:#fde68a;{% endif %}">
+      <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;">
+        {% if profile.on_leave %}🏖 On leave{% else %}Leave mode{% endif %}
+        {% if profile.on_leave %}<span style="font-size:11px;background:#fde68a;color:#92400e;padding:2px 8px;border-radius:10px;">active</span>{% endif %}
+      </div>
+      <div style="margin-top:10px;font-size:12px;color:#475569;">
+        When on leave, the auto-online + idle-warning automations skip you —
+        your work schedule is ignored and no nudges are sent.
+        {% if profile.on_leave %}
+          <strong>You're currently on leave.</strong>
+          {% if profile.leave_start %}From <strong>{{ profile.leave_start }}</strong>{% endif %}
+          {% if profile.leave_end %}until <strong>{{ profile.leave_end }}</strong>{% else %}{% if profile.leave_start %} — open-ended.{% endif %}{% endif %}
+          {% if profile.leave_reason %}<div style="margin-top:4px;">Reason: <em>{{ profile.leave_reason }}</em></div>{% endif %}
+        {% endif %}
+      </div>
+
+      {% if profile.on_leave %}
+      <div style="margin-top:12px;display:flex;gap:8px;">
+        <button type="button" onclick="clearLeave()" class="admin-card-btn"
+                style="background:linear-gradient(135deg,#10b981,#14b8a6);color:#fff;border:none;padding:8px 16px;">
+          ✓ I'm back — clear leave
+        </button>
+      </div>
+      {% else %}
+      {# NOT a <form> — nesting forms is invalid HTML and disabled the outer
+         profile form's Save button. This is a plain div with a JS-driven save. #}
+      <div id="leave-on-form" style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr 2fr auto;gap:10px;align-items:end;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">From (optional)</span>
+          <input type="date" id="leave-start"
+                 style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Until (optional)</span>
+          <input type="date" id="leave-end"
+                 style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Reason (optional)</span>
+          <input type="text" id="leave-reason" placeholder="e.g. Vacation, sick day, conference"
+                 style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <button type="button" onclick="setLeave()" class="admin-card-btn"
+                style="background:linear-gradient(135deg,#f59e0b,#ef4444);color:#fff;border:none;padding:8px 16px;">
+          🏖 Mark on leave
+        </button>
+      </div>
+      <div style="margin-top:8px;font-size:11px;color:var(--muted);">
+        Tip: leave dates blank for "indefinite — until I come back and clear it manually".
+      </div>
+      {% endif %}
+    </div>
+
+    <!-- Work schedule -->
+    <div class="admin-card admin-card-done" style="margin-top:14px;">
+      <div class="admin-card-title">Work schedule</div>
+      <div style="margin-top:10px;font-size:12px;color:#475569;">
+        Used by SLA business hours, auto-replies, and routing rules to know when
+        you're "on the clock" vs not. Even if your status says Online outside
+        these hours, automations treat you as off-duty.
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:14px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Timezone</span>
+          <select name="timezone" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+            {% for tz in timezone_choices %}
+            <option value="{{ tz }}" {% if profile.timezone == tz %}selected{% endif %}>{{ tz }}</option>
+            {% endfor %}
+          </select>
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Start time</span>
+          <input type="time" name="work_start_time" value="{{ profile.work_start_time or '09:00' }}"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">End time</span>
+          <input type="time" name="work_end_time" value="{{ profile.work_end_time or '18:00' }}"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+      </div>
+
+      <div style="margin-top:14px;">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px;">Work days</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;" id="work-days-row">
+          {% set work_days = profile.work_days or ['Mon','Tue','Wed','Thu','Fri'] %}
+          {% for d in weekday_order %}
+          <label style="display:flex;align-items:center;gap:5px;padding:6px 12px;border:1px solid {% if d in work_days %}var(--accent){% else %}var(--border){% endif %};background:{% if d in work_days %}#eef2ff{% else %}#fff{% endif %};border-radius:8px;font-size:12px;cursor:pointer;">
+            <input type="checkbox" class="wd-cb" value="{{ d }}" {% if d in work_days %}checked{% endif %}
+                   onchange="this.closest('label').style.borderColor = this.checked ? 'var(--accent)' : 'var(--border)'; this.closest('label').style.background = this.checked ? '#eef2ff' : '#fff'">
+            {{ d }}
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+    </div>
+
+    <!-- Notifications -->
+    <div class="admin-card admin-card-done" style="margin-top:14px;">
+      <div class="admin-card-title">Notifications</div>
+      <div style="display:flex;flex-direction:column;gap:8px;margin-top:10px;">
+        <label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" name="notify_email" value="1" {% if profile.notify_email %}checked{% endif %}>
+          <div>
+            <strong>Email notifications</strong>
+            <div style="font-size:11px;color:#64748b;">New ticket assigned, customer reply, SLA at risk</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" name="notify_browser" value="1" {% if profile.notify_browser %}checked{% endif %}>
+          <div>
+            <strong>Browser notifications</strong>
+            <div style="font-size:11px;color:#64748b;">Native browser pop-ups while you have a tab open</div>
+          </div>
+        </label>
+        <label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:12px;cursor:pointer;">
+          <input type="checkbox" name="notify_sound" value="1" {% if profile.notify_sound %}checked{% endif %}>
+          <div>
+            <strong>Sound</strong>
+            <div style="font-size:11px;color:#64748b;">Play a chime on new ticket / mention</div>
+          </div>
+        </label>
+      </div>
+    </div>
+
+    <!-- Read-only context -->
+    <div class="admin-card admin-card-done" style="margin-top:14px;">
+      <div class="admin-card-title">Linked accounts</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;font-size:12px;">
+        <div>
+          <span style="color:var(--muted);">Zendesk user</span>
+          <div style="padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px;background:#f8fafc;">
+            {% if zd_user %}
+              <strong>{{ zd_user.name }}</strong>
+              <div style="font-size:10px;color:#64748b;">{{ zd_user.email }}</div>
+            {% else %}
+              <span style="color:#be123c;font-style:italic;">Not mapped — ask an admin to set this in /admin/users so "Assigned to me" works.</span>
+            {% endif %}
+          </div>
+        </div>
+        <div>
+          <span style="color:var(--muted);">Groups</span>
+          <div style="display:flex;flex-wrap:wrap;gap:4px;padding:8px;border:1px solid #e2e8f0;border-radius:8px;margin-top:4px;background:#f8fafc;min-height:34px;">
+            {% for g in my_groups %}
+              <span style="font-size:11px;background:#fff;border:1px solid var(--border);padding:2px 7px;border-radius:10px;">{{ g.name }}</span>
+            {% else %}
+              <span style="font-size:11px;color:#94a3b8;font-style:italic;">no groups</span>
+            {% endfor %}
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Save bar -->
+    <div style="margin-top:24px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+      <span id="save-status" style="font-size:12px;color:var(--muted);"></span>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 22px;">
+        Save profile
+      </button>
+    </div>
+  </form>
+</main>
+
+<script>
+async function setLeave() {
+  const fd = new FormData();
+  fd.append('on_leave', 1);
+  fd.append('leave_start', document.getElementById('leave-start').value || '');
+  fd.append('leave_end', document.getElementById('leave-end').value || '');
+  fd.append('reason', document.getElementById('leave-reason').value || '');
+  const r = await fetch('/api/profile/leave', { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+  else alert('Failed to set leave');
+}
+
+async function clearLeave() {
+  if (!confirm("Welcome back! Clear leave mode now?")) return;
+  const fd = new FormData();
+  fd.append('on_leave', 0);
+  const r = await fetch('/api/profile/leave', { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+}
+
+async function quickSetAvail(av) {
+  const fd = new FormData();
+  fd.append('availability', av);
+  await fetch('/api/profile/availability', { method: 'POST', body: fd });
+  location.reload();
+}
+
+async function saveProfile(e) {
+  e.preventDefault();
+  const status = document.getElementById('save-status');
+  status.textContent = 'Saving…'; status.style.color = '';
+  const form = e.target;
+  const fd = new FormData();
+  fd.append('name', form.name.value.trim());
+  fd.append('title', form.title.value.trim());
+  fd.append('timezone', form.timezone.value);
+  fd.append('work_start_time', form.work_start_time.value);
+  fd.append('work_end_time', form.work_end_time.value);
+  const days = Array.from(form.querySelectorAll('.wd-cb:checked')).map(cb => cb.value);
+  fd.append('work_days', days.join(','));
+  fd.append('phone', form.phone.value.trim());
+  fd.append('slack_handle', form.slack_handle.value.trim());
+  fd.append('bio', form.bio.value.trim());
+  fd.append('notify_email', form.notify_email.checked ? 1 : 0);
+  fd.append('notify_browser', form.notify_browser.checked ? 1 : 0);
+  fd.append('notify_sound', form.notify_sound.checked ? 1 : 0);
+  const r = await fetch('/api/profile', { method: 'POST', body: fd });
+  if (r.ok) {
+    status.textContent = '✓ Saved';
+    status.style.color = '#047857';
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = '✗ ' + (body.detail || 'failed');
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+</script>
+{% endblock %}

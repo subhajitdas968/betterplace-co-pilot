@@ -1,0 +1,216 @@
+{% extends "_base.html" %}
+{% block title %}Groups · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block or 'F0+' }}</div>
+    <h1 class="admin-detail-title">Groups</h1>
+    <div class="admin-detail-summary">
+      ZD-synced groups appear here read-only — edit them in Zendesk. Native
+      groups (created below) are fully editable and used for routing, view
+      sharing, and "Assigned to me" defaults.
+    </div>
+  </div>
+
+  <!-- Sync from ZD card -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;display:flex;align-items:center;gap:14px;">
+    <div style="flex:1;">
+      <div class="admin-card-title">Sync all groups from Zendesk</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+        Pulls every group from your Zendesk instance into this table. ZD-synced
+        groups are read-only here — edit names in Zendesk and re-sync.
+      </div>
+    </div>
+    <div style="display:flex;flex-direction:column;align-items:flex-end;gap:6px;">
+      <button type="button" onclick="syncFromZd(this)"
+              class="admin-card-btn"
+              style="background:linear-gradient(135deg,#0ea5e9,#06b6d4);color:#fff;border:none;padding:8px 16px;">
+        ⇣ Sync from Zendesk
+      </button>
+      <div id="sync-status" style="font-size:11px;color:var(--muted);"></div>
+    </div>
+  </div>
+
+  <!-- Create native group card -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">+ New native group</div>
+    <form id="new-group-form" onsubmit="return createGroup(event)"
+          style="display:grid;grid-template-columns:1fr 2fr auto;gap:8px;align-items:end;margin-top:10px;">
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Name</span>
+        <input name="name" required placeholder="e.g. KB Editors"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Description (optional)</span>
+        <input name="description" placeholder="What is this group for?"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+      </label>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">
+        Create
+      </button>
+    </form>
+    <div id="create-status" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+
+  <!-- Groups table -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;padding:0;">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th style="width:22%;">Name</th>
+          <th>Description</th>
+          <th style="width:10%;">Source</th>
+          <th style="width:8%;text-align:center;">Members</th>
+          <th style="width:10%;">Status</th>
+          <th style="width:14%;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for g in groups %}
+        <tr data-gid="{{ g.id }}" style="{% if not g.is_active %}opacity:0.5;background:#fafbff;{% endif %}">
+          <td>
+            <strong contenteditable="{% if g.is_native and g.is_active %}true{% else %}false{% endif %}"
+                    class="gn-name"
+                    onblur="saveName({{ g.id }}, this)"
+                    onkeydown="if (event.key === 'Enter') { event.preventDefault(); this.blur(); }"
+                    style="{% if g.is_native and g.is_active %}cursor:text;border-bottom:1px dashed transparent;{% else %}cursor:default;{% endif %}">{{ g.name }}</strong>
+            <div style="font-size:10px;color:#94a3b8;font-family:monospace;">#{{ g.id }}</div>
+          </td>
+          <td style="font-size:12px;color:#475569;">
+            <span contenteditable="{% if g.is_native and g.is_active %}true{% else %}false{% endif %}"
+                  class="gn-desc"
+                  onblur="saveDesc({{ g.id }}, this)"
+                  style="display:block;min-height:18px;{% if g.is_native and g.is_active %}cursor:text;{% endif %}">{{ g.description or '' }}</span>
+          </td>
+          <td>
+            {% if g.is_native %}
+            <span style="font-size:11px;background:#ecfdf5;color:#065f46;padding:2px 7px;border-radius:10px;">native</span>
+            {% else %}
+            <span style="font-size:11px;background:#eff6ff;color:#1e40af;padding:2px 7px;border-radius:10px;">ZD-synced</span>
+            {% endif %}
+          </td>
+          <td style="text-align:center;font-family:monospace;">{{ g.member_count }}</td>
+          <td>
+            <span style="font-size:11px;padding:2px 7px;border-radius:10px;
+                         background:{% if g.is_active %}#dcfce7;color:#166534{% else %}#fee2e2;color:#991b1b{% endif %};">
+              {{ 'active' if g.is_active else 'archived' }}
+            </span>
+          </td>
+          <td style="white-space:nowrap;text-align:right;">
+            {% if g.is_native %}
+              <button type="button" class="admin-card-btn"
+                      onclick="toggleArchive({{ g.id }}, {{ 0 if g.is_active else 1 }})"
+                      style="{% if g.is_active %}color:#be123c;border-color:#fecdd3;background:#fff1f2;{% endif %}">
+                {{ 'Archive' if g.is_active else 'Restore' }}
+              </button>
+            {% else %}
+              <span style="font-size:10px;color:#94a3b8;font-style:italic;padding:6px;">ZD — edit in Zendesk</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not groups %}
+    <div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;">
+      No groups yet. Run a Zendesk sync (it'll pull existing groups), or create a native one above.
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="margin-top:14px;font-size:11px;color:var(--muted);">
+    Click a name or description to edit (native groups only). Press Enter or click
+    away to save. Native group IDs start at 9,000,000,000 so they never collide with
+    Zendesk's.
+  </div>
+</main>
+
+<script>
+async function syncFromZd(btn) {
+  const status = document.getElementById('sync-status');
+  btn.disabled = true;
+  const origText = btn.textContent;
+  btn.textContent = '⏳ Syncing…';
+  status.textContent = 'Pulling from Zendesk…';
+  status.style.color = '';
+  try {
+    const r = await fetch('/api/admin/groups/sync-from-zd', { method: 'POST' });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.detail || ('HTTP ' + r.status));
+    }
+    const out = await r.json();
+    status.textContent = `✓ ${out.pulled} groups pulled · ${out.created} new · ${out.updated} renamed. Reloading…`;
+    status.style.color = '#047857';
+    setTimeout(() => location.reload(), 800);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.style.color = '#be123c';
+    btn.disabled = false;
+    btn.textContent = origText;
+  }
+}
+
+async function createGroup(e) {
+  e.preventDefault();
+  const form = e.target;
+  const status = document.getElementById('create-status');
+  status.textContent = 'Creating…';
+  const fd = new FormData(form);
+  const r = await fetch('/api/admin/groups', { method: 'POST', body: fd });
+  if (r.ok) {
+    status.textContent = '✓ Created. Reloading…';
+    setTimeout(() => location.reload(), 400);
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = '✗ ' + (body.detail || 'failed');
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+
+async function saveName(gid, el) {
+  const original = el.dataset.original || el.textContent;
+  const name = el.textContent.trim();
+  if (!name || name === original) return;
+  const row = el.closest('tr');
+  const desc = row.querySelector('.gn-desc').textContent.trim();
+  const fd = new FormData();
+  fd.append('name', name); fd.append('description', desc);
+  const r = await fetch('/api/admin/groups/' + gid, { method: 'POST', body: fd });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    alert('Failed: ' + (body.detail || 'unknown'));
+    el.textContent = original;
+  } else {
+    el.dataset.original = name;
+  }
+}
+
+async function saveDesc(gid, el) {
+  const desc = el.textContent.trim();
+  const row = el.closest('tr');
+  const name = row.querySelector('.gn-name').textContent.trim();
+  const fd = new FormData();
+  fd.append('name', name); fd.append('description', desc);
+  const r = await fetch('/api/admin/groups/' + gid, { method: 'POST', body: fd });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    alert('Failed: ' + (body.detail || 'unknown'));
+  }
+}
+
+async function toggleArchive(gid, active) {
+  const fd = new FormData(); fd.append('active', active);
+  const r = await fetch('/api/admin/groups/' + gid + '/archive', { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+  else {
+    const body = await r.json().catch(() => ({}));
+    alert('Failed: ' + (body.detail || 'unknown'));
+  }
+}
+</script>
+{% endblock %}

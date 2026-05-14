@@ -1,0 +1,169 @@
+{% set t = selected if selected is defined else ticket %}
+<section class="ticket-section">
+
+{% if t.insight and t.insight.pickup_flag %}
+<div class="sla-banner urgent">
+  <span class="icon-pill">⚠</span>
+  <div>
+    <strong>{{ t.insight.pickup_flag.title or 'Untouched · needs pickup' }}</strong>
+    <div class="meta">{{ t.insight.pickup_flag.meta or t.insight.pickup_flag.reason or '' }}</div>
+  </div>
+  <div class="actions"><button class="pill-btn primary">Pick up</button></div>
+</div>
+{% endif %}
+
+<div class="ticket-header">
+  <div class="ticket-id-row">
+    <span class="id-num">#{{ t.id }}</span><span class="sep">·</span>
+    <span>Created {{ t.created_at }} · Updated {{ t.updated_at }}</span>
+  </div>
+  <div class="ticket-subject">{{ t.subject }}</div>
+  <div class="ticket-meta-row">
+    <span class="badge b-{{ t.status }}">{{ t.status }}</span>
+    {% if t.group %}<span class="badge {% if 'managed' in (t.group.name or '')|lower %}b-ms{% else %}b-ps{% endif %}">{{ t.group.name }}</span>{% endif %}
+    {% if t.organization %}<span class="badge b-cust">{{ t.organization.name }}</span>{% endif %}
+    {% if t.assignee %}
+      <span class="badge b-grey">Assignee: {{ t.assignee.name }}</span>
+    {% else %}
+      <span class="badge b-rose">Unassigned</span>
+    {% endif %}
+    {% if t.requester %}<span class="badge b-grey">Requester: {{ t.requester.name }}</span>{% endif %}
+  </div>
+</div>
+
+<div class="ticket-body">
+  <div class="conv-col">
+    <div class="section-heading">Conversation · {{ t.comments|length }} message(s)</div>
+    {% for c in t.comments %}
+    <div class="comment {% if c.public %}public{% else %}internal{% endif %}">
+      <div class="comment-head">
+        <div class="comment-author">
+          <span class="a {% if c.author_role == 'agent' or c.author_role == 'admin' %}agent{% else %}cust{% endif %}">
+            {{ (c.author_name or '?')[0]|upper }}
+          </span>
+          {{ c.author_name or 'Unknown' }} · {{ c.author_role or 'user' }}
+          {% if not c.public %}<span class="internal-tag">Internal</span>{% endif %}
+        </div>
+        <span>{{ c.created_at }}</span>
+      </div>
+      <div class="comment-body">{{ c.body[:1500] }}{% if c.body|length > 1500 %}…{% endif %}</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <div class="right-col">
+    {% if t.insight and t.insight.suggested_reply %}
+    <div class="reply-panel">
+      <div class="heading">
+        <span>✦ Suggested reply</span>
+        <span class="pill-flag">{{ t.insight.suggested_reply.flag or 'reply incomplete' }}</span>
+      </div>
+      <div class="reply-flaws">
+        <div class="label">⚠ Issues with current reply</div>
+        <ul>{% for f in t.insight.suggested_reply.flaws or [] %}<li>{{ f|safe }}</li>{% endfor %}</ul>
+      </div>
+      {% if t.insight.suggested_reply.current %}<div class="reply-current"><strong>Current reply:</strong> "{{ t.insight.suggested_reply.current }}"</div>{% endif %}
+      <div class="reply-suggest"><strong>Suggested:</strong>
+{{ t.insight.suggested_reply.suggested|safe }}</div>
+      <div class="reply-actions">
+        <button class="pill-btn primary">Use this reply</button>
+        <button class="pill-btn">Edit before sending</button>
+      </div>
+    </div>
+    {% endif %}
+
+    {% if t.insight and t.insight.kb_worthy %}
+    <div class="kb-banner"><strong>KB-worthy:</strong> {{ t.insight.kb_topic or 'recurring failure mode — runbook recommended' }}</div>
+    {% endif %}
+
+    <div class="panel">
+      <div class="panel-head">
+        <h3><span class="h-icon" style="background:var(--indigo-soft);color:var(--indigo);">⚙</span> Ticket fields</h3>
+        <span class="right-tag">As tagged</span>
+      </div>
+      <div class="panel-body">
+        {% for f in t.fields %}
+        <div class="field-row">
+          <span class="name">{{ f.name }}</span>
+          <span class="value {% if f.empty %}empty{% else %}ok{% endif %}">{{ f.value }}</span>
+        </div>
+        {% endfor %}
+        {% if not t.fields %}<div style="color:#64748b;font-size:12px;padding:8px;">No custom field values yet.</div>{% endif %}
+      </div>
+    </div>
+
+    {% if t.insight %}
+    <div class="ai-panel">
+      <div class="ai-panel-head">
+        <h3><span class="ai-mark">✦</span> Claude AI Insights</h3>
+        <span class="meta">{{ t.insight.created_at }}</span>
+      </div>
+
+      {% if t.insight.summary %}
+      <div class="ai-section">
+        <div class="heading">Conversation summary</div>
+        <div class="summary-glass">{{ t.insight.summary|safe }}</div>
+      </div>
+      {% endif %}
+
+      {% if t.insight.recommendations %}
+      <div class="ai-section">
+        <div class="heading">Recommended corrections <span class="heading-pill">{{ t.insight.recommendations|length }}</span></div>
+        {% for r in t.insight.recommendations %}
+        <div class="rec-card">
+          <div class="rec-row">
+            <span class="field-name">{{ r.field }}</span>
+            {% if r.confidence %}
+            <div class="ring-wrap">
+              <svg width="36" height="36" viewBox="0 0 36 36">
+                <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                <circle class="ring-fg" cx="18" cy="18" r="14"
+                  stroke="{% if r.confidence >= 0.9 %}#10b981{% elif r.confidence >= 0.75 %}#f59e0b{% else %}#fbbf24{% endif %}"
+                  stroke-dasharray="{{ (r.confidence * 87.96)|round(2) }} 87.96"/>
+              </svg>
+              <div class="ring-text">{{ (r.confidence * 100)|round|int }}</div>
+            </div>
+            {% endif %}
+          </div>
+          <div class="change">
+            {% if r.current %}<span class="from">{{ r.current }}</span><span class="arrow">→</span>{% endif %}
+            <span class="to {% if r.review %}review{% endif %}">{{ r.suggest }}</span>
+          </div>
+          {% if r.reason %}<div class="reason">{{ r.reason|safe }}</div>{% endif %}
+        </div>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if t.insight.completeness %}
+      <div class="ai-section">
+        <div class="heading">Completeness check</div>
+        <ul class="checklist">
+          {% for c in t.insight.completeness %}
+          <li class="{{ c.state }}">
+            <span class="marker {% if c.state == 'ok' %}ok-marker{% elif c.state == 'miss' %}miss-marker{% else %}thin-marker{% endif %}">
+              {% if c.state == 'ok' %}✓{% else %}!{% endif %}
+            </span>
+            {{ c.text|safe }}
+            {% if c.hint %}<span class="miss-hint">{{ c.hint|safe }}</span>{% endif %}
+          </li>
+          {% endfor %}
+        </ul>
+      </div>
+      {% endif %}
+
+      <div class="actions-bar">
+        <button class="pill primary">Apply all corrections</button>
+        <button class="pill">Notify Slack</button>
+        <button class="pill">Mark KB-worthy</button>
+      </div>
+    </div>
+    {% else %}
+    <div class="panel"><div class="panel-body" style="color:#64748b;font-size:12px;">
+      AI hasn't analysed this ticket yet. Run <code>make ai</code> or wait for the next worker pass.
+    </div></div>
+    {% endif %}
+  </div>
+</div>
+
+</section>

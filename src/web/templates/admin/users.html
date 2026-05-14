@@ -1,0 +1,434 @@
+{% extends "_base.html" %}
+{% block title %}Users · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block or 'F0' }}</div>
+    <h1 class="admin-detail-title">Users</h1>
+    <div class="admin-detail-summary">
+      App users — who can sign in and what they can do. Anyone with a
+      <code>@betterplace.co.in</code> Google account can self-sign-in; on
+      first login they get the <strong>View-only</strong> role automatically.
+      Upgrade or disable them below.
+    </div>
+  </div>
+
+  <!-- Invite card -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">+ Invite user (or pre-seed before they sign in)</div>
+    <form id="invite-form" onsubmit="return inviteUser(event)" style="display:grid;grid-template-columns:1.2fr 1fr 1.4fr auto;gap:8px;align-items:end;margin-top:10px;">
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Email</span>
+        <input name="email" type="email" required placeholder="someone@betterplace.co.in"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Name (optional)</span>
+        <input name="name" type="text" placeholder="Auto-filled on first login"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Roles</span>
+        <div style="display:flex;flex-wrap:wrap;gap:4px;padding:6px;border:1px solid var(--border);border-radius:8px;margin-top:4px;background:#fff;">
+          {% for r in roles %}
+          <label style="font-size:11px;background:#f1f5f9;padding:2px 6px;border-radius:10px;cursor:pointer;">
+            <input type="checkbox" class="inv-role" value="{{ r.id }}"
+                   {% if r.name == 'View-only' %}checked{% endif %}> {{ r.name }}
+          </label>
+          {% endfor %}
+        </div>
+      </label>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">
+        Invite
+      </button>
+    </form>
+    <div id="invite-status" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+
+  <!-- Users table -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;padding:0;overflow-x:auto;">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th style="width:24%;">User</th>
+          <th style="width:20%;">Roles</th>
+          <th style="width:18%;">Groups</th>
+          <th style="width:14%;">ZD user</th>
+          <th style="width:10%;">Last login</th>
+          <th style="width:8%;">Status</th>
+          <th style="width:6%;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for u in users %}
+        <tr data-email="{{ u.email }}" style="{% if u.status == 'disabled' %}opacity:0.55;background:#fafbff;{% endif %}">
+          <td>
+            <strong>{{ u.name or u.email.split('@')[0] }}</strong>
+            <div style="font-size:11px;color:#64748b;">{{ u.email }}</div>
+            {% if u.email == user.email %}
+              <span style="font-size:10px;background:#dcfce7;color:#166534;padding:1px 5px;border-radius:6px;margin-top:2px;display:inline-block;">you</span>
+            {% endif %}
+          </td>
+          <td>
+            <div class="role-chips" style="display:flex;flex-wrap:wrap;gap:4px;">
+              {% for r in u.roles %}
+                <span style="font-size:11px;background:{% if r.name == 'Admin' %}#fef3c7;color:#92400e{% elif r.name == 'Agent' %}#dbeafe;color:#1e40af{% else %}#f1f5f9;color:#475569{% endif %};padding:2px 7px;border-radius:10px;">{{ r.name }}</span>
+              {% endfor %}
+              {% if not u.roles %}
+                <span style="font-size:11px;color:#94a3b8;font-style:italic;">none</span>
+              {% endif %}
+            </div>
+          </td>
+          <td>
+            <button type="button" class="admin-card-btn"
+                    onclick="openGroupsModal('{{ u.email }}')"
+                    style="display:flex;flex-wrap:wrap;gap:3px;padding:4px 6px;text-align:left;background:transparent;border:1px dashed transparent;cursor:pointer;width:100%;"
+                    onmouseover="this.style.borderColor='var(--border)'"
+                    onmouseout="this.style.borderColor='transparent'">
+              {% for gid in u.group_ids %}
+                {% set g = groups | selectattr('id','equalto',gid) | first %}
+                {% if g %}
+                <span style="font-size:11px;background:#ede9fe;color:#5b21b6;padding:2px 6px;border-radius:8px;">{{ g.name }}</span>
+                {% endif %}
+              {% endfor %}
+              {% if not u.group_ids %}
+                <span style="font-size:11px;color:#94a3b8;font-style:italic;">add groups…</span>
+              {% endif %}
+            </button>
+          </td>
+          <td style="font-size:11px;">
+            {% if u.zd_user_id %}
+              <strong>{{ u.zd_user_name or '(unknown)' }}</strong>
+              <div style="color:#64748b;font-family:monospace;font-size:10px;">#{{ u.zd_user_id }}</div>
+              <button type="button"
+                      onclick="openZdMapModal('{{ u.email }}', {{ u.zd_user_id }})"
+                      style="font-size:10px;background:transparent;border:none;color:var(--accent);cursor:pointer;padding:0;text-decoration:underline;">change</button>
+            {% else %}
+              <span style="color:#be123c;font-style:italic;">unmapped</span>
+              <button type="button"
+                      onclick="openZdMapModal('{{ u.email }}', null)"
+                      style="font-size:10px;background:transparent;border:none;color:var(--accent);cursor:pointer;padding:0;text-decoration:underline;margin-top:2px;display:block;">map now</button>
+            {% endif %}
+          </td>
+          <td style="font-size:11px;color:#64748b;">
+            {% if u.last_login_at %}{{ u.last_login_at | ist }}{% else %}<em>never</em>{% endif %}
+          </td>
+          <td>
+            <span style="font-size:11px;padding:2px 7px;border-radius:10px;
+                         background:{% if u.status == 'active' %}#dcfce7;color:#166534{% else %}#fee2e2;color:#991b1b{% endif %};">
+              {{ u.status }}
+            </span>
+          </td>
+          <td style="white-space:nowrap;text-align:right;">
+            <button type="button" class="admin-card-btn" onclick="openRolesModal('{{ u.email }}')" title="Edit roles">⚙</button>
+            {% if u.email != user.email %}
+            <button type="button" class="admin-card-btn"
+                    onclick="toggleStatus('{{ u.email }}', '{{ 'disabled' if u.status == 'active' else 'active' }}')"
+                    style="{% if u.status == 'active' %}color:#be123c;border-color:#fecdd3;background:#fff1f2;{% endif %}"
+                    title="{{ 'Disable' if u.status == 'active' else 'Enable' }}">
+              {{ '⊘' if u.status == 'active' else '✓' }}
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    {% if not users %}
+    <div style="padding:30px;text-align:center;color:var(--muted);font-size:13px;">
+      No users yet. Invite someone above, or have them sign in with Google.
+    </div>
+    {% endif %}
+  </div>
+
+  <div style="margin-top:14px;font-size:11px;color:var(--muted);">
+    <strong>Tip:</strong> Permissions for each role are managed under
+    <a href="/admin/roles" style="color:var(--accent);">/admin/roles</a> →
+    pick a role → toggle checkboxes. Changes take effect on the user's next
+    request (no re-login needed).
+  </div>
+</main>
+
+<!-- Edit roles modal -->
+<div id="roles-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;">
+    <h2 style="margin:0 0 4px 0;font-size:18px;" id="rm-title">Edit roles</h2>
+    <div id="rm-email" style="font-size:12px;color:var(--muted);margin-bottom:14px;"></div>
+    <div id="rm-roles" style="display:flex;flex-direction:column;gap:8px;"></div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px;">
+      <button type="button" class="admin-card-btn" onclick="closeRolesModal()">Cancel</button>
+      <button type="button" class="admin-card-btn"
+              onclick="saveRoles()"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">
+        Save
+      </button>
+    </div>
+    <div id="rm-status" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- Edit groups modal -->
+<div id="groups-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;">
+    <h2 style="margin:0 0 4px 0;font-size:18px;" id="gm-title">Edit groups</h2>
+    <div id="gm-email" style="font-size:12px;color:var(--muted);margin-bottom:14px;"></div>
+    <input type="text" id="gm-search" placeholder="Filter groups…" oninput="filterGroups(this.value)"
+           style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;">
+    <div id="gm-groups" style="display:flex;flex-direction:column;gap:6px;"></div>
+    <div style="margin-top:18px;display:flex;justify-content:flex-end;gap:8px;">
+      <button type="button" class="admin-card-btn" onclick="closeGroupsModal()">Cancel</button>
+      <button type="button" class="admin-card-btn" onclick="saveGroups()"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Save</button>
+    </div>
+    <div id="gm-status" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+</div>
+
+<!-- ZD-user-mapping modal -->
+<div id="zd-map-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:24px;max-width:500px;width:90%;max-height:80vh;overflow-y:auto;">
+    <h2 style="margin:0 0 4px 0;font-size:18px;">Map to Zendesk user</h2>
+    <div id="zm-email" style="font-size:12px;color:var(--muted);margin-bottom:14px;"></div>
+    <div style="font-size:12px;color:#64748b;margin-bottom:12px;">
+      When this app user logs in, "Assigned to me" and other ZD-assignee features
+      will use this Zendesk user's ID. Auto-matched by email on first login —
+      override here if the match was wrong.
+    </div>
+    <input type="text" id="zm-search" placeholder="Type to filter agents…" oninput="filterZdAgents(this.value)"
+           style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-bottom:8px;">
+    <div id="zm-agents" style="max-height:300px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;border:1px solid var(--border);border-radius:8px;padding:4px;"></div>
+    <div style="margin-top:18px;display:flex;justify-content:space-between;gap:8px;">
+      <button type="button" class="admin-card-btn" onclick="clearZdMap()"
+              style="color:#be123c;border-color:#fecdd3;background:#fff1f2;">Clear mapping</button>
+      <div style="display:flex;gap:8px;">
+        <button type="button" class="admin-card-btn" onclick="closeZdMapModal()">Cancel</button>
+      </div>
+    </div>
+    <div id="zm-status" style="font-size:12px;color:var(--muted);margin-top:8px;"></div>
+  </div>
+</div>
+
+<script>
+const ALL_ROLES = {{ roles | tojson }};
+const ALL_GROUPS = {{ groups | tojson }};
+const ALL_ZD_AGENTS = {{ zd_agents | tojson }};
+const USERS_BY_EMAIL = Object.fromEntries({{ users | tojson }}.map(u => [u.email, u]));
+let currentEditEmail = null;
+
+async function inviteUser(e) {
+  e.preventDefault();
+  const form = e.target;
+  const status = document.getElementById('invite-status');
+  status.textContent = 'Inviting…';
+  status.style.color = '';
+  const fd = new FormData();
+  fd.append('email', form.email.value.trim().toLowerCase());
+  fd.append('name', form.name.value.trim());
+  const roleIds = Array.from(form.querySelectorAll('.inv-role:checked')).map(i => i.value);
+  fd.append('role_ids', roleIds.join(','));
+  const r = await fetch('/api/admin/users', { method: 'POST', body: fd });
+  if (r.ok) {
+    status.textContent = '✓ Invited. Reloading…';
+    status.style.color = '#047857';
+    setTimeout(() => location.reload(), 600);
+  } else {
+    const err = await r.text();
+    status.textContent = '✗ ' + err;
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+
+function openRolesModal(email) {
+  currentEditEmail = email;
+  const u = USERS_BY_EMAIL[email];
+  document.getElementById('rm-title').textContent = 'Edit roles for ' + (u.name || email.split('@')[0]);
+  document.getElementById('rm-email').textContent = email;
+  const list = document.getElementById('rm-roles');
+  const currentIds = new Set(u.roles.map(r => r.id));
+  list.innerHTML = ALL_ROLES.map(r => `
+    <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+      <input type="checkbox" class="rm-role" value="${r.id}" ${currentIds.has(r.id) ? 'checked' : ''} style="margin-top:2px;">
+      <div>
+        <div style="font-weight:600;">${r.name}${r.is_system_default ? ' <span style="font-size:10px;color:#94a3b8;font-weight:400;">(built-in)</span>' : ''}</div>
+        <div style="font-size:11px;color:var(--muted);">${r.description || ''}</div>
+      </div>
+    </label>
+  `).join('');
+  document.getElementById('rm-status').textContent = '';
+  document.getElementById('roles-modal').style.display = 'flex';
+}
+
+function closeRolesModal() {
+  document.getElementById('roles-modal').style.display = 'none';
+  currentEditEmail = null;
+}
+
+async function saveRoles() {
+  const status = document.getElementById('rm-status');
+  status.textContent = 'Saving…';
+  status.style.color = '';
+  const roleIds = Array.from(document.querySelectorAll('.rm-role:checked')).map(i => i.value);
+  const fd = new FormData();
+  fd.append('role_ids', roleIds.join(','));
+  const r = await fetch('/api/admin/users/' + encodeURIComponent(currentEditEmail) + '/roles',
+                       { method: 'POST', body: fd });
+  if (r.ok) {
+    status.textContent = '✓ Saved. Reloading…';
+    status.style.color = '#047857';
+    setTimeout(() => location.reload(), 500);
+  } else {
+    const body = await r.json().catch(() => ({}));
+    const errs = body.errors || [await r.text()];
+    status.textContent = '✗ ' + errs.join('; ');
+    status.style.color = '#be123c';
+  }
+}
+
+async function toggleStatus(email, newStatus) {
+  const verb = newStatus === 'disabled' ? 'Disable' : 'Enable';
+  if (!confirm(`${verb} ${email}?`)) return;
+  const fd = new FormData();
+  fd.append('status', newStatus);
+  const r = await fetch('/api/admin/users/' + encodeURIComponent(email) + '/status',
+                       { method: 'POST', body: fd });
+  if (r.ok) {
+    location.reload();
+  } else {
+    const body = await r.json().catch(() => ({}));
+    alert('Failed: ' + (body.detail || await r.text()));
+  }
+}
+
+// --- Groups modal ---
+function openGroupsModal(email) {
+  currentEditEmail = email;
+  const u = USERS_BY_EMAIL[email];
+  document.getElementById('gm-title').textContent = 'Edit groups for ' + (u.name || email.split('@')[0]);
+  document.getElementById('gm-email').textContent = email;
+  document.getElementById('gm-search').value = '';
+  document.getElementById('gm-status').textContent = '';
+  renderGroupsModal('');
+  document.getElementById('groups-modal').style.display = 'flex';
+}
+
+function renderGroupsModal(filterText) {
+  const u = USERS_BY_EMAIL[currentEditEmail];
+  const currentIds = new Set(u.group_ids || []);
+  const filter = (filterText || '').trim().toLowerCase();
+  const items = ALL_GROUPS
+    .filter(g => !filter || g.name.toLowerCase().includes(filter))
+    .map(g => `
+      <label style="display:flex;align-items:center;gap:8px;padding:8px;border:1px solid var(--border);border-radius:8px;cursor:pointer;">
+        <input type="checkbox" class="gm-grp" value="${g.id}" ${currentIds.has(g.id) ? 'checked' : ''}>
+        <div style="flex:1;">
+          <strong style="font-size:12px;">${g.name}</strong>
+          ${g.is_native ? '<span style="font-size:9px;background:#ecfdf5;color:#065f46;padding:1px 5px;border-radius:6px;margin-left:6px;">native</span>' : '<span style="font-size:9px;background:#eff6ff;color:#1e40af;padding:1px 5px;border-radius:6px;margin-left:6px;">ZD</span>'}
+          ${g.description ? `<div style="font-size:11px;color:#64748b;">${g.description}</div>` : ''}
+        </div>
+        <span style="font-size:10px;color:#94a3b8;">${g.member_count} members</span>
+      </label>
+    `).join('');
+  document.getElementById('gm-groups').innerHTML = items || '<div style="padding:14px;color:#94a3b8;font-style:italic;text-align:center;">No groups match.</div>';
+}
+
+function filterGroups(text) { renderGroupsModal(text); }
+
+function closeGroupsModal() {
+  document.getElementById('groups-modal').style.display = 'none';
+  currentEditEmail = null;
+}
+
+async function saveGroups() {
+  const status = document.getElementById('gm-status');
+  status.textContent = 'Saving…';
+  status.style.color = '';
+  const gids = Array.from(document.querySelectorAll('.gm-grp:checked')).map(i => i.value);
+  const fd = new FormData();
+  fd.append('group_ids', gids.join(','));
+  const r = await fetch('/api/admin/users/' + encodeURIComponent(currentEditEmail) + '/groups', { method: 'POST', body: fd });
+  if (r.ok) {
+    status.textContent = '✓ Saved. Reloading…';
+    status.style.color = '#047857';
+    setTimeout(() => location.reload(), 400);
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = '✗ ' + (body.detail || 'failed');
+    status.style.color = '#be123c';
+  }
+}
+
+// --- ZD-user-mapping modal ---
+let zdMapEmail = null;
+let zdMapCurrentId = null;
+
+function openZdMapModal(email, currentId) {
+  zdMapEmail = email;
+  zdMapCurrentId = currentId;
+  document.getElementById('zm-email').textContent = email;
+  document.getElementById('zm-search').value = '';
+  document.getElementById('zm-status').textContent = '';
+  renderZdAgents('');
+  document.getElementById('zd-map-modal').style.display = 'flex';
+}
+
+function renderZdAgents(filterText) {
+  const filter = (filterText || '').trim().toLowerCase();
+  const items = ALL_ZD_AGENTS
+    .filter(a => !filter || (a.name || '').toLowerCase().includes(filter) || (a.email || '').toLowerCase().includes(filter))
+    .slice(0, 50)
+    .map(a => `
+      <button type="button" onclick="pickZdAgent(${a.id})"
+              style="display:flex;flex-direction:column;align-items:flex-start;padding:8px;border:1px solid ${zdMapCurrentId === a.id ? 'var(--accent)' : 'var(--border)'};background:${zdMapCurrentId === a.id ? '#eef2ff' : '#fff'};border-radius:8px;cursor:pointer;text-align:left;">
+        <strong style="font-size:12px;">${a.name || '(no name)'}</strong>
+        <span style="font-size:11px;color:#64748b;">${a.email || ''}</span>
+        <span style="font-size:10px;color:#94a3b8;font-family:monospace;">#${a.id}</span>
+      </button>
+    `).join('');
+  document.getElementById('zm-agents').innerHTML = items || '<div style="padding:14px;color:#94a3b8;font-style:italic;text-align:center;">No matches.</div>';
+}
+
+function filterZdAgents(text) { renderZdAgents(text); }
+
+async function pickZdAgent(zdId) {
+  const status = document.getElementById('zm-status');
+  status.textContent = 'Saving…';
+  const fd = new FormData(); fd.append('zd_user_id', zdId);
+  const r = await fetch('/api/admin/users/' + encodeURIComponent(zdMapEmail) + '/zd-user', { method: 'POST', body: fd });
+  if (r.ok) {
+    status.textContent = '✓ Saved. Reloading…';
+    status.style.color = '#047857';
+    setTimeout(() => location.reload(), 400);
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = '✗ ' + (body.detail || 'failed');
+    status.style.color = '#be123c';
+  }
+}
+
+async function clearZdMap() {
+  if (!confirm('Clear ZD user mapping for ' + zdMapEmail + '?')) return;
+  const fd = new FormData(); fd.append('zd_user_id', '');
+  const r = await fetch('/api/admin/users/' + encodeURIComponent(zdMapEmail) + '/zd-user', { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+}
+
+function closeZdMapModal() {
+  document.getElementById('zd-map-modal').style.display = 'none';
+  zdMapEmail = null; zdMapCurrentId = null;
+}
+
+// Click outside modal to close
+document.getElementById('roles-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'roles-modal') closeRolesModal();
+});
+document.getElementById('groups-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'groups-modal') closeGroupsModal();
+});
+document.getElementById('zd-map-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'zd-map-modal') closeZdMapModal();
+});
+</script>
+{% endblock %}

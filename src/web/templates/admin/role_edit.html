@@ -1,0 +1,166 @@
+{% extends "_base.html" %}
+{% block title %}{% if is_new %}New role{% else %}{{ role.name }}{% endif %} · Roles{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin/roles" class="back-link">← Back to Roles</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">F0</div>
+    <h1 class="admin-detail-title">
+      {% if is_new %}New role{% else %}{{ role.name }}
+        {% if role.is_system_default %}<span style="font-size:13px;color:#92400e;background:#fef3c7;padding:2px 7px;border-radius:8px;font-weight:500;vertical-align:middle;">built-in</span>{% endif %}
+      {% endif %}
+    </h1>
+    <div class="admin-detail-summary">
+      {% if is_new %}
+        Pick a name, description, and the permissions this role grants.
+      {% else %}
+        Toggle permissions below to change what this role can do. Renaming a
+        built-in role is allowed but its built-in flag stays — it can't be
+        deleted, and seed will not re-fill its permissions.
+      {% endif %}
+    </div>
+  </div>
+
+  <form id="role-form" onsubmit="return saveRole(event)">
+
+    <!-- Identity card -->
+    <div class="admin-card admin-card-done" style="margin-top:18px;">
+      <div class="admin-card-title">Identity</div>
+      <div style="display:grid;grid-template-columns:1fr 2fr;gap:12px;margin-top:10px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Name</span>
+          <input name="name" required value="{{ role.name }}"
+                 placeholder="e.g. KB Editor"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Description (shown in /admin/users role picker)</span>
+          <input name="description" value="{{ role.description or '' }}"
+                 placeholder="What this role is for"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+      </div>
+    </div>
+
+    <!-- Permission matrix -->
+    <div class="admin-card admin-card-done" style="margin-top:18px;">
+      <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;">
+        Permissions
+        <span id="perm-count" style="font-size:12px;color:var(--muted);font-weight:400;">
+          0 of {% set total = namespace(n=0) %}{% for g in groups %}{% set total.n = total.n + permissions_by_group[g]|length %}{% endfor %}{{ total.n }} selected
+        </span>
+        <div style="margin-left:auto;display:flex;gap:6px;">
+          <button type="button" class="admin-card-btn" onclick="selectAll(true)">All</button>
+          <button type="button" class="admin-card-btn" onclick="selectAll(false)">None</button>
+        </div>
+      </div>
+
+      {% set role_perms = role.permissions or [] %}
+      {% for group in groups %}
+      <div style="margin-top:18px;border-top:1px solid var(--border);padding-top:14px;">
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+          <h3 style="margin:0;font-size:14px;">{{ group }}</h3>
+          <button type="button" class="admin-card-btn"
+                  onclick="selectGroup('{{ group }}', true)"
+                  style="font-size:10px;padding:2px 6px;">Select all in group</button>
+          <button type="button" class="admin-card-btn"
+                  onclick="selectGroup('{{ group }}', false)"
+                  style="font-size:10px;padding:2px 6px;">Clear group</button>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:8px;">
+          {% for perm in permissions_by_group[group] %}
+          <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid {% if perm.destructive %}#fee2e2{% else %}var(--border){% endif %};border-radius:8px;cursor:pointer;background:{% if perm.destructive %}#fef9f9{% else %}#fff{% endif %};">
+            <input type="checkbox" class="perm-cb" data-group="{{ group }}"
+                   value="{{ perm.key }}"
+                   {% if perm.key in role_perms %}checked{% endif %}
+                   style="margin-top:2px;">
+            <div style="flex:1;min-width:0;">
+              <div style="font-weight:600;font-size:12px;">
+                {{ perm.label }}
+                {% if perm.destructive %}<span style="font-size:9px;color:#be123c;background:#fee2e2;padding:1px 4px;border-radius:4px;margin-left:4px;vertical-align:middle;">write</span>{% endif %}
+              </div>
+              <div style="font-size:11px;color:#64748b;line-height:1.4;">{{ perm.description }}</div>
+              <code style="font-size:10px;color:#94a3b8;">{{ perm.key }}</code>
+            </div>
+          </label>
+          {% endfor %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    <!-- Users with this role (info only) -->
+    {% if not is_new and role.users %}
+    <div class="admin-card admin-card-done" style="margin-top:18px;">
+      <div class="admin-card-title">{{ role.users|length }} user{{ '' if role.users|length == 1 else 's' }} with this role</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;">
+        {% for u in role.users %}
+        <span style="font-size:11px;background:#f1f5f9;padding:3px 8px;border-radius:10px;{% if u.status == 'disabled' %}opacity:0.55;{% endif %}">
+          {{ u.email }}{% if u.status == 'disabled' %} (disabled){% endif %}
+        </span>
+        {% endfor %}
+      </div>
+    </div>
+    {% endif %}
+
+    <!-- Sticky save bar -->
+    <div style="margin-top:24px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+      <span id="save-status" style="font-size:12px;color:var(--muted);"></span>
+      <a href="/admin/roles" class="admin-card-btn">Cancel</a>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">
+        {% if is_new %}Create role{% else %}Save changes{% endif %}
+      </button>
+    </div>
+  </form>
+</main>
+
+<script>
+const IS_NEW = {{ 'true' if is_new else 'false' }};
+const ROLE_ID = {{ role.id or 'null' }};
+
+function updateCount() {
+  const n = document.querySelectorAll('.perm-cb:checked').length;
+  const total = document.querySelectorAll('.perm-cb').length;
+  document.getElementById('perm-count').textContent = `${n} of ${total} selected`;
+}
+
+function selectAll(state) {
+  document.querySelectorAll('.perm-cb').forEach(cb => cb.checked = state);
+  updateCount();
+}
+
+function selectGroup(group, state) {
+  document.querySelectorAll(`.perm-cb[data-group="${group}"]`).forEach(cb => cb.checked = state);
+  updateCount();
+}
+
+document.querySelectorAll('.perm-cb').forEach(cb => cb.addEventListener('change', updateCount));
+updateCount();
+
+async function saveRole(e) {
+  e.preventDefault();
+  const status = document.getElementById('save-status');
+  status.textContent = 'Saving…';
+  status.style.color = '';
+  const form = e.target;
+  const fd = new FormData();
+  fd.append('name', form.name.value.trim());
+  fd.append('description', form.description.value.trim());
+  const keys = Array.from(document.querySelectorAll('.perm-cb:checked')).map(cb => cb.value);
+  fd.append('permission_keys', keys.join(','));
+  const url = IS_NEW ? '/api/admin/roles' : '/api/admin/roles/' + ROLE_ID;
+  const r = await fetch(url, { method: 'POST', body: fd });
+  if (r.ok) {
+    status.textContent = '✓ Saved.';
+    status.style.color = '#047857';
+    setTimeout(() => location.href = '/admin/roles', 400);
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = '✗ ' + (body.detail || await r.text());
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+</script>
+{% endblock %}

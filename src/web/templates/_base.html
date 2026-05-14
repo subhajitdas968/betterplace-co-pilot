@@ -1,0 +1,542 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>{% block title %}BetterPlace · Co-Pilot{% endblock %}</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}">
+</head>
+<body class="{% if in_detail %}body-detail{% else %}body-list{% endif %}">
+
+<div class="topbar">
+  <div class="brand">
+    <a href="/" style="text-decoration:none;display:flex;gap:12px;align-items:center;color:inherit;">
+      <div class="brand-mark">B</div>
+      <div class="brand-text">
+        <div class="name">BetterPlace · Co-Pilot</div>
+        <div class="sub">Last sync {{ last_sync }} · Haiku 4.5</div>
+      </div>
+    </a>
+    <span class="live-pill" style="margin-left:12px;"><span class="live-dot"></span> Synced live</span>
+  </div>
+  {# F7 · Universal search — navigates to /search in the SAME tab.
+     Each ticket result row opens in a new tab so the search results stay
+     visible while you triage. Matches ticket id, BP-ID, subject, tags,
+     requester, customer, Jira, custom fields. #}
+  <form class="search-wrap" method="get" action="/search">
+    <svg width="14" height="14" style="position:absolute;left:12px;top:50%;transform:translateY(-50%);color:#94a3b8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input name="q" placeholder="Search tickets · ID, BP-#, subject, requester, customer…" value="{% if current_view == '_search' %}{{ search or '' }}{% endif %}" />
+  </form>
+  {# F6 · Notification bell — polls /api/notifications/list every 30s. #}
+  <div id="notif-wrap" style="position:relative;margin-right:6px;">
+    <button type="button" onclick="toggleNotifMenu(event)"
+            style="position:relative;background:rgba(255,255,255,0.65);border:1px solid #e2e8f0;border-radius:50%;width:34px;height:34px;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#475569" stroke-width="2">
+        <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/>
+        <path d="M13.73 21a2 2 0 0 1-3.46 0"/>
+      </svg>
+      <span id="notif-badge" style="display:none;position:absolute;top:-3px;right:-3px;background:#ef4444;color:#fff;font-size:9px;font-weight:700;padding:1px 5px;border-radius:9px;line-height:1.2;min-width:14px;text-align:center;">0</span>
+    </button>
+    <div id="notif-menu" style="display:none;position:absolute;top:42px;right:0;width:360px;max-height:480px;overflow-y:auto;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.15);z-index:9000;">
+      <div style="padding:10px 14px;background:linear-gradient(135deg,#f8fafc,#eef2ff);border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;">
+        <strong style="font-size:13px;">Notifications</strong>
+        <button type="button" onclick="dismissAllNotifs()" style="font-size:10px;background:transparent;border:none;color:var(--accent);cursor:pointer;text-decoration:underline;">Mark all read</button>
+      </div>
+      <div id="notif-list" style="padding:6px;">
+        <div style="font-size:11px;color:#94a3b8;text-align:center;padding:18px;">Loading…</div>
+      </div>
+    </div>
+  </div>
+
+  {# F5 · Profile chip — replaces the old cost pill. Click → dropdown
+     menu with quick status changer + link to full /profile page. #}
+  {% set _avail = (user.availability if user.availability in ['online','away','busy','offline'] else 'offline') %}
+  <div class="user-pill" id="user-pill" onclick="toggleProfileMenu(event)" style="cursor:pointer;position:relative;">
+    <div class="avatar" style="position:relative;">
+      {% if user.picture_url %}
+        <img src="{{ user.picture_url }}" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover;">
+      {% else %}
+        {{ user.name[0]|upper if user.name else '?' }}
+      {% endif %}
+      {# Color-coded availability dot anchored to the avatar #}
+      <span class="avail-dot avail-{{ _avail }}" title="{{ _avail }}"
+            style="position:absolute;bottom:-1px;right:-1px;width:11px;height:11px;border-radius:50%;border:2px solid #fff;"></span>
+    </div>
+    <div style="min-width:0;">
+      <div class="name" style="display:flex;align-items:center;gap:5px;">
+        {{ user.name }}
+      </div>
+      <div class="role" style="display:flex;align-items:center;gap:4px;">
+        {% if user.availability_emoji or user.availability_label %}
+          {% if user.availability_emoji %}<span>{{ user.availability_emoji }}</span>{% endif %}
+          <span>{{ user.availability_label or _avail|capitalize }}</span>
+        {% else %}
+          <span class="avail-text avail-{{ _avail }}-text">{{ _avail|capitalize }}</span>
+        {% endif %}
+      </div>
+    </div>
+    <svg width="10" height="10" viewBox="0 0 12 12" style="color:#94a3b8;flex-shrink:0;"><path d="M3 4.5l3 3 3-3" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>
+  </div>
+
+  <!-- Profile dropdown menu -->
+  <div id="profile-menu" style="display:none;position:absolute;top:64px;right:18px;width:320px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.15);z-index:9000;overflow:hidden;">
+    <div style="padding:14px 16px;background:linear-gradient(135deg,#f8fafc,#eef2ff);border-bottom:1px solid #e2e8f0;">
+      <div style="font-weight:700;font-size:13px;">{{ user.name }}</div>
+      <div style="font-size:11px;color:#64748b;">{{ user.email }}</div>
+      {% if user.roles %}
+      <div style="display:flex;flex-wrap:wrap;gap:3px;margin-top:6px;">
+        {% for r in user.roles %}<span style="font-size:10px;background:#fff;border:1px solid #e2e8f0;padding:1px 6px;border-radius:8px;color:#475569;">{{ r }}</span>{% endfor %}
+      </div>
+      {% endif %}
+    </div>
+    <div style="padding:8px 12px;">
+      <div style="font-size:10px;text-transform:uppercase;color:#94a3b8;letter-spacing:0.08em;padding:6px 4px;">Set availability</div>
+      {% for av, lbl in [('online','Online'),('away','Away'),('busy','Busy'),('offline','Offline')] %}
+      <button type="button" onclick="setAvailability('{{ av }}', '', '')"
+              class="avail-row" data-av="{{ av }}"
+              style="display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;background:{% if _avail == av %}#eef2ff{% else %}transparent{% endif %};border:none;border-radius:6px;cursor:pointer;font-size:12px;text-align:left;color:#1e293b;">
+        <span class="avail-dot avail-{{ av }}" style="width:10px;height:10px;border-radius:50%;flex-shrink:0;"></span>
+        <span style="flex:1;">{{ lbl }}</span>
+        {% if _avail == av %}<span style="color:var(--accent);font-size:14px;">✓</span>{% endif %}
+      </button>
+      {% endfor %}
+      <div style="border-top:1px solid #e2e8f0;margin-top:6px;padding-top:6px;">
+        <button type="button" onclick="openCustomStatusForm()"
+                style="display:flex;align-items:center;gap:8px;width:100%;padding:7px 10px;background:transparent;border:none;border-radius:6px;cursor:pointer;font-size:12px;text-align:left;color:#1e293b;">
+          <span style="font-size:14px;">✏</span><span>Set custom status…</span>
+        </button>
+        <div id="custom-status-form" style="display:none;padding:8px 10px;background:#f8fafc;border-radius:6px;margin-top:4px;">
+          <div style="display:flex;gap:4px;margin-bottom:6px;">
+            <input id="cs-emoji" maxlength="2" placeholder="🍵"
+                   style="width:36px;padding:5px;border:1px solid var(--border);border-radius:6px;text-align:center;font-size:14px;">
+            <input id="cs-label" maxlength="60" placeholder="What's your status?"
+                   style="flex:1;padding:5px 8px;border:1px solid var(--border);border-radius:6px;font-size:11px;">
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:6px;font-size:10px;">
+            <span style="color:#64748b;">Maps to:</span>
+            <select id="cs-bucket" style="padding:3px;border:1px solid var(--border);border-radius:6px;font-size:11px;">
+              <option value="online" selected>Online (green)</option>
+              <option value="away">Away (amber)</option>
+              <option value="busy">Busy (red)</option>
+              <option value="offline">Offline (gray)</option>
+            </select>
+          </div>
+          <button type="button" onclick="saveCustomStatus()"
+                  style="width:100%;padding:5px;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;border-radius:6px;cursor:pointer;font-size:11px;">Set status</button>
+          {% if user.availability_emoji or user.availability_label %}
+          <button type="button" onclick="clearCustomStatus()"
+                  style="width:100%;padding:5px;margin-top:4px;background:transparent;color:#be123c;border:1px solid #fecdd3;border-radius:6px;cursor:pointer;font-size:11px;">Clear custom status</button>
+          {% endif %}
+        </div>
+      </div>
+    </div>
+    <div style="border-top:1px solid #e2e8f0;padding:6px 8px;">
+      <a href="/profile" style="display:block;padding:7px 10px;font-size:12px;color:#1e293b;text-decoration:none;border-radius:6px;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">⚙ Edit profile</a>
+      {% if user.is_admin %}
+      <a href="/admin" style="display:block;padding:7px 10px;font-size:12px;color:#1e293b;text-decoration:none;border-radius:6px;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🛠 Admin panel</a>
+      {% endif %}
+      <form method="post" action="/auth/logout" style="margin:0;">
+        <button type="submit" style="display:block;width:100%;text-align:left;padding:7px 10px;font-size:12px;color:#be123c;background:transparent;border:none;cursor:pointer;border-radius:6px;" onmouseover="this.style.background='#fff1f2'" onmouseout="this.style.background='transparent'">⏻ Sign out</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<style>
+.avail-online   { background: #10b981; }
+.avail-away     { background: #f59e0b; }
+.avail-busy     { background: #ef4444; }
+.avail-offline  { background: #94a3b8; }
+.avail-online-text   { color: #047857; }
+.avail-away-text     { color: #b45309; }
+.avail-busy-text     { color: #b91c1c; }
+.avail-offline-text  { color: #64748b; }
+</style>
+
+<script>
+function toggleProfileMenu(e) {
+  e.stopPropagation();
+  const m = document.getElementById('profile-menu');
+  m.style.display = (m.style.display === 'none' || !m.style.display) ? 'block' : 'none';
+}
+document.addEventListener('click', (e) => {
+  const m = document.getElementById('profile-menu');
+  if (!m) return;
+  if (!m.contains(e.target) && !e.target.closest('#user-pill')) {
+    m.style.display = 'none';
+  }
+});
+
+async function setAvailability(av, emoji, label) {
+  const fd = new FormData();
+  fd.append('availability', av);
+  fd.append('emoji', emoji || '');
+  fd.append('label', label || '');
+  const r = await fetch('/api/profile/availability', { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+  else alert('Failed to update status');
+}
+
+function openCustomStatusForm() {
+  const f = document.getElementById('custom-status-form');
+  f.style.display = f.style.display === 'none' ? 'block' : 'none';
+}
+
+async function saveCustomStatus() {
+  const emoji = document.getElementById('cs-emoji').value;
+  const label = document.getElementById('cs-label').value.trim();
+  const bucket = document.getElementById('cs-bucket').value;
+  if (!label && !emoji) { alert('Add an emoji or a label (or both)'); return; }
+  await setAvailability(bucket, emoji, label);
+}
+
+async function clearCustomStatus() {
+  await setAvailability('{{ _avail }}', '', '');
+}
+
+// ===== F6 · Notification bell =====
+function toggleNotifMenu(e) {
+  e.stopPropagation();
+  const m = document.getElementById('notif-menu');
+  m.style.display = (m.style.display === 'none' || !m.style.display) ? 'block' : 'none';
+  if (m.style.display === 'block') refreshNotifs();
+}
+document.addEventListener('click', (e) => {
+  const m = document.getElementById('notif-menu');
+  if (m && !m.contains(e.target) && !e.target.closest('#notif-wrap')) {
+    m.style.display = 'none';
+  }
+});
+
+async function refreshNotifs() {
+  try {
+    const r = await fetch('/api/notifications/list', { cache: 'no-store' });
+    if (!r.ok) return;
+    const out = await r.json();
+    const badge = document.getElementById('notif-badge');
+    if (out.unread > 0) {
+      badge.style.display = 'inline-block';
+      badge.textContent = out.unread > 99 ? '99+' : out.unread;
+    } else {
+      badge.style.display = 'none';
+    }
+    renderNotifs(out.notifications || []);
+  } catch (e) { /* swallow */ }
+}
+
+function renderNotifs(list) {
+  const wrap = document.getElementById('notif-list');
+  if (!list.length) {
+    wrap.innerHTML = '<div style="font-size:11px;color:#94a3b8;text-align:center;padding:18px;">All caught up.</div>';
+    return;
+  }
+  const kindColor = { info: '#3b82f6', warning: '#f59e0b', error: '#ef4444', prompt: '#8b5cf6', success: '#10b981' };
+  wrap.innerHTML = list.map(n => `
+    <div style="padding:10px 12px;border-bottom:1px solid #f1f5f9;display:flex;align-items:flex-start;gap:8px;">
+      <span style="width:6px;height:6px;border-radius:50%;background:${kindColor[n.kind] || '#94a3b8'};flex-shrink:0;margin-top:6px;"></span>
+      <div style="flex:1;min-width:0;">
+        <div style="font-weight:600;font-size:12px;color:#1e293b;">${escapeHtmlSafe(n.title)}</div>
+        ${n.body ? `<div style="font-size:11px;color:#64748b;margin-top:2px;line-height:1.4;">${escapeHtmlSafe(n.body)}</div>` : ''}
+        <div style="display:flex;gap:8px;margin-top:6px;font-size:10px;">
+          ${n.action_url ? `<a href="${escapeHtmlSafe(n.action_url)}" style="color:var(--accent);text-decoration:none;">${escapeHtmlSafe(n.action_label || 'Open')}</a>` : ''}
+          <button type="button" onclick="dismissNotif(${n.id})" style="background:transparent;border:none;color:#94a3b8;cursor:pointer;font-size:10px;text-decoration:underline;padding:0;">dismiss</button>
+        </div>
+      </div>
+    </div>
+  `).join('');
+}
+
+function escapeHtmlSafe(s) {
+  return String(s || '').replace(/[&<>"']/g, m => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[m]));
+}
+
+async function dismissNotif(id) {
+  await fetch('/api/notifications/' + id + '/dismiss', { method: 'POST' });
+  refreshNotifs();
+}
+
+async function dismissAllNotifs() {
+  await fetch('/api/notifications/dismiss-all', { method: 'POST' });
+  refreshNotifs();
+}
+
+// Poll every 30s + on page load
+refreshNotifs();
+setInterval(refreshNotifs, 30000);
+</script>
+
+<div class="layout {% if in_detail %}layout-detail{% else %}layout-list{% endif %}">
+
+  <!-- LEFT: Views sidebar -->
+  <aside class="nav">
+    <div class="nav-hero">
+      <h4>Views</h4>
+      <div style="font-size:10.5px;color:rgba(255,255,255,0.7);">click to load tickets</div>
+      <a href="/tickets/new" class="nav-create-link {% if current_view == '_new' %}active{% endif %}">
+        ✚ Create ticket
+      </a>
+      <a href="/leadership" class="nav-leadership-link {% if current_view == '_leadership' %}active{% endif %}">
+        📊 Leadership dashboard
+      </a>
+      {% if user.is_admin %}
+      <a href="/admin" class="nav-admin-link {% if current_view == '_admin' %}active{% endif %}">
+        ⚙ Admin &amp; setup
+      </a>
+      {% endif %}
+    </div>
+    <div class="nav-scroll">
+      {# F0+ · Native views: system / personal / shared, each with its own section #}
+      {% if system_views %}
+      <div class="nav-section">
+        {% for v in system_views %}
+        <a href="/views/{{ v.key }}" class="view-row {% if current_view == v.key %}active{% endif %}">
+          <span class="view-stripe stripe-{{ v.color }}"></span>
+          <span class="view-label">{{ v.label }}</span>
+          <span class="view-count {% if v.color in ('rose','amber') %}bad{% endif %}">{{ v.count }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if personal_views %}
+      <div class="nav-section">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.6);padding:6px 12px 2px;">My views</div>
+        {% for v in personal_views %}
+        <a href="/views/{{ v.key }}" class="view-row {% if current_view == v.key %}active{% endif %}">
+          <span class="view-stripe stripe-{{ v.color }}"></span>
+          <span class="view-label">{{ v.label }}</span>
+          <span class="view-count">{{ v.count }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {% if shared_views %}
+      <div class="nav-section">
+        <div style="font-size:10px;text-transform:uppercase;letter-spacing:0.06em;color:rgba(255,255,255,0.6);padding:6px 12px 2px;">Shared with me</div>
+        {% for v in shared_views %}
+        <a href="/views/{{ v.key }}" class="view-row {% if current_view == v.key %}active{% endif %}">
+          <span class="view-stripe stripe-{{ v.color }}"></span>
+          <span class="view-label">{{ v.label }}</span>
+          <span class="view-count">{{ v.count }}</span>
+        </a>
+        {% endfor %}
+      </div>
+      {% endif %}
+
+      {# New view button — gated by views.create_personal #}
+      {% if has_perm(user, 'views.create_personal') %}
+      <div style="padding:8px 12px;">
+        <a href="/view-builder/new" style="display:flex;align-items:center;gap:6px;padding:6px 10px;font-size:11px;color:rgba(255,255,255,0.85);background:rgba(255,255,255,0.08);border:1px dashed rgba(255,255,255,0.3);border-radius:8px;text-decoration:none;justify-content:center;">
+          + New view
+        </a>
+      </div>
+      {% endif %}
+
+      {# Legacy 10 static views — tucked into a collapsed "More views" section #}
+      {% if legacy_view_defs %}
+      <details class="nav-section" style="border-top:1px solid rgba(255,255,255,0.08);margin-top:4px;">
+        <summary style="cursor:pointer;list-style:none;padding:8px 12px;font-size:11px;color:rgba(255,255,255,0.7);text-transform:uppercase;letter-spacing:0.06em;display:flex;align-items:center;gap:6px;">
+          <span style="font-size:9px;">▸</span> More views
+        </summary>
+        {% for v in legacy_view_defs %}
+        <a href="/views/{{ v.key }}" class="view-row {% if current_view == v.key %}active{% endif %}">
+          <span class="view-stripe stripe-{{ v.color }}"></span>
+          <span class="view-label">{{ v.label }}</span>
+          <span class="view-count {% if v.color in ('rose','amber') %}bad{% endif %}">{{ v.count }}</span>
+        </a>
+        {% endfor %}
+      </details>
+      {% endif %}
+
+      {% if customer_buckets %}
+      <div class="nav-section nav-section-customers">
+        <div class="cust-buckets-header">
+          <span class="stripe stripe-emerald"></span>
+          <span>By customer · top {{ customer_buckets|length }}</span>
+        </div>
+        {% for cu in customer_buckets %}
+        <details class="cust-bucket" {% if loop.first %}open{% endif %}>
+          <summary class="cust-bucket-head">
+            <span class="cust-bucket-chev">▸</span>
+            <span class="cust-bucket-name">{{ cu.label }}</span>
+            <span class="cust-bucket-total">{{ cu.subs.open + cu.subs.eng + cu.subs.pending + cu.subs.unassigned }}</span>
+          </summary>
+          <div class="cust-bucket-body">
+            <a href="/views/cust_{{ cu.value }}:open" class="view-row sub {% if current_view == 'cust_' ~ cu.value ~ ':open' %}active{% endif %}">
+              <span class="view-stripe stripe-indigo"></span>
+              <span class="view-label">Open with support</span>
+              <span class="view-count">{{ cu.subs.open }}</span>
+            </a>
+            <a href="/views/cust_{{ cu.value }}:eng" class="view-row sub {% if current_view == 'cust_' ~ cu.value ~ ':eng' %}active{% endif %}">
+              <span class="view-stripe stripe-violet"></span>
+              <span class="view-label">With engineering</span>
+              <span class="view-count">{{ cu.subs.eng }}</span>
+            </a>
+            <a href="/views/cust_{{ cu.value }}:pending" class="view-row sub {% if current_view == 'cust_' ~ cu.value ~ ':pending' %}active{% endif %}">
+              <span class="view-stripe stripe-amber"></span>
+              <span class="view-label">Awaiting customer</span>
+              <span class="view-count">{{ cu.subs.pending }}</span>
+            </a>
+            <a href="/views/cust_{{ cu.value }}:unassigned" class="view-row sub {% if current_view == 'cust_' ~ cu.value ~ ':unassigned' %}active{% endif %}">
+              <span class="view-stripe stripe-rose"></span>
+              <span class="view-label">Open &amp; unassigned</span>
+              <span class="view-count {% if cu.subs.unassigned > 0 %}bad{% endif %}">{{ cu.subs.unassigned }}</span>
+            </a>
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+  </aside>
+
+  {% block main %}{% endblock %}
+
+</div>
+
+{# F4 · Welcome banner for new View-only users (engineers).
+   Shows on first session for users whose ONLY role is View-only and who
+   haven't dismissed it. localStorage key keeps it from re-appearing on
+   subsequent page loads in the same browser. #}
+{% if user and user.roles and user.roles == ['View-only'] %}
+<div id="engineer-welcome-banner" style="display:none;position:fixed;bottom:20px;right:20px;max-width:380px;background:linear-gradient(135deg,#1e1b4b,#312e81);color:#fff;padding:18px 22px;border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.35);z-index:9000;font-size:13px;line-height:1.55;">
+  <div style="display:flex;align-items:start;gap:10px;">
+    <div style="font-size:24px;line-height:1;">👋</div>
+    <div style="flex:1;">
+      <div style="font-weight:700;font-size:14px;margin-bottom:4px;">Welcome to BetterPlace Co-Pilot</div>
+      <div style="opacity:0.85;">
+        You have <strong>read-only access</strong> to all tickets. Browse the views
+        in the sidebar to explore AI insights, similar tickets, and historical context.
+        You can't reply or edit fields — that's intentional for the soft launch.
+      </div>
+      <div style="margin-top:8px;font-size:11px;opacity:0.7;">
+        Need to make changes? Ask <code style="background:rgba(255,255,255,0.12);padding:1px 4px;border-radius:3px;">subhajit.das@betterplace.co.in</code> to grant you the Agent role.
+      </div>
+    </div>
+    <button type="button" onclick="dismissWelcome()"
+            style="background:rgba(255,255,255,0.15);border:none;color:#fff;font-size:16px;line-height:1;width:24px;height:24px;border-radius:6px;cursor:pointer;flex-shrink:0;">×</button>
+  </div>
+</div>
+<script>
+(function() {
+  // localStorage doesn't work in some sandboxed environments, so we wrap.
+  let dismissed = false;
+  try { dismissed = !!localStorage.getItem('engineerWelcomeDismissed_v1'); } catch (e) {}
+  if (!dismissed) {
+    document.getElementById('engineer-welcome-banner').style.display = 'block';
+  }
+  window.dismissWelcome = function() {
+    document.getElementById('engineer-welcome-banner').style.display = 'none';
+    try { localStorage.setItem('engineerWelcomeDismissed_v1', '1'); } catch (e) {}
+  };
+})();
+</script>
+{% endif %}
+
+{# F9 · Version footer chip — pinned bottom-LEFT so it doesn't overlap the
+   feedback FAB. Always-visible reminder of which build is live. #}
+{% set _rt = runtime_info() %}
+<div style="position:fixed;bottom:8px;left:8px;z-index:8400;font-size:10px;color:rgba(100,116,139,.7);background:rgba(255,255,255,0.6);padding:3px 8px;border-radius:8px;font-family:'JetBrains Mono',monospace;backdrop-filter:blur(4px);">
+  {% if user and has_perm(user, 'admin.feature_flags') %}
+  <a href="/admin/releases" style="color:inherit;text-decoration:none;">
+    v{{ _rt.version }}{% if _rt.git_sha %} · {{ _rt.git_sha }}{% endif %}{% if not _rt.git_clean %} · <span style="color:#dc2626;">DIRTY</span>{% endif %}
+  </a>
+  {% else %}
+  v{{ _rt.version }}
+  {% endif %}
+</div>
+
+<script src="/static/placeholder-autocomplete.js?v={{ asset_v }}"></script>
+
+{# F8 · Feedback widget — floating button bottom-right on every page.
+   Click → popover with kind/severity/textarea. Submits to /api/feedback. #}
+{% if user and user.email %}
+<button type="button" id="fb-fab" onclick="toggleFb(event)" title="Send feedback"
+        style="position:fixed;bottom:20px;right:20px;width:48px;height:48px;border-radius:50%;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;box-shadow:0 6px 20px rgba(79,70,229,.4);cursor:pointer;font-size:20px;line-height:1;z-index:8500;">
+  💬
+</button>
+
+<div id="fb-panel" style="display:none;position:fixed;bottom:80px;right:20px;width:340px;background:#fff;border:1px solid #e2e8f0;border-radius:14px;box-shadow:0 16px 40px rgba(15,23,42,.2);z-index:8500;overflow:hidden;">
+  <div style="padding:14px 16px;background:linear-gradient(135deg,#f8fafc,#eef2ff);border-bottom:1px solid #e2e8f0;display:flex;align-items:center;justify-content:space-between;">
+    <strong style="font-size:13px;">Send feedback</strong>
+    <button type="button" onclick="toggleFb()" style="background:transparent;border:none;font-size:16px;cursor:pointer;color:#64748b;">×</button>
+  </div>
+  <div style="padding:14px 16px;">
+    <div style="display:flex;gap:6px;margin-bottom:8px;">
+      {% for k, lbl in [('bug','🐛 Bug'),('idea','💡 Idea'),('question','❓ Question'),('praise','✨ Praise')] %}
+      <label style="flex:1;text-align:center;font-size:11px;padding:5px 4px;border:1px solid var(--border);border-radius:6px;cursor:pointer;">
+        <input type="radio" name="fb-kind" value="{{ k }}" {% if k == 'bug' %}checked{% endif %} style="display:none;" onchange="updateFbKind(this)">
+        {{ lbl }}
+      </label>
+      {% endfor %}
+    </div>
+    <label style="font-size:11px;color:var(--muted);display:block;">Severity
+      <select id="fb-severity" style="display:block;width:100%;padding:5px;border:1px solid var(--border);border-radius:6px;margin-top:3px;font-size:11px;">
+        <option value="normal" selected>Normal</option>
+        <option value="low">Low</option>
+        <option value="high">High</option>
+        <option value="urgent">Urgent</option>
+      </select>
+    </label>
+    <textarea id="fb-body" rows="4" placeholder="What happened? What did you expect?"
+              style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;margin-top:8px;font-size:12px;font-family:inherit;resize:vertical;box-sizing:border-box;"></textarea>
+    <div style="margin-top:8px;font-size:10px;color:#94a3b8;">
+      We'll auto-attach: this page URL · your browser · ticket id if you're on one.
+    </div>
+    <div style="display:flex;gap:6px;justify-content:flex-end;margin-top:10px;align-items:center;">
+      <span id="fb-status" style="font-size:11px;color:var(--muted);flex:1;"></span>
+      <button type="button" onclick="sendFb()" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:6px 14px;">Send</button>
+    </div>
+  </div>
+</div>
+
+<script>
+function toggleFb(e) {
+  if (e) e.stopPropagation();
+  const p = document.getElementById('fb-panel');
+  p.style.display = (p.style.display === 'none' || !p.style.display) ? 'block' : 'none';
+}
+function updateFbKind(input) {
+  document.querySelectorAll('input[name=fb-kind]').forEach(r => {
+    r.parentElement.style.borderColor = r.checked ? 'var(--accent)' : 'var(--border)';
+    r.parentElement.style.background = r.checked ? '#eef2ff' : '#fff';
+  });
+}
+// Initial highlight
+document.querySelectorAll('input[name=fb-kind]').forEach(r => updateFbKind(r));
+async function sendFb() {
+  const body = document.getElementById('fb-body').value.trim();
+  const status = document.getElementById('fb-status');
+  if (!body) { status.textContent = 'Please add some text'; status.style.color = '#be123c'; return; }
+  status.textContent = 'Sending…'; status.style.color = '';
+  const fd = new FormData();
+  fd.append('body', body);
+  fd.append('kind', document.querySelector('input[name=fb-kind]:checked').value);
+  fd.append('severity', document.getElementById('fb-severity').value);
+  fd.append('page_url', location.pathname + location.search);
+  // Auto-attach ticket id if URL is /tickets/<id-or-BP>
+  const m = location.pathname.match(/^\/tickets\/([^/?#]+)/);
+  if (m) fd.append('ticket_id', m[1].replace(/^BP-/, '').replace(/\D/g, ''));
+  try {
+    const r = await fetch('/api/feedback', { method: 'POST', body: fd });
+    if (!r.ok) {
+      const b = await r.json().catch(() => ({}));
+      throw new Error(b.detail || 'failed');
+    }
+    status.textContent = '✓ Thanks! Sent to admin.'; status.style.color = '#047857';
+    document.getElementById('fb-body').value = '';
+    setTimeout(toggleFb, 1200);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message; status.style.color = '#be123c';
+  }
+}
+</script>
+{% endif %}
+
+</body>
+</html>

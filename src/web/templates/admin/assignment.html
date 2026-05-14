@@ -1,0 +1,57 @@
+{% extends "_base.html" %}
+{% block title %}Round-robin assignment · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Round-robin assignment</h1>
+    <div class="admin-detail-summary">
+      Auto-pick the next agent for an unassigned ticket. Defaults to <strong>least-loaded
+      online agent</strong> in the matching group, tie-breaking by oldest last-assigned time.
+      Max-load cap from the agents page is respected.
+    </div>
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Test pick</div>
+    <div class="admin-card-summary">Dry-run the algorithm for a group to see which agent it would assign right now.</div>
+    <form onsubmit="return testPick(event)" style="display:flex;gap:8px;align-items:end;margin-top:8px;">
+      <label style="font-size:12px;flex:1;"><span style="color:var(--muted);">Group</span>
+        <select name="group_id" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+          {% for g in groups %}<option value="{{ g.id }}">{{ g.name }}</option>{% endfor %}
+        </select></label>
+      <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Pick →</button>
+    </form>
+    <div id="pick-result" style="margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:12px;"></div>
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Eligibility by group</div>
+    <table class="admin-table" style="margin-top:8px;">
+      <thead><tr><th>Group</th><th>Eligible agents</th><th>Currently online</th></tr></thead>
+      <tbody>
+        {% for e in eligibility %}
+        <tr>
+          <td><strong>{{ e.group.name }}</strong></td>
+          <td>{{ e.agents|length }}</td>
+          <td>{{ e.agents|selectattr('availability','equalto','online')|list|length }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</main>
+<script>
+async function testPick(ev) {
+  ev.preventDefault();
+  const fd = new FormData(ev.target);
+  const r = await fetch('/api/admin/assignment/test', { method: 'POST', body: fd });
+  const out = await r.json();
+  const el = document.getElementById('pick-result');
+  if (out.picked) el.innerHTML = `→ Would assign to <strong>${out.picked.name}</strong> &lt;${out.picked.email}&gt;`;
+  else el.innerHTML = `→ ${out.reason}`;
+  return false;
+}
+</script>
+{% endblock %}

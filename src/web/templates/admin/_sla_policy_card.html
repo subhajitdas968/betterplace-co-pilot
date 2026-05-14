@@ -1,0 +1,98 @@
+{# Reusable card — included both in #policies and inside <template>.
+   When inside the <template> tag, p has placeholder values (id=0) so the form
+   creates a new row on submit. #}
+<div class="admin-card admin-card-done policy-card" data-id="{{ p.id }}">
+  <form onsubmit="return savePolicy(event, {{ p.id }})">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <input name="name" required value="{{ p.name }}" placeholder="Policy name"
+             style="font-size:15px;font-weight:700;padding:4px 8px;border:1px solid transparent;border-radius:6px;flex:1;background:transparent;">
+      <div style="display:flex;gap:8px;align-items:center;">
+        <label style="font-size:11.5px;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" name="active" {% if p.active %}checked{% endif %}> active
+        </label>
+        {% if p.id %}
+        <button type="button" class="admin-card-btn" onclick="deletePolicy({{ p.id }})"
+                style="color:#be123c;border-color:#fecdd3;background:#fff1f2;">Delete</button>
+        {% endif %}
+      </div>
+    </div>
+
+    <input name="description" value="{{ p.description }}"
+           placeholder="What this policy covers — internal description"
+           style="font-size:12px;color:var(--muted);padding:6px 8px;border:1px solid transparent;border-radius:6px;width:100%;margin-top:2px;background:transparent;">
+
+    <!-- Applies to -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;">
+        <legend style="font-size:11px;color:var(--muted);">Priority</legend>
+        {% for pr in ['low','normal','high','urgent'] %}
+        <label style="font-size:12px;display:block;">
+          <input type="checkbox" name="prio" value="{{ pr }}"
+            {% if p.applies_to.get('priority') and pr in p.applies_to['priority'] %}checked{% endif %}>
+          {{ pr }}
+        </label>
+        {% endfor %}
+      </fieldset>
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;max-height:140px;overflow:auto;">
+        <legend style="font-size:11px;color:var(--muted);">Group</legend>
+        {% for g in groups %}
+        <label style="font-size:12px;display:block;">
+          <input type="checkbox" name="grp" value="{{ g.id }}"
+            {% if p.applies_to.get('group_ids') and g.id in p.applies_to['group_ids'] %}checked{% endif %}>
+          {{ g.name }}
+        </label>
+        {% endfor %}
+      </fieldset>
+      <fieldset style="border:1px solid var(--border);border-radius:8px;padding:8px 10px;max-height:140px;overflow:auto;">
+        <legend style="font-size:11px;color:var(--muted);">Customer</legend>
+        {% for c in customers %}
+        <label style="font-size:12px;display:block;">
+          <input type="checkbox" name="cust" value="{{ c.value }}"
+            {% if p.applies_to.get('customer_values') and c.value in p.applies_to['customer_values'] %}checked{% endif %}>
+          {{ c.name }}
+        </label>
+        {% endfor %}
+      </fieldset>
+    </div>
+
+    <!-- Targets -->
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;margin-top:10px;">
+      <label style="font-size:12px;"><span style="color:var(--muted);">First reply (min)</span>
+        <input type="number" name="t_first_reply" value="{{ p.targets.get('first_reply', {}).get('minutes', '') }}"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;"><span style="color:var(--muted);">Next reply (min)</span>
+        <input type="number" name="t_next_reply" value="{{ p.targets.get('next_reply', {}).get('minutes', '') }}"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;"><span style="color:var(--muted);">Resolution (min)</span>
+        <input type="number" name="t_resolution" value="{{ p.targets.get('resolution', {}).get('minutes', '') }}"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+    </div>
+
+    <!-- Clock + business hours + order -->
+    <div style="display:grid;grid-template-columns:1fr 2fr 1fr;gap:12px;margin-top:10px;">
+      <label style="font-size:12px;"><span style="color:var(--muted);">Clock</span>
+        <select name="clock_type" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+          <option value="business" {% if p.clock_type == 'business' %}selected{% endif %}>Business hours</option>
+          <option value="calendar" {% if p.clock_type == 'calendar' %}selected{% endif %}>Calendar (24×7)</option>
+        </select></label>
+      <label style="font-size:12px;"><span style="color:var(--muted);">Business-hours schedule</span>
+        <select name="business_hours_id" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+          <option value="">— use default —</option>
+          {% for b in business_hours %}
+          <option value="{{ b.id }}" {% if p.business_hours_id == b.id %}selected{% endif %}>{{ b.name }}{% if b.is_default %} ★{% endif %}</option>
+          {% endfor %}
+        </select></label>
+      <label style="font-size:12px;"><span style="color:var(--muted);">Order</span>
+        <input type="number" name="position" value="{{ p.position }}"
+               title="Lower wins on a tie"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+    </div>
+
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+      <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">
+        {% if p.id %}Save{% else %}Create policy{% endif %}
+      </button>
+      <span class="save-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </form>
+</div>

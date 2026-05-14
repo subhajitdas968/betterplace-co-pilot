@@ -1,0 +1,84 @@
+{% extends "_base.html" %}
+{% block title %}Roles &amp; permissions · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block or 'F0' }}</div>
+    <h1 class="admin-detail-title">Roles &amp; permissions</h1>
+    <div class="admin-detail-summary">
+      Built-in roles cover most teams. Create custom roles for tighter scoping
+      (e.g. "KB Editor" with <code>kb.*</code> only). Each role holds a flat
+      set of permission keys; users can hold multiple roles and get the
+      <strong>union</strong> of their roles' permissions.
+    </div>
+  </div>
+
+  <!-- Roles table -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;padding:0;">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th style="width:24%;">Role</th>
+          <th>Description</th>
+          <th style="width:10%;text-align:center;">Users</th>
+          <th style="width:10%;text-align:center;">Permissions</th>
+          <th style="width:16%;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for r in roles %}
+        <tr>
+          <td>
+            <strong>{{ r.name }}</strong>
+            {% if r.is_system_default %}
+              <div style="font-size:10px;color:#92400e;background:#fef3c7;padding:1px 5px;border-radius:6px;display:inline-block;margin-top:2px;">built-in</div>
+            {% endif %}
+          </td>
+          <td style="font-size:12px;color:#475569;">{{ r.description or '' }}</td>
+          <td style="text-align:center;font-family:'JetBrains Mono',monospace;">{{ r.user_count }}</td>
+          <td style="text-align:center;font-family:'JetBrains Mono',monospace;">{{ r.perm_count }}</td>
+          <td style="text-align:right;white-space:nowrap;">
+            <a class="admin-card-btn" href="/admin/roles/{{ r.id }}">Edit →</a>
+            {% if not r.is_system_default %}
+            <button type="button" class="admin-card-btn"
+                    onclick="deleteRole({{ r.id }}, '{{ r.name|e }}')"
+                    style="margin-left:4px;color:#be123c;border-color:#fecdd3;background:#fff1f2;">
+              Delete
+            </button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:14px;">
+    <a href="/admin/roles/new" class="admin-card-btn"
+       style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 16px;display:inline-block;">
+      + New role
+    </a>
+  </div>
+
+  <div style="margin-top:18px;font-size:11px;color:var(--muted);">
+    <strong>Bootstrap protection:</strong> the system refuses to delete the
+    last role holding <code>admin.users</code> or <code>admin.roles</code>.
+    You can always recover by re-running <code>db.seed_access_control()</code>
+    which reinstates the built-in Admin role.
+  </div>
+</main>
+
+<script>
+async function deleteRole(rid, name) {
+  if (!confirm(`Delete role "${name}"?\n\nUsers currently holding this role will lose it. This cannot be undone.`)) return;
+  const r = await fetch('/api/admin/roles/' + rid + '/delete', { method: 'POST' });
+  if (r.ok) {
+    location.reload();
+  } else {
+    const body = await r.json().catch(() => ({}));
+    alert('Failed: ' + (body.detail || 'unknown error'));
+  }
+}
+</script>
+{% endblock %}

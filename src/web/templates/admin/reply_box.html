@@ -1,0 +1,94 @@
+{% extends "_base.html" %}
+{% block title %}Reply box · Admin{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <span class="admin-status admin-status-done">● Live</span>
+  </div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Reply box &amp; Internal notes</h1>
+    <div class="admin-detail-summary">
+      Markdown toolbar (B / I / code / lists / links), file attachments
+      (up to {{ max_upload_mb }} MB each), {{ languages|length }} translate languages, distinct
+      yellow theme for internal notes. All replies are saved as <em>native comments</em>
+      under the ticket — never sent to Zendesk.
+    </div>
+  </div>
+
+  <div class="admin-kpis">
+    <div class="admin-kpi">
+      <div class="akpi-num">{{ '{:,}'.format(public_count) }}</div>
+      <div class="akpi-lbl">Public replies (native)</div>
+    </div>
+    <div class="admin-kpi">
+      <div class="akpi-num">{{ '{:,}'.format(internal_count) }}</div>
+      <div class="akpi-lbl">Internal notes (native)</div>
+    </div>
+    <div class="admin-kpi">
+      <div class="akpi-num">{{ '{:,}'.format(native_attachments.n) }}</div>
+      <div class="akpi-lbl">Files uploaded · {{ (native_attachments.b/1024/1024)|round(1) }} MB</div>
+    </div>
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Translation languages</div>
+    <div class="admin-card-summary">
+      Translate-draft uses Claude (same Sonnet/Haiku as the AI worker). Source
+      language is auto-detected. Technical terms, product names, and ticket IDs
+      are preserved verbatim.
+    </div>
+    <div style="margin-top:10px;display:flex;flex-wrap:wrap;gap:6px;">
+      {% for l in languages %}
+      <span class="admin-block" style="font-size:11px;background:var(--indigo-soft);color:var(--indigo);">
+        {{ l.code }} · {{ l.name }}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Upload limit</div>
+    <div class="admin-card-summary">
+      Maximum file size per upload is <strong>{{ max_upload_mb }} MB</strong>.
+      To change, edit <code>MAX_UPLOAD_BYTES</code> in <code>src/web/app.py</code>.
+      Files are stored under <code>data/attachments/native/&lt;ticket_id&gt;/</code>.
+    </div>
+  </div>
+
+  {% if recent_replies %}
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Last 20 native replies</div>
+    <table class="admin-table" style="margin-top:8px;">
+      <thead><tr>
+        <th>Comment ID</th><th>Ticket</th><th>Mode</th><th>Format</th><th>Created</th>
+      </tr></thead>
+      <tbody>
+        {% for r in recent_replies %}
+        <tr>
+          <td><code>{{ r.id }}</code></td>
+          <td><a href="/tickets/{{ r.ticket_id }}">#{{ r.ticket_id }}</a></td>
+          <td>{% if r.public %}<span class="admin-status admin-status-done">● public</span>{% else %}<span class="admin-status admin-status-partial">◐ internal</span>{% endif %}</td>
+          <td><code>{{ r.body_format or 'plain' }}</code></td>
+          <td>{{ r.created_at|ist }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="admin-stub-banner admin-stub-pending" style="margin-top:18px;">
+    <div class="ass-icon">○</div>
+    <div>
+      <strong>No native replies yet.</strong> Open any ticket and try the reply box —
+      attachment chip, language translate, internal-note toggle, Markdown toolbar.
+    </div>
+  </div>
+  {% endif %}
+
+</main>
+{% endblock %}

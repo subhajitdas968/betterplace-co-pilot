@@ -1,0 +1,20 @@
+# --- Phase 0 + Phase 1 deps ---
+requests>=2.31
+python-dotenv>=1.0
+anthropic>=0.40
+fastapi>=0.115
+uvicorn[standard]>=0.30
+jinja2>=3.1
+authlib>=1.3
+itsdangerous>=2.2
+httpx>=0.27
+tenacity>=8.5
+pydantic>=2.8
+python-multipart>=0.0.10
+
+# --- MCP server (Block #8: Claude Desktop integration) ---
+mcp>=1.0
+
+# --- Phase 2+ (uncomment as we get there) ---
+# atlassian-python-api>=3.41
+# slack-sdk>=3.30

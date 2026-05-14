@@ -1,0 +1,409 @@
+{% extends "_base.html" %}
+{% block title %}AI worker · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">AI worker — Claude insights</h1>
+    <div class="admin-detail-summary">
+      Start / stop the worker that pulls unanalyzed tickets and saves Claude's
+      insights to the ticket-detail page. Choose model. Toggle whether to use
+      Claude Desktop / MCP (no API spend, uses the Team OAuth subscription) or
+      the metered API.
+    </div>
+  </div>
+
+  <!-- Status header -->
+  <div class="admin-kpis" style="margin-top:8px;">
+    <div class="admin-kpi">
+      <div class="akpi-num" style="color:{% if cfg.is_running %}#047857{% else %}#94a3b8{% endif %};">
+        {% if cfg.is_running %}● RUNNING (pid {{ cfg.process_pid }}){% else %}○ STOPPED{% endif %}
+      </div>
+      <div class="akpi-lbl">Worker state</div>
+    </div>
+    <div class="admin-kpi" id="kpi-heartbeat">
+      <div class="akpi-num" id="hb-num" style="font-size:18px;color:#94a3b8;">…</div>
+      <div class="akpi-lbl" id="hb-lbl">Heartbeat</div>
+    </div>
+    <div class="admin-kpi" id="kpi-last-insight">
+      <div class="akpi-num" id="li-num" style="font-size:18px;color:#94a3b8;">…</div>
+      <div class="akpi-lbl">Last insight saved</div>
+    </div>
+    <div class="admin-kpi"><div class="akpi-num">{{ '{:,}'.format(stats.last_24h_count) }}</div><div class="akpi-lbl">Insights · last 24h</div></div>
+    <div class="admin-kpi"><div class="akpi-num">${{ '%.4f'|format(stats.last_24h_cost) }}</div><div class="akpi-lbl">Cost · last 24h</div></div>
+    <div class="admin-kpi"><div class="akpi-num">{{ '{:,}'.format(stats.unanalyzed) }}</div><div class="akpi-lbl">Unanalyzed open tickets</div></div>
+  </div>
+
+  <!-- Control panel -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Run controls</div>
+    <div style="margin-top:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;">
+      <button id="btn-start" type="button" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#10b981,#14b8a6);color:#fff;border:none;padding:8px 16px;font-size:13px;"
+              onclick="startWorker()" {% if cfg.is_running %}disabled{% endif %}>
+        ▶ Start fetching insights
+      </button>
+      <button id="btn-stop" type="button" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#f43f5e,#be123c);color:#fff;border:none;padding:8px 16px;font-size:13px;"
+              onclick="stopWorker()" {% if not cfg.is_running %}disabled{% endif %}>
+        ■ Stop worker
+      </button>
+      <span id="ctrl-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px;">
+      Last started: <code>{{ cfg.last_started_at or '—' }}</code> ·
+      Last stopped: <code>{{ cfg.last_stopped_at or '—' }}</code> ·
+      Tail the log: <code>tail -f data/ai_worker.log</code>
+    </div>
+  </div>
+
+  <!-- Bulk re-analyze — separate subprocess from the live worker -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">↻ Bulk re-analyze worker (separate process)</div>
+    <div class="admin-card-summary">
+      Runs as its <strong>own subprocess</strong>, distinct from the live
+      "Start fetching insights" worker above. Use this to upgrade existing
+      ticket insights to the history-aware version. Stop the live worker
+      first (your backfill will catch up to newer tickets naturally as it
+      processes the queue). Heartbeat below shows live progress.
+    </div>
+    <form onsubmit="return startBulk(event)" style="margin-top:10px;display:flex;gap:10px;align-items:end;flex-wrap:wrap;">
+      <label style="font-size:12px;">Scope
+        <select name="scope" style="display:block;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;min-width:280px;">
+          <option value="legacy_only">Legacy insights + missing (recommended)</option>
+          <option value="no_insight">Tickets with NO insight at all</option>
+          <option value="open">Open tickets only (new/open/pending/hold)</option>
+          <option value="all">Every ticket (use with care · 56K+)</option>
+        </select></label>
+      <label style="font-size:12px;">Limit (0 = no cap)
+        <input name="limit" type="number" value="0" min="0" step="100"
+               style="display:block;width:120px;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;">Throttle (s)
+        <input name="throttle" type="number" value="2.0" min="0" max="60" step="0.5"
+               title="Sleep between tickets — higher = nicer to the rest of the app"
+               style="display:block;width:100px;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <button id="bulk-start-btn" type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#10b981,#14b8a6);color:#fff;border:none;padding:8px 16px;">
+        ▶ Start bulk re-analyze
+      </button>
+      <button id="bulk-stop-btn" type="button" class="admin-card-btn"
+              onclick="stopBulk()"
+              style="background:linear-gradient(135deg,#f43f5e,#be123c);color:#fff;border:none;padding:8px 16px;display:none;">
+        ■ Stop
+      </button>
+      <span id="bulk-status" style="font-size:12px;color:var(--muted);"></span>
+    </form>
+
+    <!-- Live progress (mirrors the attachments backfill pattern) -->
+    <div id="bulk-progress-wrap" style="display:none;margin-top:14px;">
+      <div style="display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-bottom:4px;">
+        <span id="bulk-prog-label">Booting…</span>
+        <span id="bulk-prog-counts" style="font-family:'JetBrains Mono',monospace;"></span>
+      </div>
+      <div style="height:10px;background:#e2e8f0;border-radius:6px;overflow:hidden;">
+        <div id="bulk-prog-bar" style="height:100%;width:0%;background:linear-gradient(90deg,#4f46e5,#7c3aed);transition:width .3s;"></div>
+      </div>
+      <div id="bulk-prog-meta" style="font-size:11px;color:var(--muted);margin-top:6px;font-family:'JetBrains Mono',monospace;"></div>
+    </div>
+  </div>
+
+  <!-- Configuration -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Configuration</div>
+    <form id="cfg-form" onsubmit="return saveCfg(event)" style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+      <label style="font-size:12px;display:flex;align-items:center;gap:8px;grid-column:1/3;">
+        <input type="checkbox" name="enabled" {% if cfg.enabled %}checked{% endif %}>
+        <strong>Enabled</strong> — when off, even a "Start" press is a no-op (safety latch)
+      </label>
+
+      <fieldset style="grid-column:1/3;border:1px solid var(--border);border-radius:8px;padding:10px 12px;">
+        <legend style="font-size:11px;color:var(--muted);padding:0 4px;">Model</legend>
+        {% for m in models %}
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:6px 4px;border-radius:6px;cursor:pointer;{% if cfg.model == m.value %}background:#eef2ff;{% endif %}">
+          <input type="radio" name="model" value="{{ m.value }}" {% if cfg.model == m.value %}checked{% endif %} style="margin-top:3px;">
+          <span>
+            <strong>{{ m.name }}</strong> <span style="color:var(--muted);font-size:11px;">({{ m.tier }})</span>
+            <div style="font-size:11.5px;color:var(--muted);">{{ m.note }}</div>
+          </span>
+        </label>
+        {% endfor %}
+      </fieldset>
+
+      <label style="font-size:12px;">Batch size (tickets per cycle)
+        <input name="batch_size" type="number" min="1" max="100" value="{{ cfg.batch_size }}"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;">Poll interval (seconds, min 15)
+        <input name="poll_interval_seconds" type="number" min="15" value="{{ cfg.poll_interval_seconds }}"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;">Daily ticket cap (0 = unlimited)
+        <input name="daily_ticket_cap" type="number" min="0" value="{{ cfg.daily_ticket_cap }}"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+      <label style="font-size:12px;display:flex;align-items:center;gap:8px;padding-top:18px;">
+        <input type="checkbox" name="use_mcp" {% if cfg.use_mcp %}checked{% endif %}>
+        Use Claude Desktop / MCP (no API spend — Team OAuth)
+      </label>
+
+      <div style="grid-column:1/3;display:flex;gap:8px;align-items:center;">
+        <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;">Save config</button>
+        <span id="cfg-status" style="font-size:12px;color:var(--muted);"></span>
+      </div>
+    </form>
+  </div>
+
+  <!-- Live log tail -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div style="display:flex;justify-content:space-between;align-items:center;">
+      <div class="admin-card-title">Live log <span style="font-weight:400;color:var(--muted);font-size:11px;">· auto-refreshes every 3s</span></div>
+      <div style="display:flex;gap:6px;align-items:center;">
+        <label style="font-size:11px;color:var(--muted);display:flex;align-items:center;gap:4px;">
+          <input type="checkbox" id="log-autoscroll" checked> autoscroll
+        </label>
+        <button type="button" class="admin-card-btn" onclick="refreshLog()" style="font-size:11px;padding:3px 8px;">Refresh now</button>
+      </div>
+    </div>
+    <pre id="log-view" style="margin-top:8px;background:#0f172a;color:#e2e8f0;padding:12px;border-radius:8px;height:340px;overflow:auto;font-family:'JetBrains Mono',monospace;font-size:11px;line-height:1.5;white-space:pre-wrap;word-break:break-all;">Loading log…</pre>
+  </div>
+
+  <!-- Spend breakdown by model (MTD) -->
+  {% if stats.by_model %}
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Spend breakdown · this month</div>
+    <table class="admin-table" style="margin-top:8px;">
+      <thead><tr><th>Model</th><th>Calls</th><th style="text-align:right;">Cost</th></tr></thead>
+      <tbody>
+        {% for r in stats.by_model %}
+        <tr><td><code>{{ r.model or '(unknown)' }}</code></td>
+            <td>{{ '{:,}'.format(r.n) }}</td>
+            <td style="text-align:right;font-family:'JetBrains Mono',monospace;">${{ '%.4f'|format(r.c) }}</td></tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</main>
+<script>
+async function saveCfg(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  for (const el of f.elements) {
+    if (!el.name) continue;
+    if (el.type === 'checkbox') fd.append(el.name, el.checked ? 1 : 0);
+    else if (el.type !== 'radio' || el.checked) fd.append(el.name, el.value);
+  }
+  const st = document.getElementById('cfg-status'); st.textContent = 'Saving…';
+  try {
+    const r = await fetch('/api/admin/ai-worker/config', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Saved'; st.style.color = '#047857';
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  return false;
+}
+async function startWorker() {
+  const st = document.getElementById('ctrl-status'); st.textContent = 'Starting…';
+  try {
+    const r = await fetch('/api/admin/ai-worker/start', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = out.already_running ? `Already running (pid ${out.pid})` : `▶ Started (pid ${out.pid})`;
+    st.style.color = '#047857';
+    setTimeout(() => location.reload(), 800);
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+}
+async function startBulk(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const scope = f.scope.value;
+  const limit = f.limit.value || 0;
+  const throttle = f.throttle.value || 2.0;
+  const friendly = {legacy_only: 'tickets with legacy/missing insights',
+                    no_insight: 'tickets with no insight at all',
+                    open: 'open tickets',
+                    all: 'EVERY ticket (this can be 56K+)'}[scope];
+  if (!confirm(`Start the bulk re-analyze worker against ${friendly}?\n\n` +
+               `Runs as a separate subprocess. Worker uses MCP / OAuth so no metered ` +
+               `cost — only Claude Team quota. You can stop it any time.`)) return false;
+  const st = document.getElementById('bulk-status');
+  st.textContent = '⏳ Spawning worker…'; st.style.color = '#475569';
+  try {
+    const fd = new FormData();
+    fd.append('scope', scope);
+    fd.append('limit', limit);
+    fd.append('throttle', throttle);
+    const r = await fetch('/api/admin/reanalyze/start-bulk', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = `▶ Started (pid ${out.pid}) · scope=${out.scope}`;
+    st.style.color = '#047857';
+    pollBulkProgress();
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  return false;
+}
+
+async function stopBulk() {
+  if (!confirm('Stop the bulk re-analyze worker?\n\nProgress so far is saved; you can ' +
+               'resume by clicking Start again — already-rich tickets will be skipped.')) return;
+  const st = document.getElementById('bulk-status');
+  st.textContent = '⏳ Stopping…';
+  try {
+    const r = await fetch('/api/admin/reanalyze/stop', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = out.was_running ? `■ Stopped (pid ${out.killed_pid})` : 'Not running.';
+    st.style.color = '#be123c';
+    setTimeout(pollBulkProgress, 600);
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+}
+
+let _bulkPollHandle = null;
+async function pollBulkProgress() {
+  try {
+    const r = await fetch('/api/admin/reanalyze/status', { cache: 'no-store' });
+    const out = await r.json();
+    renderBulkProgress(out);
+    const keepGoing = out.is_running ||
+                      (out.state === 'done' && (out.age_seconds || 0) < 30) ||
+                      (out.state === 'stopped' && (out.age_seconds || 0) < 30);
+    if (keepGoing) _bulkPollHandle = setTimeout(pollBulkProgress, 2000);
+    else _bulkPollHandle = null;
+  } catch (e) {
+    _bulkPollHandle = setTimeout(pollBulkProgress, 5000);
+  }
+}
+
+function renderBulkProgress(out) {
+  const wrap   = document.getElementById('bulk-progress-wrap');
+  const bar    = document.getElementById('bulk-prog-bar');
+  const label  = document.getElementById('bulk-prog-label');
+  const counts = document.getElementById('bulk-prog-counts');
+  const meta   = document.getElementById('bulk-prog-meta');
+  const startBtn = document.getElementById('bulk-start-btn');
+  const stopBtn  = document.getElementById('bulk-stop-btn');
+  if (!out.present) {
+    wrap.style.display = 'none';
+    startBtn.style.display = ''; stopBtn.style.display = 'none';
+    return;
+  }
+  wrap.style.display = 'block';
+  const done  = out.processed || 0;
+  const total = out.total || 0;
+  const pct   = total ? Math.min(100, Math.round((done / total) * 100)) : 0;
+  bar.style.width = pct + '%';
+  counts.textContent = `${done.toLocaleString()} / ${total.toLocaleString()} tickets · ${pct}%`;
+  const labels = {
+    booting:  '⏳ Booting…',
+    running:  '▶ Running — re-analyzing with history-aware prompt',
+    done:     '✓ Completed',
+    stopped:  '■ Stopped by user',
+    error:    '✗ Error: ' + (out.error || ''),
+  };
+  label.textContent = labels[out.state] || out.state;
+  // Format ETA helpers (mirror fmtAge but tuned for "remaining")
+  function fmtETA(s) {
+    if (s == null || s < 0) return null;
+    if (s < 60)    return `~${s}s remaining`;
+    if (s < 3600)  return `~${Math.floor(s/60)}m remaining`;
+    if (s < 86400) return `~${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m remaining`;
+    return `~${Math.floor(s/86400)}d ${Math.floor((s%86400)/3600)}h remaining`;
+  }
+  function fmtElapsed(s) {
+    if (s == null) return null;
+    if (s < 60)    return `${s}s elapsed`;
+    if (s < 3600)  return `${Math.floor(s/60)}m ${s%60}s elapsed`;
+    return `${Math.floor(s/3600)}h ${Math.floor((s%3600)/60)}m elapsed`;
+  }
+  meta.textContent = [
+    out.scope                     ? `scope: ${out.scope}` : null,
+    out.errors != null            ? `${out.errors} errors` : null,
+    out.current_ticket            ? `current ticket #${out.current_ticket}` : null,
+    out.avg_seconds_per_ticket    ? `~${out.avg_seconds_per_ticket}s/ticket` : null,
+    fmtETA(out.eta_seconds),
+    fmtElapsed(out.elapsed_seconds),
+    out.pid                       ? `pid ${out.pid}` : null,
+    out.age_seconds != null       ? `heartbeat ${out.age_seconds}s ago` : null,
+  ].filter(Boolean).join('  ·  ');
+  if (out.is_running) { startBtn.style.display = 'none'; stopBtn.style.display = ''; }
+  else { startBtn.style.display = ''; stopBtn.style.display = 'none'; }
+}
+
+// Initial poll — picks up state from a previous session if a run is mid-flight
+pollBulkProgress();
+
+// ----- Heartbeat -----
+function fmtAge(s) {
+  if (s == null) return '—';
+  if (s < 60)   return s + 's';
+  if (s < 3600) return Math.floor(s / 60) + 'm ' + (s % 60) + 's';
+  if (s < 86400) return Math.floor(s / 3600) + 'h ' + Math.floor((s % 3600) / 60) + 'm';
+  return Math.floor(s / 86400) + 'd';
+}
+
+async function refreshHeartbeat() {
+  try {
+    const r = await fetch('/api/admin/ai-worker/heartbeat', { cache: 'no-store' });
+    if (!r.ok) return;
+    const hb = await r.json();
+    const numEl = document.getElementById('hb-num');
+    const lblEl = document.getElementById('hb-lbl');
+    const liEl  = document.getElementById('li-num');
+    if (!hb.present) {
+      numEl.textContent = '— never —';
+      numEl.style.color = '#94a3b8';
+      lblEl.textContent = 'No heartbeat (worker not started)';
+    } else {
+      const age = hb.age_seconds;
+      // Stale = > 2× poll interval (180s default) or > 600s as a hard upper
+      const stale = age > 600;
+      numEl.textContent = fmtAge(age) + ' ago';
+      numEl.style.color = stale ? '#be123c' : (age > 90 ? '#b45309' : '#047857');
+      lblEl.textContent = `Heartbeat · state: ${hb.state || '?'}`;
+      if (hb.last_processed != null) {
+        lblEl.textContent += ` · last batch ${hb.last_processed} processed / ${hb.last_errors || 0} errors`;
+      }
+    }
+    if (hb.last_insight_age_seconds != null) {
+      liEl.textContent = fmtAge(hb.last_insight_age_seconds) + ' ago';
+      liEl.style.color = hb.last_insight_age_seconds < 300 ? '#047857' :
+                         hb.last_insight_age_seconds < 1800 ? '#b45309' : '#94a3b8';
+    } else if (hb.last_insight_at) {
+      liEl.textContent = '✓';
+    } else {
+      liEl.textContent = '—';
+    }
+  } catch (e) { /* swallow */ }
+}
+refreshHeartbeat();
+setInterval(refreshHeartbeat, 5000);
+
+// ----- Live log tail -----
+async function refreshLog() {
+  try {
+    const r = await fetch('/api/admin/ai-worker/log?lines=300', { cache: 'no-store' });
+    if (!r.ok) return;
+    const out = await r.json();
+    const el = document.getElementById('log-view');
+    const atBottom = (el.scrollHeight - el.scrollTop - el.clientHeight) < 20;
+    el.textContent = out.text || '(log empty)';
+    if (document.getElementById('log-autoscroll').checked && atBottom) {
+      el.scrollTop = el.scrollHeight;
+    }
+  } catch (e) { /* swallow — keep polling */ }
+}
+refreshLog();
+setInterval(refreshLog, 3000);
+
+async function stopWorker() {
+  if (!confirm('Stop the AI worker? In-flight Claude calls will be killed.')) return;
+  const st = document.getElementById('ctrl-status'); st.textContent = 'Stopping…';
+  try {
+    const r = await fetch('/api/admin/ai-worker/stop', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '■ Stopped'; st.style.color = '#047857';
+    setTimeout(() => location.reload(), 600);
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+}
+</script>
+{% endblock %}

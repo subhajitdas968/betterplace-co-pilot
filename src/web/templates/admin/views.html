@@ -1,0 +1,86 @@
+{% extends "_base.html" %}
+{% block title %}Saved views · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block or 'F0+' }}</div>
+    <h1 class="admin-detail-title">Saved views</h1>
+    <div class="admin-detail-summary">
+      Every view in the system — the 7 seeded defaults plus any custom views
+      users have created. Click into a view to edit; click <strong>+ New view</strong>
+      below to start from scratch.
+    </div>
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin-top:18px;padding:0;">
+    <table class="admin-table">
+      <thead>
+        <tr>
+          <th style="width:30%;">View</th>
+          <th style="width:12%;">Scope</th>
+          <th style="width:25%;">Owner</th>
+          <th style="width:8%;text-align:center;">Shares</th>
+          <th style="width:10%;">Status</th>
+          <th style="width:15%;"></th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for v in views %}
+        <tr style="{% if not v.active %}opacity:0.55;{% endif %}">
+          <td>
+            <strong>{{ v.icon or '' }} {{ v.name }}</strong>
+            {% if v.description %}<div style="font-size:11px;color:#64748b;">{{ v.description }}</div>{% endif %}
+            <div style="font-size:10px;color:#94a3b8;font-family:monospace;">#nv_{{ v.id }}</div>
+          </td>
+          <td>
+            <span style="font-size:11px;padding:2px 7px;border-radius:10px;
+                         background:{% if v.scope == 'system' %}#fef3c7;color:#92400e{% elif v.scope == 'shared' %}#dbeafe;color:#1e40af{% else %}#f1f5f9;color:#475569{% endif %};">
+              {{ v.scope }}
+            </span>
+          </td>
+          <td style="font-size:12px;color:#475569;">
+            {{ v.owner_email or '(system)' }}
+            {% if v.is_system_default %}<span style="font-size:10px;color:#92400e;background:#fef3c7;padding:1px 5px;border-radius:6px;margin-left:6px;">seeded</span>{% endif %}
+          </td>
+          <td style="text-align:center;font-family:monospace;">{{ v.share_count }}</td>
+          <td>
+            <span style="font-size:11px;padding:2px 7px;border-radius:10px;
+                         background:{% if v.active %}#dcfce7;color:#166534{% else %}#fee2e2;color:#991b1b{% endif %};">
+              {{ 'active' if v.active else 'archived' }}
+            </span>
+          </td>
+          <td style="text-align:right;white-space:nowrap;">
+            <a href="/view-builder/edit/{{ v.id }}" class="admin-card-btn">Edit →</a>
+            {% if not v.is_system_default %}
+            <button type="button" class="admin-card-btn"
+                    onclick="deleteView({{ v.id }}, '{{ v.name|e }}')"
+                    style="margin-left:4px;color:#be123c;border-color:#fecdd3;background:#fff1f2;">Delete</button>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:14px;">
+    <a href="/view-builder/new" class="admin-card-btn"
+       style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 16px;display:inline-block;">
+      + New view
+    </a>
+  </div>
+</main>
+
+<script>
+async function deleteView(vid, name) {
+  if (!confirm(`Delete view "${name}"?\n\nUsers who had this view in their sidebar will lose it.`)) return;
+  const r = await fetch('/api/views/' + vid + '/delete', { method: 'POST' });
+  if (r.ok) location.reload();
+  else {
+    const body = await r.json().catch(() => ({}));
+    alert('Failed: ' + (body.detail || 'unknown'));
+  }
+}
+</script>
+{% endblock %}

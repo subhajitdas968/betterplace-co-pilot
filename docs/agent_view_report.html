@@ -1,0 +1,1693 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>BetterPlace · Co-Pilot Agent View · 10 real tickets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg-1: #f6f7fb; --bg-2: #eef0fa;
+    --ink: #0f172a; --muted: #64748b; --border: #e2e8f0; --card: #ffffff;
+    --indigo: #4f46e5; --indigo-soft: #eef2ff;
+    --violet: #7c3aed; --fuchsia: #d946ef;
+    --emerald: #10b981; --emerald-soft: #ecfdf5;
+    --amber: #f59e0b; --amber-soft: #fffbeb;
+    --rose: #f43f5e; --rose-soft: #fff1f2;
+    --sky: #0ea5e9; --teal: #14b8a6;
+    --shadow-sm: 0 1px 2px rgba(15,23,42,0.04), 0 1px 3px rgba(15,23,42,0.06);
+    --shadow-md: 0 2px 4px rgba(15,23,42,0.04), 0 8px 24px rgba(15,23,42,0.08);
+    --shadow-lg: 0 8px 24px rgba(15,23,42,0.08), 0 24px 48px rgba(76,29,149,0.12);
+    --radius: 14px; --radius-sm: 8px;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  html, body { height: 100%; }
+  body {
+    font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+    background: var(--bg-1);
+    background-image:
+      radial-gradient(circle at 0% 0%, rgba(124,58,237,0.10) 0, transparent 40%),
+      radial-gradient(circle at 100% 0%, rgba(14,165,233,0.10) 0, transparent 40%),
+      radial-gradient(circle at 50% 100%, rgba(217,70,239,0.06) 0, transparent 50%),
+      linear-gradient(180deg, #f6f7fb 0%, #eef0fa 100%);
+    color: var(--ink); font-size: 13.5px; line-height: 1.55;
+    min-height: 100vh; -webkit-font-smoothing: antialiased;
+  }
+  body::before {
+    content: ''; position: fixed; inset: 0;
+    background-image: radial-gradient(circle, rgba(15,23,42,0.045) 1px, transparent 1px);
+    background-size: 22px 22px; pointer-events: none; z-index: 0;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.6), rgba(0,0,0,0.15));
+  }
+  .container { position: relative; z-index: 1; }
+
+  /* TOP BAR */
+  .topbar {
+    backdrop-filter: blur(18px); background: rgba(255,255,255,0.78);
+    border-bottom: 1px solid rgba(226,232,240,0.7);
+    padding: 14px 28px; display: flex; align-items: center; justify-content: space-between; gap: 24px;
+    position: sticky; top: 0; z-index: 50;
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-mark {
+    width: 32px; height: 32px; border-radius: 9px;
+    background: linear-gradient(135deg, #4f46e5, #7c3aed 60%, #d946ef);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-weight: 800; font-size: 16px;
+    box-shadow: 0 6px 16px rgba(124,58,237,0.35);
+  }
+  .brand-text .name {
+    font-size: 15px; font-weight: 700;
+    background: linear-gradient(135deg, #4f46e5, #d946ef);
+    -webkit-background-clip: text; -webkit-text-fill-color: transparent;
+    background-clip: text; letter-spacing: -0.01em;
+  }
+  .brand-text .sub { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+  .live-pill {
+    display: inline-flex; align-items: center; gap: 6px;
+    padding: 4px 10px; border-radius: 20px;
+    background: var(--emerald-soft); color: #047857;
+    font-size: 11px; font-weight: 600; border: 1px solid #a7f3d0;
+  }
+  .live-dot {
+    width: 6px; height: 6px; border-radius: 50%; background: #10b981;
+    box-shadow: 0 0 0 0 rgba(16,185,129,0.8); animation: livePulse 1.6s infinite;
+  }
+  @keyframes livePulse {
+    0% { box-shadow: 0 0 0 0 rgba(16,185,129,0.7); }
+    70% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
+    100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
+  }
+  .search-wrap { flex: 1; max-width: 520px; position: relative; }
+  .search-wrap input {
+    width: 100%; padding: 10px 14px 10px 38px;
+    border-radius: 10px; border: 1px solid var(--border);
+    background: rgba(255,255,255,0.9);
+    font-size: 13px; color: var(--ink); font-family: inherit; transition: all 0.18s;
+  }
+  .search-wrap input:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 4px rgba(79,70,229,0.12); background: white; }
+  .search-wrap input::placeholder { color: #94a3b8; }
+  .search-wrap .icon { position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: #94a3b8; }
+  .search-wrap kbd {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    font-family: 'JetBrains Mono', monospace; font-size: 10px; padding: 2px 6px; border-radius: 4px;
+    background: var(--indigo-soft); color: var(--indigo); border: 1px solid #c7d2fe;
+  }
+  .user-pill {
+    display: flex; align-items: center; gap: 10px; padding: 5px 12px 5px 6px;
+    border-radius: 100px; background: rgba(255,255,255,0.8); border: 1px solid var(--border);
+  }
+  .avatar {
+    width: 26px; height: 26px; border-radius: 50%;
+    background: linear-gradient(135deg, #f59e0b, #ef4444);
+    display: flex; align-items: center; justify-content: center;
+    color: white; font-size: 11px; font-weight: 700;
+  }
+  .user-pill .name { font-size: 12px; font-weight: 600; color: var(--ink); }
+  .user-pill .role { font-size: 10px; color: var(--muted); }
+
+  /* KPI BAR */
+  .kpi-bar {
+    display: grid; grid-template-columns: repeat(6, 1fr); gap: 14px;
+    padding: 18px 28px 4px;
+  }
+  .kpi-card {
+    background: var(--card); border-radius: var(--radius);
+    padding: 14px; box-shadow: var(--shadow-sm);
+    position: relative; overflow: hidden;
+    border: 1px solid var(--border); transition: all 0.18s;
+  }
+  .kpi-card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 3px; }
+  .kpi-card.indigo::before  { background: linear-gradient(90deg, #4f46e5, #7c3aed); }
+  .kpi-card.violet::before  { background: linear-gradient(90deg, #7c3aed, #d946ef); }
+  .kpi-card.amber::before   { background: linear-gradient(90deg, #f59e0b, #ef4444); }
+  .kpi-card.emerald::before { background: linear-gradient(90deg, #10b981, #14b8a6); }
+  .kpi-card.rose::before    { background: linear-gradient(90deg, #f43f5e, #ec4899); }
+  .kpi-card.sky::before     { background: linear-gradient(90deg, #0ea5e9, #4f46e5); }
+  .kpi-card:hover { transform: translateY(-1px); box-shadow: var(--shadow-md); }
+  .kpi-card .label {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); font-weight: 600;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .kpi-card .label-icon {
+    width: 18px; height: 18px; border-radius: 5px;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .kpi-card.indigo .label-icon { background: var(--indigo-soft); color: var(--indigo); }
+  .kpi-card.violet .label-icon { background: #f5f3ff; color: var(--violet); }
+  .kpi-card.amber .label-icon { background: var(--amber-soft); color: var(--amber); }
+  .kpi-card.emerald .label-icon { background: var(--emerald-soft); color: var(--emerald); }
+  .kpi-card.rose .label-icon { background: var(--rose-soft); color: var(--rose); }
+  .kpi-card.sky .label-icon { background: #f0f9ff; color: var(--sky); }
+  .kpi-card .value {
+    font-size: 26px; font-weight: 800; color: var(--ink);
+    margin-top: 8px; letter-spacing: -0.02em; font-variant-numeric: tabular-nums;
+  }
+  .kpi-card .desc { font-size: 11px; color: var(--muted); margin-top: 2px; }
+
+  /* LAYOUT */
+  .layout {
+    display: grid; grid-template-columns: 280px 1fr 400px;
+    gap: 18px; padding: 18px 28px 36px;
+    max-width: 1700px; margin: 0 auto;
+  }
+
+  /* LEFT RAIL */
+  .nav {
+    background: var(--card); border-radius: var(--radius); padding: 0;
+    height: fit-content; position: sticky; top: 80px;
+    border: 1px solid var(--border); box-shadow: var(--shadow-md);
+    overflow: hidden;
+    max-height: calc(100vh - 96px);
+    display: flex; flex-direction: column;
+  }
+  .nav-hero {
+    padding: 14px 16px 14px;
+    background:
+      radial-gradient(circle at 100% 0%, rgba(217,70,239,0.35), transparent 60%),
+      linear-gradient(135deg, #4f46e5 0%, #7c3aed 60%, #c026d3 100%);
+    color: white; position: relative; overflow: hidden; flex-shrink: 0;
+  }
+  .nav-hero::after {
+    content: ''; position: absolute; inset: 0;
+    background-image: radial-gradient(circle, rgba(255,255,255,0.10) 1px, transparent 1px);
+    background-size: 14px 14px; pointer-events: none;
+    mask-image: linear-gradient(180deg, rgba(0,0,0,0.6), transparent);
+  }
+  .nav-hero h4 {
+    font-size: 10px; letter-spacing: 0.10em; text-transform: uppercase;
+    color: rgba(255,255,255,0.7); font-weight: 700; margin-bottom: 8px; position: relative;
+  }
+  .scope-toggle {
+    display: flex; background: rgba(0,0,0,0.20);
+    border-radius: 8px; padding: 3px; font-size: 11px; font-weight: 600;
+    position: relative;
+  }
+  .scope-toggle .opt {
+    flex: 1; text-align: center; padding: 5px 8px; border-radius: 6px;
+    cursor: pointer; color: rgba(255,255,255,0.65); transition: all 0.16s;
+  }
+  .scope-toggle .opt.active { background: white; color: var(--indigo); box-shadow: 0 1px 3px rgba(0,0,0,0.20); }
+
+  .nav-scroll { overflow-y: auto; flex: 1; }
+  .nav-scroll::-webkit-scrollbar { width: 6px; }
+  .nav-scroll::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  .nav-section { padding: 12px 14px; border-top: 1px solid var(--border); }
+  .nav-section:first-of-type { border-top: none; }
+  .nav-section h4 {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+    color: var(--muted); margin: 0 0 8px; font-weight: 700;
+    display: flex; align-items: center; gap: 6px;
+  }
+  .nav-section h4 .stripe { width: 12px; height: 3px; border-radius: 2px; }
+  .nav-section.tickets .stripe { background: linear-gradient(90deg, #4f46e5, #7c3aed); }
+  .nav-section.flags .stripe { background: linear-gradient(90deg, #f43f5e, #f59e0b); }
+  .nav-section.buckets .stripe { background: linear-gradient(90deg, #0ea5e9, #14b8a6); }
+  .nav-section.customers .stripe { background: linear-gradient(90deg, #10b981, #4f46e5); }
+
+  /* TICKET LIST in left rail */
+  .ticket-row {
+    display: grid; grid-template-columns: 8px 1fr auto;
+    gap: 8px; padding: 8px 8px 8px 6px; border-radius: 8px;
+    cursor: pointer; transition: background 0.14s;
+    margin-bottom: 2px; border: 1px solid transparent;
+    align-items: start;
+  }
+  .ticket-row:hover { background: #f8fafc; }
+  .ticket-row.active {
+    background: linear-gradient(135deg, rgba(79,70,229,0.10), rgba(124,58,237,0.10));
+    border-color: rgba(79,70,229,0.20);
+  }
+  .ticket-row .stat-bar { width: 4px; border-radius: 2px; height: 100%; min-height: 32px; }
+  .stat-bar.s-open { background: #fb923c; }
+  .stat-bar.s-new { background: #3b82f6; }
+  .stat-bar.s-solved { background: #10b981; }
+  .stat-bar.s-closed { background: #94a3b8; }
+  .ticket-row .meta { min-width: 0; }
+  .ticket-row .id-row {
+    font-family: 'JetBrains Mono', monospace; font-size: 10.5px;
+    color: var(--muted); display: flex; align-items: center; gap: 4px;
+  }
+  .ticket-row .id-num { color: var(--indigo); font-weight: 700; font-size: 11.5px; }
+  .ticket-row.active .id-num { color: var(--indigo); }
+  .ticket-row .subject {
+    font-size: 11.5px; color: var(--ink); font-weight: 500;
+    line-height: 1.35; margin-top: 1px;
+    overflow: hidden; text-overflow: ellipsis; display: -webkit-box;
+    -webkit-line-clamp: 2; -webkit-box-orient: vertical;
+  }
+  .ticket-row .cust-pill {
+    display: inline-block; font-size: 9.5px; padding: 1px 6px;
+    border-radius: 8px; margin-top: 3px; font-weight: 600;
+  }
+  .cust-pill.reliance { background: #e0e7ff; color: #3730a3; }
+  .cust-pill.reliance-o2c { background: #c7d2fe; color: #312e81; }
+  .cust-pill.accenture { background: #fff7ed; color: #9a3412; }
+  .cust-pill.cpf { background: #fff7ed; color: #9a3412; }
+  .cust-pill.silagroup { background: #f0fdfa; color: #0f766e; }
+  .cust-pill.amps { background: #fae8ff; color: #86198c; }
+  .cust-pill.unknown { background: #f1f5f9; color: var(--muted); }
+  .ticket-row .pickup-tag {
+    background: #fee2e2; color: #991b1b;
+    font-size: 9px; padding: 1px 5px; border-radius: 8px;
+    font-weight: 700; flex-shrink: 0; margin-top: 2px;
+    box-shadow: 0 0 0 0 rgba(239,68,68,0.6);
+    animation: pulse 1.6s infinite;
+  }
+  @keyframes pulse {
+    0% { box-shadow: 0 0 0 0 rgba(239,68,68,0.6); }
+    70% { box-shadow: 0 0 0 5px rgba(239,68,68,0); }
+    100% { box-shadow: 0 0 0 0 rgba(239,68,68,0); }
+  }
+
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 7px 8px; border-radius: 8px; cursor: pointer;
+    font-size: 12.5px; font-weight: 500; color: #334155;
+    transition: all 0.14s;
+  }
+  .nav-item:hover { background: var(--indigo-soft); color: var(--indigo); transform: translateX(2px); }
+  .nav-icon {
+    width: 24px; height: 24px; border-radius: 7px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; color: white;
+  }
+  .ico-rose    { background: linear-gradient(135deg, #f43f5e, #ec4899); }
+  .ico-amber   { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+  .ico-sky     { background: linear-gradient(135deg, #0ea5e9, #4f46e5); }
+  .ico-teal    { background: linear-gradient(135deg, #14b8a6, #0ea5e9); }
+  .ico-emerald { background: linear-gradient(135deg, #10b981, #14b8a6); }
+  .nav-item .count {
+    margin-left: auto; font-size: 11px; font-variant-numeric: tabular-nums;
+    font-weight: 700; padding: 2px 9px; border-radius: 12px;
+    background: #f1f5f9; color: var(--muted);
+  }
+  .nav-item.flag .count { background: var(--rose-soft); color: #be123c; }
+  .nav-item.kb .count { background: var(--amber-soft); color: #92400e; }
+  .nav-item.match .count { background: var(--emerald-soft); color: #047857; }
+
+  /* TICKET CENTER */
+  .ticket {
+    background: var(--card); border-radius: var(--radius);
+    border: 1px solid var(--border); box-shadow: var(--shadow-md);
+    overflow: hidden; min-width: 0;
+  }
+  .sla-banner {
+    padding: 12px 22px; display: flex; align-items: center; gap: 14px;
+    border-bottom: 1px solid var(--border); font-size: 12.5px;
+  }
+  .sla-banner.urgent { background: linear-gradient(90deg, #fee2e2 0%, #fecaca 100%); color: #7f1d1d; border-color: #fca5a5; }
+  .sla-banner.warn { background: linear-gradient(90deg, #fef3c7 0%, #fde68a 100%); color: #78350f; border-color: #fcd34d; }
+  .sla-banner.merge { background: linear-gradient(90deg, #ede9fe 0%, #ddd6fe 100%); color: #4c1d95; border-color: #c4b5fd; }
+  .sla-banner .icon-pill {
+    width: 32px; height: 32px; border-radius: 10px;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0; font-size: 16px;
+  }
+  .sla-banner.urgent .icon-pill { background: #f43f5e; color: white; box-shadow: 0 0 0 0 rgba(244,63,94,0.6); animation: pulse 1.8s infinite; }
+  .sla-banner.warn .icon-pill { background: var(--amber); color: white; }
+  .sla-banner.merge .icon-pill { background: var(--violet); color: white; }
+  .sla-banner strong { font-weight: 700; font-size: 13px; }
+  .sla-banner .meta { font-size: 11.5px; opacity: 0.82; margin-top: 2px; }
+  .sla-banner .actions { margin-left: auto; display: flex; gap: 6px; }
+  .pill-btn {
+    border: 1px solid currentColor; padding: 4px 12px; border-radius: 14px;
+    background: white; color: inherit; font-size: 11.5px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .pill-btn.primary { background: currentColor; color: white; }
+
+  .ticket-header { padding: 16px 22px 14px; background: linear-gradient(135deg, #fafbff 0%, #ffffff 100%); border-bottom: 1px solid var(--border); }
+  .ticket-id-row {
+    display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+    font-size: 11.5px; color: var(--muted);
+    font-family: 'JetBrains Mono', monospace; margin-bottom: 4px;
+  }
+  .ticket-id-row .id-num { color: var(--indigo); font-weight: 700; font-size: 14px; }
+  .ticket-id-row .sep { color: #cbd5e1; }
+  .ticket-subject {
+    font-size: 18px; font-weight: 700; color: var(--ink);
+    margin: 4px 0 10px; letter-spacing: -0.012em;
+  }
+  .ticket-meta-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 12px; }
+  .badge {
+    display: inline-flex; align-items: center; gap: 5px;
+    padding: 3px 10px; border-radius: 16px;
+    font-size: 11px; font-weight: 600; border: 1px solid;
+  }
+  .b-open    { background: #ffedd5; color: #9a3412; border-color: #fdba74; }
+  .b-new     { background: #dbeafe; color: #1e40af; border-color: #93c5fd; }
+  .b-solved  { background: #d1fae5; color: #065f46; border-color: #6ee7b7; }
+  .b-closed  { background: #f3f4f6; color: #374151; border-color: #d1d5db; }
+  .b-ms      { background: #fef3c7; color: #92400e; border-color: #fcd34d; }
+  .b-ps      { background: #ddd6fe; color: #4c1d95; border-color: #a78bfa; }
+  .b-cust    { background: #e0e7ff; color: #3730a3; border-color: #a5b4fc; }
+  .b-cust-other { background: #fff7ed; color: #9a3412; border-color: #fed7aa; }
+  .b-grey    { background: #f1f5f9; color: #475569; border-color: #cbd5e1; }
+  .b-rose    { background: #fee2e2; color: #991b1b; border-color: #fecaca; }
+  .b-violet  { background: #ede9fe; color: #5b21b6; border-color: #c4b5fd; }
+
+  .conversation { padding: 16px 22px; max-height: 540px; overflow-y: auto; }
+  .conversation::-webkit-scrollbar { width: 6px; }
+  .conversation::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 3px; }
+  .comment {
+    border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+    border: 1px solid var(--border); transition: all 0.14s;
+  }
+  .comment:hover { box-shadow: var(--shadow-sm); }
+  .comment.public { background: white; }
+  .comment.internal {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border-color: #fcd34d; border-left: 3px solid var(--amber);
+  }
+  .comment-head {
+    display: flex; align-items: center; justify-content: space-between;
+    margin-bottom: 6px; font-size: 11.5px; color: var(--muted);
+  }
+  .comment-author {
+    display: flex; align-items: center; gap: 8px;
+    color: var(--ink); font-weight: 600; font-size: 12.5px;
+  }
+  .comment-author .a {
+    width: 22px; height: 22px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: white;
+  }
+  .a.cust { background: linear-gradient(135deg, #14b8a6, #0ea5e9); }
+  .a.agent { background: linear-gradient(135deg, #f59e0b, #ef4444); }
+  .a.bp { background: linear-gradient(135deg, #4f46e5, #7c3aed); }
+  .internal-tag {
+    background: var(--amber); color: white; font-size: 9.5px; padding: 2px 7px;
+    border-radius: 4px; text-transform: uppercase; letter-spacing: 0.05em; font-weight: 700;
+  }
+  .comment-body { font-size: 12.5px; color: #1e293b; white-space: pre-wrap; line-height: 1.55; }
+  .mention { background: var(--indigo-soft); color: var(--indigo); padding: 1px 6px; border-radius: 4px; font-weight: 600; font-size: 12px; }
+  .ai-note {
+    margin-top: 8px; padding: 6px 10px;
+    background: linear-gradient(135deg, rgba(124,58,237,0.10), rgba(217,70,239,0.06));
+    border: 1px solid rgba(124,58,237,0.25);
+    border-radius: 6px; font-size: 11px; color: var(--violet);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .ai-note::before { content: '✦'; font-size: 13px; }
+
+  .reply-box {
+    border-top: 1px solid var(--border); padding: 14px 22px;
+    background: linear-gradient(180deg, #fafbff 0%, white 100%);
+  }
+  .reply-box textarea {
+    width: 100%; min-height: 70px;
+    border: 1px solid var(--border); border-radius: 10px;
+    padding: 12px; font-family: inherit; font-size: 13px;
+    resize: vertical; transition: all 0.18s; background: white;
+  }
+  .reply-box textarea:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 4px rgba(79,70,229,0.10); }
+  .reply-box .actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+  .btn {
+    padding: 8px 14px; border-radius: 8px; font-size: 12.5px;
+    cursor: pointer; font-weight: 600; border: 1px solid transparent;
+    transition: all 0.16s; display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit;
+  }
+  .btn-primary {
+    background: linear-gradient(135deg, #4f46e5, #7c3aed); color: white;
+    box-shadow: 0 4px 12px rgba(79,70,229,0.28);
+  }
+  .btn-primary:hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(79,70,229,0.36); }
+  .btn-secondary { background: white; color: var(--ink); border-color: var(--border); }
+  .btn-ai {
+    background: linear-gradient(135deg, #7c3aed, #d946ef); color: white;
+    box-shadow: 0 4px 12px rgba(217,70,239,0.28);
+  }
+
+  /* RIGHT COL */
+  .right-col {
+    display: flex; flex-direction: column; gap: 16px;
+    position: sticky; top: 80px; align-self: start;
+    height: calc(100vh - 96px);  /* fixed height so internal scroll always works */
+    overflow-y: auto;
+    padding-right: 8px;  /* room for scrollbar */
+    min-width: 0;
+    scrollbar-gutter: stable;
+  }
+  .right-col::-webkit-scrollbar { width: 10px; }
+  .right-col::-webkit-scrollbar-track { background: rgba(15,23,42,0.04); border-radius: 5px; }
+  .right-col::-webkit-scrollbar-thumb { background: #94a3b8; border-radius: 5px; border: 2px solid transparent; background-clip: padding-box; }
+  .right-col::-webkit-scrollbar-thumb:hover { background: #64748b; background-clip: padding-box; border: 2px solid transparent; }
+
+  .panel {
+    background: var(--card); border-radius: var(--radius);
+    border: 1px solid var(--border); box-shadow: var(--shadow-sm); overflow: hidden;
+  }
+  .panel-head {
+    padding: 12px 16px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between;
+    background: #fafbff;
+  }
+  .panel-head h3 {
+    font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: var(--muted); font-weight: 700;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .panel-head .h-icon { width: 22px; height: 22px; border-radius: 6px; display: flex; align-items: center; justify-content: center; }
+  .panel-head .right-tag { font-size: 10px; color: var(--muted); font-weight: 500; }
+  .panel-body { padding: 12px 16px; }
+
+  /* AI panel hero */
+  .ai-panel {
+    background: linear-gradient(135deg, #1e1b4b 0%, #4c1d95 50%, #831843 100%);
+    border-radius: var(--radius); color: white;
+    box-shadow: var(--shadow-lg); overflow: hidden;
+    border: 1px solid rgba(255,255,255,0.08); position: relative;
+  }
+  .ai-panel::before {
+    content: ''; position: absolute; top: -50%; right: -20%;
+    width: 300px; height: 300px;
+    background: radial-gradient(circle, rgba(217,70,239,0.4), transparent 70%);
+    pointer-events: none;
+  }
+  .ai-panel-head {
+    padding: 16px 18px; display: flex; align-items: center; justify-content: space-between;
+    border-bottom: 1px solid rgba(255,255,255,0.08); position: relative;
+  }
+  .ai-panel-head h3 {
+    font-size: 12.5px; font-weight: 700; letter-spacing: 0.04em;
+    text-transform: uppercase;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .ai-panel-head .ai-mark {
+    width: 26px; height: 26px; border-radius: 7px;
+    background: linear-gradient(135deg, #d946ef, #f472b6);
+    display: flex; align-items: center; justify-content: center;
+    box-shadow: 0 4px 14px rgba(217,70,239,0.45);
+  }
+  .ai-panel-head .meta { font-size: 10.5px; color: rgba(255,255,255,0.65); font-family: 'JetBrains Mono', monospace; }
+
+  .ai-section { padding: 14px 18px; position: relative; }
+  .ai-section + .ai-section { border-top: 1px solid rgba(255,255,255,0.08); }
+  .ai-section .heading {
+    font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: rgba(255,255,255,0.7); font-weight: 700;
+    margin-bottom: 10px; display: flex; align-items: center; gap: 8px;
+  }
+  .heading-pill {
+    background: rgba(217,70,239,0.20); color: #f9a8d4;
+    padding: 2px 8px; border-radius: 12px; font-size: 10px;
+  }
+  .summary-glass {
+    background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px; padding: 12px 14px;
+    font-size: 12.5px; line-height: 1.6;
+    color: rgba(255,255,255,0.92); backdrop-filter: blur(8px);
+  }
+  .summary-glass strong { color: white; font-weight: 700; }
+
+  .rec-card {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px; padding: 12px; margin-bottom: 10px; transition: all 0.18s;
+  }
+  .rec-card:hover { background: rgba(255,255,255,0.10); }
+  .rec-card .rec-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+  .rec-card .field-name {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.06em;
+    color: rgba(255,255,255,0.7); font-weight: 600;
+  }
+  .rec-card .change {
+    display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 6px;
+  }
+  .rec-card .from {
+    text-decoration: line-through; color: rgba(252,165,165,0.85);
+    background: rgba(244,63,94,0.18); padding: 2px 8px;
+    border-radius: 6px; font-size: 11.5px; font-weight: 500;
+  }
+  .rec-card .arrow { color: rgba(255,255,255,0.5); font-size: 13px; }
+  .rec-card .to {
+    background: linear-gradient(135deg, rgba(16,185,129,0.30), rgba(20,184,166,0.30));
+    color: #6ee7b7; padding: 2px 10px; border-radius: 6px;
+    font-size: 11.5px; font-weight: 600;
+    border: 1px solid rgba(16,185,129,0.40);
+  }
+  .rec-card .to.review {
+    background: linear-gradient(135deg, rgba(245,158,11,0.30), rgba(251,191,36,0.30));
+    color: #fcd34d; border-color: rgba(245,158,11,0.40);
+  }
+  .rec-card .reason {
+    font-size: 11.5px; color: rgba(255,255,255,0.7); line-height: 1.55; font-style: italic;
+  }
+
+  .ring-wrap { position: relative; width: 36px; height: 36px; flex-shrink: 0; }
+  .ring-bg, .ring-fg { fill: none; stroke-width: 4; }
+  .ring-bg { stroke: rgba(255,255,255,0.10); }
+  .ring-fg { stroke-linecap: round; transform: rotate(-90deg); transform-origin: center; }
+  .ring-text {
+    position: absolute; inset: 0;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 10px; font-weight: 700; color: white; font-variant-numeric: tabular-nums;
+  }
+
+  .checklist { list-style: none; padding: 0; margin: 0; }
+  .checklist li {
+    padding: 8px 12px 8px 36px; position: relative;
+    font-size: 12px; border-radius: 8px; margin-bottom: 4px; line-height: 1.5;
+  }
+  .checklist .marker {
+    position: absolute; left: 12px; top: 8px;
+    width: 18px; height: 18px; border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700;
+  }
+  .checklist .ok-marker { background: rgba(16,185,129,0.20); color: #6ee7b7; }
+  .checklist .miss-marker { background: rgba(244,63,94,0.20); color: #fca5a5; }
+  .checklist .thin-marker { background: rgba(245,158,11,0.30); color: #fcd34d; }
+  .checklist li.ok    { color: rgba(255,255,255,0.78); }
+  .checklist li.miss  { background: rgba(244,63,94,0.10); border: 1px solid rgba(244,63,94,0.20); color: #fecaca; }
+  .checklist li.thin  { background: rgba(245,158,11,0.10); border: 1px solid rgba(245,158,11,0.20); color: #fde68a; }
+  .checklist li strong { color: white; }
+  .miss-hint { font-size: 11px; color: rgba(255,255,255,0.55); display: block; margin-top: 2px; }
+
+  .sim {
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.10);
+    border-radius: 10px; padding: 12px; margin-bottom: 8px;
+    cursor: pointer; transition: all 0.18s;
+  }
+  .sim:hover { background: rgba(255,255,255,0.12); transform: translateX(2px); }
+  .sim-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 4px; }
+  .sim-id { font-family: 'JetBrains Mono', monospace; font-size: 11px; color: rgba(255,255,255,0.65); font-weight: 600; }
+  .sim-match {
+    font-size: 10.5px; font-weight: 700;
+    padding: 2px 8px; border-radius: 12px;
+    background: linear-gradient(135deg, rgba(16,185,129,0.25), rgba(20,184,166,0.25));
+    color: #6ee7b7; border: 1px solid rgba(16,185,129,0.30);
+  }
+  .sim-match.med { background: rgba(245,158,11,0.22); color: #fcd34d; border-color: rgba(245,158,11,0.30); }
+  .sim-subj { font-size: 12.5px; font-weight: 600; color: white; margin: 4px 0 4px; line-height: 1.4; }
+  .sim-meta { font-size: 11px; color: rgba(255,255,255,0.65); line-height: 1.5; }
+  .sim-meta strong { color: #f9a8d4; font-weight: 600; }
+
+  .resbox {
+    background: linear-gradient(135deg, rgba(124,58,237,0.18), rgba(217,70,239,0.10));
+    border: 1px solid rgba(217,70,239,0.30);
+    border-radius: 10px; padding: 14px;
+  }
+  .resbox ol { padding-left: 22px; margin: 0; font-size: 12.5px; line-height: 1.65; color: rgba(255,255,255,0.92); }
+  .resbox ol li { margin-bottom: 6px; }
+  .resbox ol li strong { color: #f9a8d4; }
+
+  .actions-bar {
+    padding: 12px 18px; background: rgba(0,0,0,0.18);
+    border-top: 1px solid rgba(255,255,255,0.08);
+    display: flex; gap: 6px; flex-wrap: wrap;
+  }
+  .pill {
+    background: rgba(255,255,255,0.10); border: 1px solid rgba(255,255,255,0.15);
+    color: white; border-radius: 16px; padding: 5px 12px;
+    font-size: 11px; cursor: pointer; font-weight: 500;
+    display: inline-flex; align-items: center; gap: 6px;
+    font-family: inherit; transition: all 0.16s;
+  }
+  .pill:hover { background: rgba(255,255,255,0.18); }
+  .pill.primary {
+    background: linear-gradient(135deg, #d946ef, #f472b6);
+    border-color: transparent;
+    box-shadow: 0 4px 12px rgba(217,70,239,0.35);
+    font-weight: 600;
+  }
+
+  /* Fields panel */
+  .field-row {
+    display: grid; grid-template-columns: 1fr auto;
+    gap: 10px; padding: 9px 0;
+    border-bottom: 1px dashed var(--border); align-items: center;
+  }
+  .field-row:last-child { border-bottom: none; }
+  .field-row .name {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); font-weight: 600;
+    display: flex; align-items: center; gap: 4px;
+  }
+  .field-row .name .req { color: var(--rose); font-weight: 700; }
+  .field-row .value { font-size: 12px; color: var(--ink); font-weight: 500; text-align: right; word-break: break-word; max-width: 240px; }
+  .field-row .value.empty { color: var(--rose); font-style: italic; }
+  .field-row .value.flagged { color: #b91c1c; font-weight: 600; }
+  .field-row .value.ok { color: #047857; font-weight: 600; }
+  .fix-chip {
+    display: inline-block; background: linear-gradient(135deg, #f43f5e, #ec4899);
+    color: white; font-size: 9px; padding: 1px 6px; border-radius: 9px;
+    margin-left: 5px; vertical-align: middle; font-weight: 700;
+    letter-spacing: 0.04em; box-shadow: 0 2px 6px rgba(244,63,94,0.30);
+  }
+
+  /* Suggested-reply panel */
+  .reply-panel {
+    background: linear-gradient(135deg, #f0fdfa 0%, #ecfeff 100%);
+    border: 1px solid #99f6e4; border-left: 3px solid #14b8a6;
+    border-radius: 12px; padding: 14px 16px;
+  }
+  .reply-panel .heading {
+    font-size: 11px; text-transform: uppercase; letter-spacing: 0.07em;
+    color: #0f766e; font-weight: 700; margin-bottom: 8px;
+    display: flex; align-items: center; gap: 8px;
+  }
+  .reply-panel .pill-flag {
+    background: #fee2e2; color: #991b1b; padding: 2px 8px;
+    border-radius: 12px; font-size: 10.5px; border: 1px solid #fca5a5;
+  }
+  .reply-flaws {
+    background: white; border: 1px solid #e2e8f0; border-radius: 8px;
+    padding: 10px 12px; margin-bottom: 10px; font-size: 12px;
+  }
+  .reply-flaws .label {
+    font-size: 10.5px; color: #be123c; font-weight: 700;
+    text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 4px;
+  }
+  .reply-flaws ul { list-style: none; padding: 0; }
+  .reply-flaws li { color: #64748b; line-height: 1.55; padding: 2px 0 2px 16px; position: relative; font-size: 11.5px; }
+  .reply-flaws li::before { content: "•"; position: absolute; left: 4px; color: var(--rose); font-weight: 700; }
+  .reply-current {
+    background: var(--rose-soft); border: 1px solid #fecaca;
+    border-radius: 8px; padding: 8px 10px; margin-bottom: 8px;
+    font-size: 11.5px; color: #7f1d1d; font-style: italic;
+  }
+  .reply-current strong { font-style: normal; color: #be123c; font-weight: 700; }
+  .reply-suggest {
+    background: white; border: 1px solid #99f6e4;
+    border-left: 3px solid #14b8a6; border-radius: 8px;
+    padding: 12px 14px; font-size: 12.5px; line-height: 1.65;
+    color: #0f172a; white-space: pre-wrap;
+    box-shadow: 0 1px 2px rgba(20,184,166,0.10);
+  }
+  .reply-suggest strong { color: #0f766e; font-weight: 700; }
+  .reply-actions { margin-top: 10px; display: flex; gap: 6px; flex-wrap: wrap; }
+  .reply-actions .pill-btn {
+    border: 1px solid #5eead4; padding: 4px 12px; border-radius: 14px;
+    background: white; color: #0f766e; font-size: 11.5px; font-weight: 600; cursor: pointer;
+    font-family: inherit;
+  }
+  .reply-actions .pill-btn.primary {
+    background: linear-gradient(135deg, #14b8a6, #0d9488);
+    color: white; border-color: transparent;
+    box-shadow: 0 4px 10px rgba(20,184,166,0.30);
+  }
+
+  /* KB banner */
+  .kb-banner {
+    background: linear-gradient(135deg, #fffbeb 0%, #fef3c7 100%);
+    border: 1px solid #fcd34d; border-left: 3px solid var(--amber);
+    border-radius: 10px; padding: 10px 12px;
+    font-size: 12px; color: #78350f;
+  }
+  .kb-banner strong { color: #5a2d04; font-weight: 700; }
+
+  .footer-note {
+    text-align: center; color: var(--muted);
+    font-size: 11.5px; padding: 24px;
+  }
+  .footer-note code {
+    background: white; padding: 2px 8px; border-radius: 4px;
+    font-family: 'JetBrains Mono', monospace; border: 1px solid var(--border);
+  }
+
+  @media (max-width: 1300px) {
+    .layout { grid-template-columns: 240px 1fr 380px; }
+  }
+  @media (max-width: 1100px) {
+    .layout { grid-template-columns: 1fr; }
+    .right-col { position: static; max-height: none; }
+  }
+</style>
+</head>
+<body>
+<div class="container">
+
+<!-- TOP BAR -->
+<div class="topbar">
+  <div class="brand">
+    <div class="brand-mark">B</div>
+    <div class="brand-text">
+      <div class="name">BetterPlace · Co-Pilot</div>
+      <div class="sub">Agent View · 10 real tickets from your Zendesk</div>
+    </div>
+    <span class="live-pill" style="margin-left: 12px;"><span class="live-dot"></span> Synced 2 min ago · 30 Apr 2026</span>
+  </div>
+  <div class="search-wrap">
+    <svg class="icon" width="14" height="14" style="color:#94a3b8" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>
+    <input placeholder="Paste ticket ID, customer name, or ask a question…" />
+    <kbd>⌘K</kbd>
+  </div>
+  <div class="user-pill">
+    <div class="avatar">SD</div>
+    <div>
+      <div class="name">Subhajit Das</div>
+      <div class="role">Admin · Support Ops</div>
+    </div>
+  </div>
+</div>
+
+<!-- KPI BAR -->
+<div class="kpi-bar">
+  <div class="kpi-card indigo">
+    <div class="label">Tickets in batch</div>
+    <div class="value">10</div>
+    <div class="desc">5 open · 5 solved</div>
+  </div>
+  <div class="kpi-card rose">
+    <div class="label">Untouched · need pickup</div>
+    <div class="value">4</div>
+    <div class="desc">15+ hours, no agent reply</div>
+  </div>
+  <div class="kpi-card violet">
+    <div class="label">AI corrections suggested</div>
+    <div class="value">79</div>
+    <div class="desc">avg ~7.9 / ticket</div>
+  </div>
+  <div class="kpi-card amber">
+    <div class="label">"How resolved?" thin</div>
+    <div class="value">8</div>
+    <div class="desc">avg 4 words / ticket</div>
+  </div>
+  <div class="kpi-card emerald">
+    <div class="label">KB-worthy resolutions</div>
+    <div class="value">3</div>
+    <div class="desc">drafts ready in data/kb_drafts/</div>
+  </div>
+  <div class="kpi-card sky">
+    <div class="label">Reliance Bucketization gaps</div>
+    <div class="value">3 / 4</div>
+    <div class="desc">mandatory but unset</div>
+  </div>
+</div>
+
+<!-- LAYOUT -->
+<div class="layout">
+
+  <!-- LEFT RAIL -->
+  <aside class="nav">
+    <div class="nav-hero">
+      <h4>Workspace</h4>
+      <div class="scope-toggle">
+        <span class="opt active">Both groups</span>
+        <span class="opt">PS only</span>
+      </div>
+    </div>
+
+    <div class="nav-scroll">
+      <div class="nav-section tickets">
+        <h4><span class="stripe"></span> Tickets · 10</h4>
+        <div id="ticket-list"><!-- rendered by JS --></div>
+      </div>
+
+      <div class="nav-section flags">
+        <h4><span class="stripe"></span> AI flags</h4>
+        <div class="nav-item flag">
+          <span class="nav-icon ico-rose"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0Z"/></svg></span>
+          Field mismatch <span class="count">79</span>
+        </div>
+        <div class="nav-item kb">
+          <span class="nav-icon ico-amber"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/></svg></span>
+          Missing KB Article <span class="count">9</span>
+        </div>
+        <div class="nav-item flag">
+          <span class="nav-icon ico-rose"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="10"/></svg></span>
+          Untouched ≥4h <span class="count">4</span>
+        </div>
+        <div class="nav-item match">
+          <span class="nav-icon ico-emerald"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4"><polyline points="20 6 9 17 4 12"/></svg></span>
+          Suggested-reply ready <span class="count">2</span>
+        </div>
+      </div>
+
+      <div class="nav-section customers">
+        <h4><span class="stripe"></span> Top customers · this batch</h4>
+        <div class="nav-item">Reliance / Reliance::O2C <span class="count">5</span></div>
+        <div class="nav-item">Accenture <span class="count">1</span></div>
+        <div class="nav-item">Classic Protection Force <span class="count">1</span></div>
+        <div class="nav-item">SilaGroup <span class="count">1</span></div>
+        <div class="nav-item">Amps India <span class="count">1</span></div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- TICKET (CENTER) -->
+  <section class="ticket">
+    <div id="sla-banner-mount"></div>
+    <div class="ticket-header" id="ticket-header"></div>
+    <div class="conversation" id="conversation"></div>
+    <div class="reply-box">
+      <textarea placeholder="Reply to customer or write internal note…"></textarea>
+      <div class="actions">
+        <button class="btn btn-primary">Reply publicly</button>
+        <button class="btn btn-secondary">Internal note</button>
+        <button class="btn btn-ai">✦ Apply AI suggestions</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- RIGHT COL -->
+  <aside class="right-col">
+    <div id="suggested-reply-mount"></div>
+    <div id="kb-banner-mount"></div>
+
+    <!-- Current fields panel -->
+    <div class="panel">
+      <div class="panel-head">
+        <h3>
+          <span class="h-icon" style="background: var(--indigo-soft); color: var(--indigo);">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"/></svg>
+          </span>
+          Ticket fields
+        </h3>
+        <span class="right-tag">As tagged by agent</span>
+      </div>
+      <div class="panel-body" id="fields-body"></div>
+    </div>
+
+    <!-- AI panel -->
+    <div class="ai-panel">
+      <div class="ai-panel-head">
+        <h3>
+          <span class="ai-mark"><svg width="14" height="14" viewBox="0 0 24 24" fill="white"><path d="M12 2 L13.5 8.5 L20 10 L13.5 11.5 L12 18 L10.5 11.5 L4 10 L10.5 8.5 Z"/></svg></span>
+          Claude AI Insights
+        </h3>
+        <span class="meta">v1 · sonnet-4.x · 2.1s</span>
+      </div>
+      <div id="ai-summary-mount"></div>
+      <div id="ai-recs-mount"></div>
+      <div id="ai-checks-mount"></div>
+      <div id="ai-similar-mount"></div>
+      <div id="ai-resolution-mount"></div>
+      <div class="actions-bar">
+        <button class="pill primary">Apply all corrections</button>
+        <button class="pill">Open similar ticket</button>
+        <button class="pill">Notify Slack</button>
+        <button class="pill">Mark KB-worthy</button>
+      </div>
+    </div>
+  </aside>
+
+</div>
+
+<div class="footer-note">
+  Real BetterPlace tickets · 30 Apr 2026 · click any ticket on the left to switch view · <code>~/Documents/zd-copilot/docs/agent_view_report.html</code>
+</div>
+
+</div>
+
+<script>
+// ============================================================================
+// TICKET DATA — all 10 real tickets with conversations + AI insights
+// ============================================================================
+const TICKETS = [
+  {
+    id: 593800, status: "open", statusLabel: "Open", group: "MS", customer: "Reliance::O2C", custClass: "reliance-o2c",
+    subject: "Re: FW: Issue with Trade Validation Document Upload on Better Place Portal",
+    created: "Apr 29, 11:55 IST", updated: "16:01", assignee: "Amarnath Rao", requester: "Mahesh Vaishnav (BP internal)",
+    pickup: false,
+    conversation: [
+      { role: "cust", initials: "MV", name: "Mahesh Vaishnav · BP internal", time: "Apr 29, 11:55", public: true,
+        body: "+Betterplace Support. On Wed, Apr 29, 2026 at 4:38 PM Shubham.Doshi@ril.com wrote: Dear Team, Request you to please check and solve the issue as per trail mail. From Bhatt, Rajendra (rajendra.bhatt@rotostat.in) — [External] Issue with Trade Validation Document Upload on Better Place Portal …",
+        ai_note: "Forwarded chain · originating from RIL → Rotostat (vendor) → BP Support." },
+      { role: "agent", initials: "MS", name: "Managed Services · Agent", time: "Apr 29, 12:36", public: true,
+        body: "Hello Rajendra Bhatt, As discussed with you, kindly share the required details. Thanks & Regards." },
+      { role: "cust", initials: "RB", name: "Rajendra Bhatt · Customer (Rotostat)", time: "Apr 29, 15:20", public: true,
+        body: "Dear Sir, Please find the data attached below for your reference. S.NO | FULL NAME | MOBILE NO | … 1 | BHUSHAN KUMAR THAKUR | 8972130227 | MALE | 553700113539 | 10TH | 8 | 01-01-1987 | DMD | PETROCHEMICAL | CENTRAL ENGINEERING SERVICE | MECHANICAL | SHIFTING LIFTING ASSISTANT | YES | YES | NO | ROTO STAT SERVICE PRIVATE LIMITED | 379143 — Thanks & Regards, Rajendra Bhatt",
+        ai_note: "Customer has provided the data — agent action now expected. Single profile (Bhushan Kumar Thakur, Rotostat)." },
+    ],
+    fields: [
+      { name: "Requestor", value: "Mahesh Vaishnav · BP internal", state: "ok" },
+      { name: "Request type", required: true, value: "Operations Task", state: "ok" },
+      { name: "Assigned Name", required: true, value: "Amarnath Rao", state: "ok" },
+      { name: "Priority", required: true, value: "Normal", state: "ok" },
+      { name: "Parent Client", required: true, value: "NA", state: "ok" },
+      { name: "Customer Name", required: true, value: "Reliance::O2C", state: "ok" },
+      { name: "Product", required: true, value: "Platform", state: "ok" },
+      { name: "Service type", required: true, value: "Profile Onboarding", state: "ok" },
+      { name: "Service Sub-Type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Root Cause - Level 1", required: true, value: "Task", state: "ok" },
+      { name: "Number of Sites", required: true, value: "1", state: "ok" },
+      { name: "Number of Profiles", required: true, value: "1", state: "ok" },
+      { name: "How was this ticket resolved?", required: true, value: "Need More info.", state: "thin", fix: true },
+      { name: "Simplesat rating", value: "empty (post-closure CSAT)", state: "empty" },
+    ],
+    ai_summary: "Reliance/Rotostat vendor (Rajendra Bhatt via Shubham Doshi at RIL) raised a trade-validation document-upload issue. Agent (Managed Services group) asked the customer to share required details. Customer responded with a profile data sheet (1 candidate: <strong>Bhushan Kumar Thakur</strong>, Rotostat, Reliance Petrochemical / Central Engineering Service / Mechanical). <strong>Awaiting agent action</strong> to deploy the profile.",
+    recommendations: [
+      { field: "Service Sub-Type", current: "empty", to: "Profile Deployment", confidence: 94,
+        reason: "Tag <code style='background:rgba(255,255,255,0.15);padding:0 4px'>profile_deployment_clone</code> already on ticket; aligns with Service type=Profile Onboarding; customer is providing data for deployment." },
+      { field: "How resolved?", current: "Need More info.", to: "DEFER (clear placeholder)", confidence: null, review: true,
+        reason: "Ticket is open; will draft on closure: \"Deployed 1 profile (Bhushan Kumar Thakur · Rotostat) per data sheet supplied 29 Apr 15:20 IST.\"" },
+    ],
+    completeness: [
+      { state: "ok", text: "11 of 14 mandatory fields populated correctly" },
+      { state: "thin", text: "<strong>Service Sub-Type</strong> empty — AI suggests 'Profile Deployment' at 94%" },
+      { state: "miss", text: "<strong>'How resolved?'</strong> contains placeholder 'Need More info.' — clear until real closure" },
+    ],
+    similar: [
+      { id: 593734, match: 87, label: "match", subj: "New Validity Issue · Reliance::O2C · Vendor LL Updates",
+        meta: "Same customer · Managed Services · Vendor profile workflow · <strong>Resolved by Mahesh + Dev Team in 8h 36m</strong>" },
+      { id: 593795, match: 72, label: "med", subj: "CWMS-O | Color code · New sites · Reliance::O2C",
+        meta: "Same customer · Reliance::O2C site-creation · <strong>KB linked: Reliance Platform Troubleshooting</strong>" },
+      { id: 593721, match: 61, label: "med", subj: "Vehicle/Driver Induction · Accenture · Vendor Tagging",
+        meta: "Same Root Cause L1 (Task) · profile-deployment-style task · <strong>Vendor script in 1h 43m</strong>" },
+    ],
+  },
+
+  {
+    id: 593770, status: "new", statusLabel: "New", group: "PS", customer: "Reliance", custClass: "reliance",
+    subject: "CAS-382980-B2M1B3 — WO Mapping",
+    created: "Apr 29, 10:13 IST", updated: "no agent reply", assignee: "Unassigned", requester: "Sachin Kondilkar · Reliance",
+    pickup: { type: "urgent", title: "Untouched · 15.4 hours old · NEW",
+      meta: "No assignee. Customer is the only voice. Reliance Enterprise — first response SLA at risk.",
+      actions: [["Pick up", true], ["Auto-merge with #593761", false]] },
+    conversation: [
+      { role: "cust", initials: "SK", name: "Sachin Kondilkar · Reliance", time: "Apr 29, 10:13", public: true,
+        body: "Dear team, Please extend the work orders in BetterPlace as mentioned in attached file. Regards, Sachin Kondilkar — Confidentiality Warning…",
+        ai_note: "Single line of intent. CAS-382980-B2M1B3 in subject is RIL change-request format. AI matched same CAS reference on #593761 (Outlook recall) — likely same incident." },
+    ],
+    fields: [
+      { name: "Customer Name", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Priority", required: true, value: "Normal", state: "ok" },
+      { name: "Product", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Module", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Section", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Bucketization (Reliance)", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Root Cause - Level 1", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Root Cause - Level 2", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Jira ID", value: "empty", state: "empty" },
+      { name: "KB Article", required: true, value: "empty", state: "empty", fix: true },
+      { name: "What was the issue?", value: "empty", state: "empty", fix: true },
+      { name: "How resolved?", required: true, value: "empty", state: "empty" },
+      { name: "Total Profiles", required: true, value: "empty", state: "empty" },
+    ],
+    ai_summary: "Reliance user requested extending Work Orders in BetterPlace per attached file. Single comment, no agent response. <strong>15.4 hours since creation, still unassigned.</strong> The CAS-382980-B2M1B3 reference also appears in <strong>#593761</strong> (an Outlook recall) — recommend merging both into one canonical ticket.",
+    recommendations: [
+      { field: "Customer Name", current: "empty", to: "Reliance", confidence: 96,
+        reason: "Organisation = Reliance; requester domain ril.com." },
+      { field: "Product", current: "empty", to: "Platform", confidence: 85,
+        reason: "WO extension is a Platform configuration task." },
+      { field: "Module", current: "empty", to: "needs human review", review: true, confidence: null,
+        reason: "No exact 'Work Order' value in 51-option Module dropdown. Closest: 'Configure'." },
+      { field: "Bucketization", current: "empty", to: "needs human review", review: true, confidence: null,
+        reason: "Mandatory for Reliance. No 'WO' value in 24-option dropdown. Closest: 'Task / Bulk execution'." },
+      { field: "What was the issue?", current: "empty", to: "Customer requested extending Work Orders in BetterPlace per attached file (CAS-382980-B2M1B3).", confidence: 93,
+        reason: "Direct paraphrase of customer comment." },
+    ],
+    completeness: [
+      { state: "miss", text: "<strong>Pickup overdue</strong> — 15.4h, no assignee, no agent reply", hint: "Reliance Enterprise customer · first response SLA at risk" },
+      { state: "miss", text: "<strong>Bucketization empty</strong> — mandatory for Reliance" },
+      { state: "miss", text: "<strong>11 of 13 mandatory fields empty</strong>" },
+      { state: "miss", text: "<strong>Likely duplicate of #593761</strong> — same CAS-382980 reference" },
+      { state: "thin", text: "Module / Section / Bucketization have no exact match in your taxonomy — flag for ops" },
+    ],
+    similar: [
+      { id: 593761, match: 99, label: "match", subj: "Recall: Re: CAS-382980-B2M1B3 — WO Mapping",
+        meta: "<strong>DUPLICATE</strong> — same CAS-382980 reference · same customer · Outlook recall · auto-merge candidate" },
+      { id: 593800, match: 68, label: "med", subj: "Trade Validation Document Upload · Reliance::O2C",
+        meta: "Same customer family · Reliance Operations · awaiting deployment" },
+      { id: 593791, match: 55, label: "med", subj: "URGENT — Z5 need to activate · Reliance",
+        meta: "Same customer · activation/extension pattern · <strong>merged into #593648</strong>" },
+    ],
+  },
+
+  {
+    id: 593763, status: "open", statusLabel: "Open", group: "MS", customer: "Amps India", custClass: "amps",
+    subject: "Request for Agreement copy for New PO process",
+    created: "Apr 29, 10:06 IST", updated: "10:27", assignee: "Unassigned", requester: "Mukesh Kumar · Amps India",
+    pickup: { type: "urgent", title: "Untouched · 15.5 hours old · OPEN",
+      meta: "No assignee. Only an internal forward to Mahalakshmi K — no agent has replied to the customer.",
+      actions: [["Pick up", true], ["Apply 6 AI suggestions", false]] },
+    conversation: [
+      { role: "cust", initials: "MK", name: "Mukesh Kumar · Amps India", time: "Apr 29, 10:06", public: true,
+        body: "Dear Team, Kindly share the agreement copy at the earliest to enable us to proceed with the new PO process. Follow Amps : LinkedIn | X | Facebook | Instagram." },
+      { role: "bp", initials: "MK", name: "Manoj Kumar K R · BP internal", time: "Apr 29, 10:27", public: true,
+        body: "+<span class='mention'>@Mahalakshmi K</span> — Please look into this.",
+        ai_note: "Internal forward — agent <strong>Mahalakshmi K</strong> has been pinged. Set as Assigned Name." },
+    ],
+    fields: [
+      { name: "Requestor", value: "Mukesh Kumar <mukesh@ampsindia.in>", state: "ok" },
+      { name: "Request type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Assigned Name", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Priority", required: true, value: "Normal", state: "ok" },
+      { name: "Parent Client", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Customer Name", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Product", required: true, value: "empty", state: "empty" },
+      { name: "Service type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Service Sub-Type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Root Cause - Level 1", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Number of Sites", required: true, value: "empty", state: "empty" },
+      { name: "Number of Profiles", required: true, value: "empty", state: "empty" },
+      { name: "How resolved?", required: true, value: "empty", state: "empty" },
+    ],
+    ai_summary: "Amps India vendor (Mukesh Kumar) requesting an agreement copy to enable a new PO process. <strong>Internal forward</strong> from Manoj Kumar K R to Mahalakshmi K, but <strong>no reply to the customer</strong>. Pure administrative document request. Customer Name 'Amps India' may not exist in your 911-option dropdown — flag for ops.",
+    recommendations: [
+      { field: "Customer Name", current: "empty", to: "Amps India (verify dropdown)", confidence: 80, review: true,
+        reason: "Email domain ampsindia.in. May need a new option added to your 911-strong dropdown." },
+      { field: "Request type", current: "empty", to: "Operations Task", confidence: 92,
+        reason: "Document request, not a platform issue." },
+      { field: "Service type", current: "empty", to: "Contract Agreement", confidence: 95,
+        reason: "Exact match in 36 Service type options." },
+      { field: "Service Sub-Type", current: "empty", to: "Existing Contract Verification", confidence: 68,
+        reason: "Customer asking for an existing agreement copy. Alt: PO Collection." },
+      { field: "Assigned Name", current: "empty", to: "Mahalakshmi K", confidence: 94,
+        reason: "Internal forward in comment 2 explicitly tags @Mahalakshmi K." },
+      { field: "Parent Client", current: "empty", to: "NA", confidence: 80,
+        reason: "Vendor not under JLL/CBRE umbrella." },
+    ],
+    completeness: [
+      { state: "miss", text: "<strong>Pickup overdue</strong> — 15.5h, no agent reply to customer" },
+      { state: "miss", text: "All 11 mandatory Managed Services fields empty" },
+      { state: "thin", text: "Customer 'Amps India' — verify exists in 911-option dropdown" },
+    ],
+    similar: [
+      { id: 593755, match: 58, label: "med", subj: "Need access for a few A/cs · SilaGroup",
+        meta: "Both: vendor admin request · Mahalakshmi K addressed · open + untouched" },
+    ],
+  },
+
+  {
+    id: 593761, status: "new", statusLabel: "New", group: "PS", customer: "Reliance", custClass: "reliance",
+    subject: "Recall: Re: [External][goBetter] Re: CAS-382980-B2M1B3 — WO Mapping",
+    created: "Apr 29, 10:04 IST", updated: "no action", assignee: "Unassigned", requester: "Rajiv Sardana · Reliance",
+    pickup: { type: "merge", title: "Outlook recall · auto-merge candidate",
+      meta: "Single comment is the Outlook recall notice. Same CAS-382980-B2M1B3 reference as #593770 — should be merged silently.",
+      actions: [["Auto-merge → #593770", true], ["Mark as recall · close", false]] },
+    conversation: [
+      { role: "cust", initials: "RS", name: "Rajiv Sardana · Reliance", time: "Apr 29, 10:04", public: true,
+        body: "Rajiv.Sardana@ril.com would like to recall the message, \"Re: [External][goBetter] Re: CAS-382980-B2M1B3 — WO Mapping\". Confidentiality Warning…",
+        ai_note: "Standard Outlook recall message. No actionable content. Same CAS reference as #593770 (created 9 minutes after this)." },
+    ],
+    fields: [
+      { name: "Customer Name", required: true, value: "Reliance", state: "ok" },
+      { name: "Priority", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Product", required: true, value: "empty", state: "empty" },
+      { name: "Module", required: true, value: "empty", state: "empty" },
+      { name: "Section", required: true, value: "empty", state: "empty" },
+      { name: "Bucketization (Reliance)", required: true, value: "empty", state: "empty" },
+    ],
+    ai_summary: "Outlook \"Recall this message\" email — <strong>not a real ticket</strong>. The single comment is the recall notice. The actual incident is in <strong>#593770</strong> (same CAS-382980 reference). Auto-merge rule should apply: subject prefix 'Recall:' + identical CAS reference + same customer + within 9 minutes.",
+    recommendations: [
+      { field: "Action", current: "queued for triage", to: "Auto-merge into #593770", confidence: 98,
+        reason: "Subject prefix 'Recall:' + identical CAS-382980-B2M1B3 reference + same customer (Reliance) + within 9 minutes." },
+      { field: "Priority", current: "empty", to: "Low", confidence: 95,
+        reason: "Recall messages are administrative noise. If kept open standalone, Low is correct." },
+    ],
+    completeness: [
+      { state: "miss", text: "<strong>Outlook recall</strong> incorrectly created a queue ticket — auto-merge rule needed" },
+      { state: "thin", text: "<code style='background:rgba(255,255,255,0.10);padding:0 4px'>external__critical</code> tag inherited from forwarded thread, not actual urgency" },
+    ],
+    similar: [
+      { id: 593770, match: 99, label: "match", subj: "CAS-382980-B2M1B3 — WO Mapping · Reliance",
+        meta: "<strong>MERGE TARGET</strong> — same CAS reference · created 9 min after this recall · canonical incident" },
+    ],
+  },
+
+  {
+    id: 593755, status: "open", statusLabel: "Open", group: "MS", customer: "SilaGroup", custClass: "silagroup",
+    subject: "Need access for a few A/cs",
+    created: "Apr 29, 09:49 IST", updated: "no agent reply", assignee: "Unassigned", requester: "Mahana R · SilaGroup",
+    pickup: { type: "urgent", title: "Untouched · 15.8 hours old · OPEN",
+      meta: "No assignee. Customer message addressed to Mahalakshmi but no agent reply. Request also under-specified — needs clarification.",
+      actions: [["Pick up", true], ["Apply 9 AI suggestions", false]] },
+    conversation: [
+      { role: "cust", initials: "MR", name: "Mahana R · SilaGroup", time: "Apr 29, 09:49", public: true,
+        body: "Dear Mahalakshmi, Kindly provide access for the AVEVA. Thanks and regards, Mahana.R Executive – Documentation, mahana.r@silagroup.co.in, +91 8951345452",
+        ai_note: "One-line request, addressed to Mahalakshmi. Under-specified — agent's first reply should ask: which AVEVA accounts, which permission level, which environment." },
+    ],
+    fields: [
+      { name: "Requestor", value: "Mahana R <mahana.r@silagroup.co.in>", state: "ok" },
+      { name: "Request type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Assigned Name", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Priority", required: true, value: "Normal", state: "ok" },
+      { name: "Parent Client", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Customer Name", value: "empty", state: "empty", fix: true },
+      { name: "Product", required: true, value: "empty", state: "empty" },
+      { name: "Service type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Service Sub-Type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Root Cause - Level 1", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Number of Sites", required: true, value: "empty", state: "empty" },
+      { name: "Number of Profiles", required: true, value: "empty", state: "empty" },
+      { name: "How resolved?", required: true, value: "empty", state: "empty" },
+    ],
+    ai_summary: "SilaGroup user (Mahana R, Documentation Executive) requesting 'AVEVA' access. Single one-line comment, addressed to Mahalakshmi. <strong>Under-specified</strong> — agent should ask which AVEVA accounts, which permissions, which environment. <strong>15.8 hours since creation, still unassigned and untouched.</strong>",
+    recommendations: [
+      { field: "Request type", current: "empty", to: "Operations Task", confidence: 92,
+        reason: "Routine access provisioning is an Operations Task." },
+      { field: "Assigned Name", current: "empty", to: "Mahalakshmi K", confidence: 95,
+        reason: "Greeting 'Dear Mahalakshmi' — direct address." },
+      { field: "Parent Client", current: "empty", to: "NA", confidence: 80,
+        reason: "SilaGroup not under JLL/CBRE." },
+      { field: "Customer Name", current: "empty", to: "Sila Group (verify dropdown)", confidence: 78, review: true,
+        reason: "Email domain silagroup.co.in. May need a new option added." },
+      { field: "Product", current: "empty", to: "needs human review", review: true, confidence: null,
+        reason: "AVEVA is a vendor system, not in your 11 Product options." },
+      { field: "Service type", current: "empty", to: "User Management", confidence: 94,
+        reason: "Direct match in 36 Service type options; request is verbatim 'provide access'." },
+      { field: "Service Sub-Type", current: "empty", to: "User Management Permissions", confidence: 95,
+        reason: "Exact match in Service Sub-Type dropdown." },
+      { field: "Root Cause - Level 1", current: "empty", to: "Task", confidence: 85,
+        reason: "Routine access task, no underlying issue." },
+    ],
+    completeness: [
+      { state: "miss", text: "<strong>Pickup overdue</strong> — 15.8h, no assignee, no agent reply" },
+      { state: "miss", text: "All 11 Managed Services mandatory fields empty" },
+      { state: "miss", text: "<strong>Conversation under-specified</strong> — agent's first reply must ask which AVEVA accounts, permissions, environment", hint: "AI can draft this clarification reply (Phase 2)" },
+      { state: "thin", text: "AVEVA not in Product taxonomy — flag" },
+    ],
+    similar: [
+      { id: 593763, match: 58, label: "med", subj: "Request for Agreement copy · Amps India",
+        meta: "Both: under-specified vendor admin request · Mahalakshmi addressed · open + untouched" },
+    ],
+  },
+
+  {
+    id: 593795, status: "solved", statusLabel: "Solved", group: "PS", customer: "Reliance::O2C", custClass: "reliance-o2c",
+    subject: "CWMS-O | Issue is color code — New sites.",
+    created: "Apr 29, 11:42 IST", updated: "Solved 13:47 (2h 5m)", assignee: "Eshwaran M H", requester: "Krantikumar Patil · Reliance",
+    pickup: false,
+    kb_banner: "<strong>KB-worthy:</strong> auto-drafted Confluence page now in <code>data/kb_drafts/593795_color_code_format.md</code> — review + publish to seed the runbook.",
+    conversation: [
+      { role: "agent", initials: "EM", name: "Eshwaran M H · BP Product Support", time: "Apr 29, 11:42", public: true,
+        body: "Issue Reported by: BP Support. Issue: Newly created Sites have incorrect color codes. Because of this, there are issues in onboarding. Platform: CWMS-O. Channel: Support." },
+      { role: "agent", initials: "EM", name: "Eshwaran M H · Agent", time: "Apr 29, 11:44", public: true,
+        body: "Hi Kranti, Bio Energy Barabanki — Incorrect color code." },
+      { role: "agent", initials: "EM", name: "Eshwaran M H · Agent", time: "Apr 29, 11:54", public: true,
+        body: "Hi Kranti, Please ignore the previous email. Below are the details: profiles are 100% complete but not visible in approval flows. Color code format is incorrect. Bio Energy Barabanki, Vadodara, Prayagraj, Kakinada, Jhajjar — all incorrect (e.g. 237, 29, 7). Correct format should be -234564 or 567432.",
+        ai_note: "Clear issue statement with scope (5 sites) and the correct format spec — canonical 'what was the issue' content." },
+      { role: "cust", initials: "KP", name: "Krantikumar Patil · Reliance", time: "Apr 29, 12:05", public: true,
+        body: "<span class='mention'>@Eshwaran M H</span> <span class='mention'>@Mahesh Vaishnav</span>, Corrected for Barabanki. Regards, Krantikumar Patil." },
+      { role: "cust", initials: "KP", name: "Krantikumar Patil · Reliance", time: "Apr 29, 12:15", public: true,
+        body: "Corrected for all mentioned sites. Regards, Krantikumar Patil." },
+      { role: "agent", initials: "EM", name: "Eshwaran M H · Agent", time: "Apr 29, 13:47", public: true,
+        body: "Hi Kranti, Thanks for the confirmation. — Eshwaran." },
+    ],
+    fields: [
+      { name: "Customer Name", required: true, value: "Reliance::O2C", state: "ok" },
+      { name: "Priority", required: true, value: "Normal", state: "ok", fix: true },
+      { name: "Product", required: true, value: "Platform", state: "ok" },
+      { name: "Module", required: true, value: "Organization Structure", state: "ok" },
+      { name: "Section", required: true, value: "Organization Structure", state: "ok" },
+      { name: "Bucketization", required: true, value: "Site", state: "ok" },
+      { name: "Root Cause L1", required: true, value: "Task", state: "thin", fix: true },
+      { name: "Root Cause L2", required: true, value: "Site Creation", state: "thin", fix: true },
+      { name: "KB Article", required: true, value: "Confluence link present ✓", state: "ok" },
+      { name: "How resolved?", required: true, value: "Color code issue in the Site.", state: "thin", fix: true },
+      { name: "What was the issue?", value: "empty", state: "empty", fix: true },
+      { name: "Total Profiles", required: true, value: "5 (likely sites)", state: "thin" },
+    ],
+    ai_summary: "Eshwaran reported 5 newly-created Reliance sites (Bio Energy Barabanki, Vadodara, Prayagraj, Kakinada, Jhajjar) had color codes in invalid format (e.g. <strong>237, 29, 7</strong>) instead of the required <strong>-234564 / 567432</strong> hex format — blocking profile visibility in approval flows. Krantikumar (Reliance) corrected codes; Eshwaran confirmed. <strong>Cleanly closed in 2h 5m. Best-tagged ticket in this batch.</strong>",
+    recommendations: [
+      { field: "Root Cause L1", current: "Task", to: "Issue", confidence: 92,
+        reason: "Ticket explicitly says color codes are 'incorrect' and asks for corrections — that's a data quality issue, not a routine task. AI distinguishes 'Issue' (something wrong) from 'Task' (something requested)." },
+      { field: "Root Cause L2", current: "Site Creation", to: "Site Attribute Modification", confidence: 92,
+        reason: "Sites already existed; what was actually done was modifying the color-code attribute. 'Site Creation' describes the original act; 'Site Attribute Modification' describes what fixed the issue." },
+      { field: "Priority", current: "Normal", to: "High", confidence: 80,
+        reason: "5-site production blocker on Reliance::O2C onboarding flow. 2h resolution confirms High but not Urgent." },
+      { field: "How resolved?", current: "Color code issue in the Site.", to: "Customer corrected color codes for 5 sites (Bio Energy Barabanki, Vadodara, Prayagraj, Kakinada, Jhajjar) per format -234564 / 567432; profiles now appearing in approval flows.", confidence: 93,
+        reason: "Current value restates the problem. Drafted note adds action, scope, format spec, verification." },
+      { field: "What was the issue?", current: "empty", to: "5 newly-created sites had color codes in invalid format (e.g. 237, 29, 7) instead of required -NNNNNN / NNNNNN hex format. Profiles 100% complete but invisible in approval flows.", confidence: 95,
+        reason: "Direct synthesis of agent comment 3." },
+    ],
+    completeness: [
+      { state: "ok", text: "Module / Section / Bucketization populated correctly" },
+      { state: "ok", text: "KB Article populated with a real Confluence URL — <strong>only ticket in batch where this is done</strong>" },
+      { state: "thin", text: "<strong>Root Cause L1</strong> = 'Task' — should be <strong>Issue</strong> (improper color coding, not a request)" },
+      { state: "thin", text: "<strong>Root Cause L2</strong> = 'Site Creation' — should be <strong>Site Attribute Modification</strong>" },
+      { state: "thin", text: "'How resolved?' restates the problem rather than the action taken" },
+      { state: "thin", text: "'What was the issue?' empty despite a clear problem statement" },
+      { state: "thin", text: "Total Profiles=5 — likely sites, not profiles" },
+    ],
+    similar: [
+      { id: 593800, match: 72, label: "med", subj: "Trade Validation Document Upload · Reliance::O2C",
+        meta: "Same customer · Reliance::O2C operations workflow" },
+      { id: 593734, match: 68, label: "med", subj: "New Validity Issue · Reliance::O2C",
+        meta: "Same customer · Vendor profile workflow · also Platform" },
+    ],
+  },
+
+  {
+    id: 593791, status: "closed", statusLabel: "Closed (merged)", group: "PS", customer: "Reliance", custClass: "reliance",
+    subject: "URGENT — Z5 need to activate_00021049",
+    created: "Apr 29, 11:36 IST", updated: "Closed 13:20", assignee: "Pooja H S", requester: "Manali Mestry · Reliance",
+    pickup: { type: "merge", title: "Closed by merge into #593648 — but custom fields lost",
+      meta: "All 11 mandatory fields empty because the merge inherited nothing. AI should run analysis on this child and propose backfilling the parent.",
+      actions: [["Backfill #593648", true]] },
+    conversation: [
+      { role: "cust", initials: "MM", name: "Manali Mestry · Reliance", time: "Apr 29, 11:36", public: true,
+        body: "Dear Wrishov, Please update on this urgently. I recall two different Z5 combinations were aligned with the same Z5 code (Z5 code – 00021049). Regards, Manali Mestry." },
+      { role: "bp", initials: "WN", name: "Wrishov Nandan · Agent", time: "Apr 29, 12:33", public: false,
+        body: "Hi Manali, This was already done around afternoon hours. Kindly check and confirm." },
+      { role: "agent", initials: "PH", name: "Pooja H S · Agent", time: "Apr 29, 13:20", public: true,
+        body: "This request was closed and merged into request #593648 \"URGENT - Z5 need to activate_000…\"." },
+    ],
+    fields: [
+      { name: "Recommended action", value: "merged into #593648", state: "thin", fix: true },
+      { name: "Customer Name", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Priority", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Product", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Module", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Section", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Bucketization", required: true, value: "empty", state: "empty", fix: true },
+    ],
+    ai_summary: "Reliance user requested urgent activation of Z5 code <strong>00021049</strong>, mentioning confusion between two Z5 combinations. Wrishov confirmed it was done in afternoon hours. Pooja merged this into <strong>#593648</strong>. <strong>All custom fields are empty because the merge inherited nothing</strong> — that's the data-loss pattern.",
+    recommendations: [
+      { field: "Action", current: "already merged", to: "Backfill custom fields onto #593648", confidence: 85,
+        reason: "Z5 activation, Reliance, urgent priority — these signals exist in the conversation but were lost on merge." },
+      { field: "Priority", current: "empty", to: "Urgent", confidence: 96,
+        reason: "'URGENT' in subject; customer language 'update on this urgently'; Reliance Enterprise." },
+    ],
+    completeness: [
+      { state: "miss", text: "<strong>11 custom fields lost on merge</strong> — Customer Name, Priority, Product, Module, Section, Bucketization, RC L1+L2, KB, How-resolved, Total Profiles" },
+      { state: "thin", text: "'URGENT' in subject not reflected in Priority before merge" },
+    ],
+    similar: [
+      { id: 593795, match: 52, label: "med", subj: "Color code · New sites · Reliance::O2C",
+        meta: "Same customer · platform configuration workflow" },
+    ],
+  },
+
+  {
+    id: 593760, status: "solved", statusLabel: "Solved", group: "PS", customer: "Classic Protection Force", custClass: "cpf",
+    subject: "Checks are not getting triggered",
+    created: "Apr 29, 10:01 IST", updated: "Solved 11:46 (1h 45m)", assignee: "Keerthi P", requester: "Sathya Arunagiri · BP",
+    pickup: false,
+    kb_banner: "<strong>KB-worthy:</strong> seed Confluence article 'BGV check trigger lag — diagnostic steps' — agents repeatedly handle this with no runbook.",
+    suggested_reply: {
+      ticket_type: "Issue",
+      flag: "root cause not communicated",
+      flaws: [
+        "Agent identified the cause (yesterday's system lag) <em>in the same reply</em>, but framed it almost as an aside — customer might miss it",
+        "Doesn't reassure the customer that this won't recur or set expectations on lag-related risks",
+      ],
+      current: "Hi Sathya, I have checked for one profile and checks are getting triggered. Yesterday there were lags due to that it was missed. Please initiate the BGV from your end. Thanks and regards, Keerthi P",
+      suggested: "Hi Sathya,\n\n<strong>Root cause:</strong> yesterday's missed BGV triggers were caused by a system-side processing lag — not a configuration issue on your side. The lag has cleared and triggers are firing correctly today (verified on a sample profile from your batch).\n\n<strong>Action needed from you:</strong> please re-initiate the BGV for the affected profiles from your end and they should process normally.\n\nIf you see any further misses today, please reply on this thread and we'll investigate immediately. We're also flagging this with engineering so we can monitor for similar lag windows.\n\nThanks,\nKeerthi P",
+    },
+    conversation: [
+      { role: "bp", initials: "SA", name: "Sathya Arunagiri · BP internal", time: "Apr 29, 10:01", public: true,
+        body: "Dear Team, This is to inform you that the onboarded profile checks are not getting triggered. Please resolve this issue as soon as possible. Client - Classic Protection." },
+      { role: "agent", initials: "KP", name: "Keerthi P · Agent", time: "Apr 29, 10:57", public: true,
+        body: "Hi Sathya, I have checked for one profile and checks are getting triggered. <strong>Yesterday there were lags due to that it was missed</strong>. Please initiate the BGV from your end. Keerthi P.",
+        ai_note: "Cause stated explicitly: <strong>system lag yesterday</strong>. Not a training issue — but the field is tagged as such." },
+      { role: "bp", initials: "SA", name: "Sathya Arunagiri", time: "Apr 29, 11:23", public: true,
+        body: "Thanks for the update." },
+    ],
+    fields: [
+      { name: "Customer Name", required: true, value: "Classic Protection Force", state: "ok" },
+      { name: "Product", required: true, value: "Verify/BGV", state: "ok" },
+      { name: "Module", required: true, value: "All Employees", state: "ok" },
+      { name: "Section", required: true, value: "Profile Verification Status", state: "ok" },
+      { name: "Bucketization", required: true, value: "Not Reliance Ticket", state: "ok" },
+      { name: "Root Cause L1", required: true, value: "Training", state: "thin", fix: true },
+      { name: "Root Cause L2", required: true, value: "Not Reproducible", state: "thin", fix: true },
+      { name: "How resolved?", required: true, value: "I have checked for one profile…", state: "thin", fix: true },
+      { name: "Priority", required: true, value: "Normal", state: "ok", fix: true },
+      { name: "KB Article", required: true, value: "NA", state: "thin", fix: true },
+      { name: "Total Profiles", value: "5", state: "ok" },
+    ],
+    ai_summary: "BetterPlace internal user (Sathya, on behalf of Classic Protection Force) reported BGV checks not triggering for onboarded profiles. Agent (Keerthi P) checked one profile, found triggers working today, attributed yesterday's misses to <strong>system lag</strong>, asked the user to re-initiate. Resolved in 1h 45m. <strong>Note: Root Cause L1 = 'Training' — but agent's own comment says system lag, not training.</strong>",
+    recommendations: [
+      { field: "Root Cause L1", current: "Training", to: "Issue / Data Issues", confidence: 82,
+        reason: "Agent's own comment 2: 'Yesterday there were lags due to that it was missed' — system-side lag, not training." },
+      { field: "Root Cause L2", current: "Not Reproducible", to: "Data Issues / Lag", confidence: 65, review: true,
+        reason: "'Not Reproducible' contradicts the known cause." },
+      { field: "How resolved?", current: "thin", to: "Verified BGV checks now triggering correctly for sample profile. Yesterday's missed triggers attributed to system lag (resolved naturally). Customer asked to re-initiate from their end.", confidence: 92,
+        reason: "Synthesis of agent comment 2 — adds cause and next-action." },
+      { field: "Priority", current: "Normal", to: "High", confidence: 80,
+        reason: "Production BGV blocker for client onboarding." },
+      { field: "KB Article", current: "NA", to: "'BGV check trigger lag — diagnostic steps' (KB-worthy)", confidence: 70, review: true,
+        reason: "Recurring failure mode without runbook." },
+    ],
+    completeness: [
+      { state: "ok", text: "Customer / Product / Module / Section / Bucketization populated correctly" },
+      { state: "thin", text: "Root Cause L1 = 'Training' contradicts agent's own comment" },
+      { state: "thin", text: "'How resolved?' doesn't capture the cause (system lag) or next action" },
+      { state: "miss", text: "KB Article = NA for a recurring failure mode" },
+    ],
+    similar: [
+      { id: 593721, match: 53, label: "med", subj: "Vehicle/Driver Induction · Accenture · Vendor Tagging",
+        meta: "Both: thin 'How resolved?' notes · routine task · KB Article = NA" },
+    ],
+  },
+
+  {
+    id: 593734, status: "solved", statusLabel: "Solved", group: "MS", customer: "Reliance::O2C", custClass: "reliance-o2c",
+    subject: "New Validity Issue",
+    created: "Apr 29, 09:02 IST", updated: "Solved 17:38 (8h 36m)", assignee: "Amarnath Rao", requester: "Krantikumar Patil · Reliance",
+    pickup: false,
+    conversation: [
+      { role: "cust", initials: "KP", name: "Krantikumar Patil · Reliance", time: "Apr 29, 09:02", public: true,
+        body: "<span class='mention'>@goBetter</span> <span class='mention'>@Eshwaran M H</span> <span class='mention'>@amarnath.d@betterplace.co.in</span>, Please check why new validity is not showing after updating LL. <span class='mention'>@Mahesh Vaishnav</span>, need your immediate support. Regards, Krantikumar Patil." },
+      { role: "bp", initials: "MV", name: "Mahesh Vaishnav · BP internal", time: "Apr 29, 09:12", public: true,
+        body: "Hi Kranti, I checked one of the profile and I can see the details are updated. Can we check for rest and confirm? I will check why updating the 'New Valid Upto' Date took time.",
+        ai_note: "Cause hint: propagation delay. 'How resolved?' should incorporate this." },
+    ],
+    fields: [
+      { name: "Request type", required: true, value: "Platform Issue", state: "ok" },
+      { name: "Service type", required: true, value: "Vendor Profile Updates", state: "ok" },
+      { name: "Service Sub-Type", required: true, value: "empty", state: "empty", fix: true },
+      { name: "Customer Name", required: true, value: "Reliance::O2C", state: "ok" },
+      { name: "Number of Sites", required: true, value: "0", state: "thin" },
+      { name: "Number of Profiles", required: true, value: "0", state: "thin", fix: true },
+      { name: "Priority", required: true, value: "Normal", state: "ok", fix: true },
+      { name: "How resolved?", required: true, value: "This has been resolved from Mahesh & Dev Team.", state: "thin", fix: true },
+    ],
+    ai_summary: "Reliance user reported 'new validity not showing after updating LL' (Letter Limit). Mahesh (BP) checked one profile, saw details updated, asked customer to verify rest. Closure attributed broadly to 'Mahesh & Dev Team'. Tags suggest Vendor LL Updates flow. <strong>Number of Profiles=0 and Sites=0 are likely incorrect</strong> — multiple profiles were involved.",
+    recommendations: [
+      { field: "Service Sub-Type", current: "empty", to: "Vendor LL Updates (verify dropdown)", confidence: 85, review: true,
+        reason: "Tag vendor_ll_updates matches naming convention." },
+      { field: "How resolved?", current: "This has been resolved from Mahesh & Dev Team.", to: "Validated 'New Valid Upto' now displaying correctly post LL update on sample profile. Investigating with Dev Team why propagation took longer than expected.", confidence: 80,
+        reason: "Closure note too thin — drafted version describes verification + open question." },
+      { field: "Number of Profiles", current: "0", to: "verify with agent — likely > 0", confidence: 60, review: true,
+        reason: "Customer mentions checking multiple profiles' validity." },
+      { field: "Priority", current: "Normal", to: "High", confidence: 80,
+        reason: "Reliance, multi-profile, 'need your immediate support', 8.5h to close." },
+    ],
+    completeness: [
+      { state: "ok", text: "Request type / Service type / Customer correctly populated" },
+      { state: "thin", text: "Service Sub-Type empty despite vendor_ll_updates tag" },
+      { state: "thin", text: "Number of Profiles=0 contradicts conversation" },
+      { state: "thin", text: "'How resolved?' doesn't describe the actual fix" },
+      { state: "miss", text: "KB Article empty" },
+    ],
+    similar: [
+      { id: 593800, match: 87, label: "match", subj: "Trade Validation · Reliance::O2C",
+        meta: "Same customer · Managed Services · Profile workflow" },
+      { id: 593721, match: 66, label: "med", subj: "Vendor change · Accenture",
+        meta: "Vendor profile workflow · script-based fix" },
+    ],
+  },
+
+  {
+    id: 593721, status: "solved", statusLabel: "Solved", group: "PS", customer: "Accenture", custClass: "accenture",
+    subject: "Re: [External] Re: New Vehicle & New Driver Induction TT — MH43CQ6506 (Kripash Das)",
+    created: "Apr 29, 08:14 IST", updated: "Solved 09:57 (1h 43m)", assignee: "Keerthi P", requester: "ajay.yadav · BP",
+    pickup: false,
+    kb_banner: "<strong>KB-worthy:</strong> seed Confluence article 'Vendor Tagging Script — Driver Re-induction' — recurring play, no runbook.",
+    suggested_reply: {
+      ticket_type: "Task",
+      flag: "reply incomplete",
+      flaws: [
+        "Doesn't say <em>what</em> the agent actually did (which script, which fields touched)",
+        "Doesn't reference the driver code <code style='background:#fef3c7;padding:0 4px'>M02DRVR0989</code> for traceability",
+        "Doesn't confirm the push notification was dispatched (customer's second ask)",
+      ],
+      current: "Hi Team, Vendor has been updated. Thanks and regards, Keerthi P",
+      suggested: "Hi Team,\n\nVendor update completed for driver <strong>M02DRVR0989</strong> — vendor tag changed to <strong>Uber</strong> as requested. Push notification has been dispatched to the driver's app.\n\nPlease confirm the change is reflected on your end and let us know if any further action is needed.\n\nThanks,\nKeerthi P",
+    },
+    conversation: [
+      { role: "bp", initials: "AY", name: "ajay.yadav · BP internal", time: "Apr 29, 08:14", public: true,
+        body: "Hello Team, Kindly change the vendor name Uber and push the notification. M02DRVR0989. From TPTInduction.MDC@accenture.com: Kindly do the reinduction process. M02DRVR0989. Shalaka Manjrekar, Accenture Workplace Solutions, Mumbai." },
+      { role: "agent", initials: "KP", name: "Keerthi P · Agent", time: "Apr 29, 09:39", public: true,
+        body: "Hi Team, Vendor has been updated. Thanks and regards, Keerthi P." },
+      { role: "bp", initials: "AY", name: "ajay.yadav", time: "Apr 29, 09:55", public: true,
+        body: "Hello Team, Thanks for the update. Please close the ticket." },
+    ],
+    fields: [
+      { name: "Customer Name", required: true, value: "Accenture", state: "ok" },
+      { name: "Priority", required: true, value: "Normal", state: "ok" },
+      { name: "Product", required: true, value: "Onboard", state: "ok" },
+      { name: "Module", required: true, value: "All Employees", state: "ok" },
+      { name: "Section", required: true, value: "Client Vendor Relation", state: "ok" },
+      { name: "Bucketization", value: "Not Reliance Ticket", state: "ok" },
+      { name: "Root Cause L1", required: true, value: "Task", state: "ok" },
+      { name: "Root Cause L2", required: true, value: "Vendor Tagging Task", state: "ok" },
+      { name: "Total Profiles", value: "1", state: "ok" },
+      { name: "How resolved?", required: true, value: "Vendor script", state: "thin", fix: true },
+      { name: "KB Article", required: true, value: "NA", state: "thin", fix: true },
+    ],
+    ai_summary: "Internal request (Ajay, BP) on behalf of Accenture's Transport Induction team — change driver <strong>M02DRVR0989</strong> vendor to 'Uber' and push notification. Agent (Keerthi P) ran vendor-update script; customer confirmed and asked to close. Resolved in 1h 43m. <strong>Custom fields well populated for routing</strong>; resolution note 'Vendor script' too thin for similar future tickets.",
+    recommendations: [
+      { field: "How resolved?", current: "Vendor script", to: "Ran vendor-update script to retag driver M02DRVR0989 to vendor 'Uber' (per Accenture transport induction request); push notification dispatched. Customer confirmed and requested closure.", confidence: 93,
+        reason: "'Vendor script' is operationally meaningless to a future engineer." },
+      { field: "KB Article", current: "NA", to: "'Vendor Tagging Script — Driver Re-induction' (KB-worthy)", confidence: 75, review: true,
+        reason: "Routine play; runbook would let agents self-serve." },
+    ],
+    completeness: [
+      { state: "ok", text: "All Product Support routing fields populated correctly" },
+      { state: "ok", text: "Priority correctly set to Normal" },
+      { state: "thin", text: "'How resolved?' = 'Vendor script' insufficient for future learning" },
+      { state: "thin", text: "KB Article = NA for a repeatable workflow" },
+    ],
+    similar: [
+      { id: 593734, match: 66, label: "med", subj: "New Validity Issue · Reliance::O2C · Vendor profile",
+        meta: "Vendor profile workflow · script/dev-team fix" },
+      { id: 593760, match: 53, label: "med", subj: "BGV checks not triggering · Classic Protection",
+        meta: "Both: thin 'How resolved?' · routine task · KB = NA" },
+    ],
+  },
+];
+
+// ============================================================================
+// RENDER
+// ============================================================================
+function escapeAttr(s) { return String(s).replace(/"/g, '&quot;'); }
+
+function renderTicketList() {
+  const container = document.getElementById('ticket-list');
+  container.innerHTML = TICKETS.map((t, i) => {
+    const statClass = t.status === 'solved' ? 's-solved' : t.status === 'closed' ? 's-closed' : t.status === 'new' ? 's-new' : 's-open';
+    const pickupTag = t.pickup ? `<span class="pickup-tag">PICKUP</span>` : '';
+    return `
+      <div class="ticket-row" data-idx="${i}" onclick="selectTicket(${i})">
+        <div class="stat-bar ${statClass}"></div>
+        <div class="meta">
+          <div class="id-row">
+            <span class="id-num">#${t.id}</span>
+            <span>·</span>
+            <span>${t.statusLabel}</span>
+            ${pickupTag}
+          </div>
+          <div class="subject">${t.subject}</div>
+          <span class="cust-pill ${t.custClass}">${t.customer} · ${t.group}</span>
+        </div>
+      </div>
+    `;
+  }).join('');
+}
+
+function ringSvg(conf) {
+  if (conf == null) return '';
+  const dash = (conf / 100) * 87.96;
+  const color = conf >= 90 ? '#10b981' : conf >= 75 ? '#f59e0b' : '#fbbf24';
+  return `
+    <div class="ring-wrap">
+      <svg width="36" height="36" viewBox="0 0 36 36">
+        <circle class="ring-bg" cx="18" cy="18" r="14"/>
+        <circle class="ring-fg" cx="18" cy="18" r="14" stroke="${color}" stroke-dasharray="${dash.toFixed(2)} 87.96"/>
+      </svg>
+      <div class="ring-text">${conf}</div>
+    </div>
+  `;
+}
+
+function renderSlaBanner(t) {
+  const mount = document.getElementById('sla-banner-mount');
+  if (!t.pickup) { mount.innerHTML = ''; return; }
+  const p = t.pickup;
+  const icon = p.type === 'urgent' ? '⚠' : p.type === 'merge' ? '↪' : '⏰';
+  const actions = (p.actions || []).map(([label, primary]) =>
+    `<button class="pill-btn ${primary ? 'primary' : ''}">${label}</button>`
+  ).join('');
+  mount.innerHTML = `
+    <div class="sla-banner ${p.type}">
+      <span class="icon-pill">${icon}</span>
+      <div>
+        <strong>${p.title}</strong>
+        <div class="meta">${p.meta}</div>
+      </div>
+      <div class="actions">${actions}</div>
+    </div>
+  `;
+}
+
+function renderHeader(t) {
+  const grpClass = t.group === 'MS' ? 'b-ms' : 'b-ps';
+  const grpLabel = t.group === 'MS' ? 'Managed Services' : 'Product Support';
+  const stClass = t.status === 'solved' ? 'b-solved' : t.status === 'closed' ? 'b-closed' : t.status === 'new' ? 'b-new' : 'b-open';
+  const custClass = t.custClass.includes('reliance') ? 'b-cust' : 'b-cust-other';
+  const unassigned = t.assignee === 'Unassigned' ? '<span class="badge b-rose">Unassigned</span>' : `<span class="badge b-grey">Assignee: ${t.assignee}</span>`;
+  document.getElementById('ticket-header').innerHTML = `
+    <div class="ticket-id-row">
+      <span class="id-num">#${t.id}</span><span class="sep">·</span>
+      <span>Created ${t.created} · ${t.updated}</span>
+    </div>
+    <div class="ticket-subject">${t.subject}</div>
+    <div class="ticket-meta-row">
+      <span class="badge ${stClass}">${t.statusLabel}</span>
+      <span class="badge ${grpClass}">${grpLabel}</span>
+      <span class="badge ${custClass}">${t.customer}</span>
+      ${unassigned}
+      <span class="badge b-grey">Requester: ${t.requester}</span>
+    </div>
+  `;
+}
+
+function renderConversation(t) {
+  document.getElementById('conversation').innerHTML = t.conversation.map(c => {
+    const tag = c.public === false ? '<span class="internal-tag">Internal</span>' : '';
+    const cls = c.public === false ? 'comment internal' : 'comment public';
+    const ai = c.ai_note ? `<div class="ai-note">${c.ai_note}</div>` : '';
+    return `
+      <div class="${cls}">
+        <div class="comment-head">
+          <div class="comment-author"><span class="a ${c.role}">${c.initials}</span> ${c.name} ${tag}</div>
+          <span>${c.time}</span>
+        </div>
+        <div class="comment-body">${c.body}</div>
+        ${ai}
+      </div>
+    `;
+  }).join('');
+}
+
+function renderFields(t) {
+  document.getElementById('fields-body').innerHTML = t.fields.map(f => {
+    const req = f.required ? '<span class="req">*</span>' : '';
+    const valClass = f.state === 'ok' ? 'ok' : f.state === 'empty' ? 'empty' : 'flagged';
+    const fix = f.fix ? '<span class="fix-chip">FIX</span>' : '';
+    return `
+      <div class="field-row">
+        <span class="name">${f.name}${req}</span>
+        <span class="value ${valClass}">${f.value}${fix}</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function renderAi(t) {
+  document.getElementById('ai-summary-mount').innerHTML = `
+    <div class="ai-section">
+      <div class="heading">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+        Conversation summary
+      </div>
+      <div class="summary-glass">${t.ai_summary}</div>
+    </div>
+  `;
+
+  document.getElementById('ai-recs-mount').innerHTML = `
+    <div class="ai-section">
+      <div class="heading">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="9 11 12 14 22 4"/></svg>
+        Recommended field corrections <span class="heading-pill">${t.recommendations.length}</span>
+      </div>
+      ${t.recommendations.map(r => {
+        const fromHTML = r.current ? `<span class="from">${r.current}</span><span class="arrow">→</span>` : '';
+        const toClass = r.review ? 'to review' : 'to';
+        return `
+          <div class="rec-card">
+            <div class="rec-row">
+              <span class="field-name">${r.field}</span>
+              ${ringSvg(r.confidence)}
+            </div>
+            <div class="change">
+              ${fromHTML}
+              <span class="${toClass}">${r.to}</span>
+            </div>
+            <div class="reason">${r.reason}</div>
+          </div>
+        `;
+      }).join('')}
+    </div>
+  `;
+
+  const counts = { ok: 0, miss: 0, thin: 0 };
+  t.completeness.forEach(c => counts[c.state]++);
+  document.getElementById('ai-checks-mount').innerHTML = `
+    <div class="ai-section">
+      <div class="heading">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 11l3 3L22 4"/></svg>
+        Completeness check
+        <span class="heading-pill">${counts.ok} ok · ${counts.thin + counts.miss} issues</span>
+      </div>
+      <ul class="checklist">
+        ${t.completeness.map(c => {
+          const marker = c.state === 'ok' ? 'ok-marker' : c.state === 'miss' ? 'miss-marker' : 'thin-marker';
+          const sym = c.state === 'ok' ? '✓' : c.state === 'miss' ? '!' : '!';
+          const hint = c.hint ? `<span class="miss-hint">${c.hint}</span>` : '';
+          return `<li class="${c.state}"><span class="marker ${marker}">${sym}</span>${c.text}${hint}</li>`;
+        }).join('')}
+      </ul>
+    </div>
+  `;
+
+  document.getElementById('ai-similar-mount').innerHTML = `
+    <div class="ai-section">
+      <div class="heading">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+        Similar tickets in repository
+      </div>
+      ${t.similar.map(s => `
+        <div class="sim" onclick="selectTicketById(${s.id})">
+          <div class="sim-head">
+            <span class="sim-id">#${s.id}</span>
+            <span class="sim-match ${s.label === 'med' ? 'med' : ''}">${s.match}% match</span>
+          </div>
+          <div class="sim-subj">${s.subj}</div>
+          <div class="sim-meta">${s.meta}</div>
+        </div>
+      `).join('')}
+    </div>
+  `;
+
+  document.getElementById('ai-resolution-mount').innerHTML = '';
+}
+
+function renderSuggestedReply(t) {
+  const mount = document.getElementById('suggested-reply-mount');
+  if (!t.suggested_reply) { mount.innerHTML = ''; return; }
+  const sr = t.suggested_reply;
+  mount.innerHTML = `
+    <div class="reply-panel">
+      <div class="heading">
+        <span>✦ Suggested reply · ${sr.ticket_type} ticket</span>
+        <span class="pill-flag">${sr.flag}</span>
+      </div>
+      <div class="reply-flaws">
+        <div class="label">⚠ AI flagged ${sr.flaws.length} issues with the agent's reply</div>
+        <ul>${sr.flaws.map(f => `<li>${f}</li>`).join('')}</ul>
+      </div>
+      <div class="reply-current"><strong>Current reply:</strong> "${sr.current}"</div>
+      <div class="reply-suggest"><strong>Suggested reply:</strong>
+${sr.suggested}</div>
+      <div class="reply-actions">
+        <button class="pill-btn primary">Use this reply</button>
+        <button class="pill-btn">Edit before sending</button>
+        <button class="pill-btn">Dismiss</button>
+      </div>
+    </div>
+  `;
+}
+
+function renderKbBanner(t) {
+  const mount = document.getElementById('kb-banner-mount');
+  mount.innerHTML = t.kb_banner ? `<div class="kb-banner">${t.kb_banner}</div>` : '';
+}
+
+function selectTicket(i) {
+  const t = TICKETS[i];
+  if (!t) return;
+  document.querySelectorAll('.ticket-row').forEach((el, idx) => {
+    el.classList.toggle('active', idx === i);
+  });
+  renderSlaBanner(t);
+  renderHeader(t);
+  renderConversation(t);
+  renderFields(t);
+  renderAi(t);
+  renderSuggestedReply(t);
+  renderKbBanner(t);
+  window.scrollTo({ top: 0, behavior: 'smooth' });
+}
+
+function selectTicketById(id) {
+  const i = TICKETS.findIndex(t => t.id === id);
+  if (i >= 0) selectTicket(i);
+}
+
+// Init: default to first untouched ticket so the pickup demo lands first
+renderTicketList();
+selectTicket(1); // #593770 — the urgent untouched Reliance ticket
+</script>
+</body>
+</html>

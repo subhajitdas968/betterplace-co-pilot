@@ -1,0 +1,108 @@
+{% extends "_base.html" %}
+{% block title %}Feedback inbox · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">F8</div>
+    <h1 class="admin-detail-title">Feedback inbox</h1>
+    <div class="admin-detail-summary">
+      Every submission from the floating 💬 button lands here. Triage, reply,
+      close. Submitters get pinged in the notification bell when you reply.
+    </div>
+  </div>
+
+  <!-- Status tabs -->
+  <div style="display:flex;gap:6px;margin-top:14px;padding:0 16px;">
+    {% for k, lbl in [('new','🆕 New'),('triaged','🔍 Triaged'),('closed','✓ Closed'),('all','All')] %}
+    <a href="/admin/feedback?status={{ k }}"
+       style="padding:6px 14px;border-radius:10px 10px 0 0;text-decoration:none;font-size:12px;font-weight:600;
+              background:{% if (current_status == k) or (k == 'all' and current_status not in ['new','triaged','closed']) %}#fff;border:1px solid var(--border);border-bottom:1px solid #fff;color:#1e293b{% else %}transparent;color:#64748b{% endif %};">
+      {{ lbl }}
+      {% if k in counts %}<span style="font-size:10px;background:#e2e8f0;color:#475569;padding:1px 6px;border-radius:8px;margin-left:4px;">{{ counts[k] }}</span>{% endif %}
+    </a>
+    {% endfor %}
+  </div>
+
+  <div class="admin-card admin-card-done" style="margin:0 16px;padding:0;border-top-left-radius:0;">
+    {% if items %}
+    <div style="display:flex;flex-direction:column;">
+      {% for it in items %}
+      {% set kind_color = {'bug':'#ef4444','idea':'#f59e0b','question':'#0ea5e9','praise':'#10b981'}.get(it.kind, '#64748b') %}
+      {% set kind_emoji = {'bug':'🐛','idea':'💡','question':'❓','praise':'✨'}.get(it.kind, '💬') %}
+      <div id="item-{{ it.id }}" style="padding:14px 18px;border-bottom:1px solid #f1f5f9;{% if it.status == 'new' %}background:#fef9c3;{% endif %}">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px;flex-wrap:wrap;">
+          <span style="font-size:14px;">{{ kind_emoji }}</span>
+          <strong style="font-size:13px;">{{ it.title or (it.body[:80] + ('…' if it.body|length > 80 else '')) }}</strong>
+          <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:{{ kind_color }}22;color:{{ kind_color }};font-weight:600;text-transform:uppercase;">{{ it.kind }}</span>
+          {% if it.severity in ('high', 'urgent') %}
+          <span style="font-size:10px;padding:2px 7px;border-radius:8px;background:#fee2e2;color:#b91c1c;">{{ it.severity }}</span>
+          {% endif %}
+          <span style="font-size:11px;padding:2px 7px;border-radius:8px;
+                       background:{% if it.status == 'new' %}#fef3c7;color:#92400e{% elif it.status == 'triaged' %}#dbeafe;color:#1e40af{% else %}#dcfce7;color:#166534{% endif %};">
+            {{ it.status }}
+          </span>
+        </div>
+        <div style="font-size:12px;color:#1e293b;white-space:pre-wrap;margin:6px 0;line-height:1.5;">{{ it.body }}</div>
+        <div style="font-size:11px;color:#64748b;display:flex;gap:14px;flex-wrap:wrap;align-items:center;">
+          <span><strong>{{ it.user_email }}</strong></span>
+          <span>{{ it.created_at | ist('%d %b %Y, %H:%M') }}</span>
+          {% if it.page_url %}<span>📍 <a href="{{ it.page_url }}" style="color:var(--accent);">{{ it.page_url }}</a></span>{% endif %}
+          {% if it.ticket_id %}<span>🎫 <a href="/tickets/{{ it.ticket_id }}" style="color:var(--accent);">#{{ it.ticket_id }}</a></span>{% endif %}
+        </div>
+        {% if it.reply %}
+        <div style="margin-top:10px;padding:10px 12px;background:#eef2ff;border-left:3px solid var(--accent);border-radius:6px;font-size:12px;">
+          <div style="font-size:10px;color:#64748b;margin-bottom:4px;">Admin reply by {{ it.replied_by }} · {{ it.replied_at | ist('%d %b %Y, %H:%M') }}</div>
+          <div style="white-space:pre-wrap;">{{ it.reply }}</div>
+        </div>
+        {% endif %}
+        <div style="display:flex;gap:6px;margin-top:10px;align-items:center;flex-wrap:wrap;">
+          {% if it.status != 'triaged' %}
+          <button type="button" onclick="setStatus({{ it.id }}, 'triaged')" class="admin-card-btn" style="font-size:11px;">🔍 Triage</button>
+          {% endif %}
+          {% if it.status != 'closed' %}
+          <button type="button" onclick="setStatus({{ it.id }}, 'closed')" class="admin-card-btn" style="font-size:11px;color:#166534;">✓ Close</button>
+          {% endif %}
+          <button type="button" onclick="toggleReply({{ it.id }})" class="admin-card-btn" style="font-size:11px;">💬 Reply</button>
+        </div>
+        <div id="reply-{{ it.id }}" style="display:none;margin-top:8px;">
+          <textarea id="reply-text-{{ it.id }}" rows="3" placeholder="Reply to the submitter…"
+                    style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:6px;font-size:12px;font-family:inherit;resize:vertical;box-sizing:border-box;">{{ it.reply or '' }}</textarea>
+          <div style="display:flex;justify-content:flex-end;margin-top:6px;">
+            <button type="button" onclick="sendReply({{ it.id }})" class="admin-card-btn"
+                    style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;font-size:11px;">Send reply &amp; mark triaged</button>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+    {% else %}
+    <div style="padding:40px;text-align:center;color:#94a3b8;font-size:13px;">
+      No feedback items{% if current_status not in ('all',) %} in <strong>{{ current_status }}</strong> status{% endif %}.
+    </div>
+    {% endif %}
+  </div>
+</main>
+
+<script>
+async function setStatus(fid, st) {
+  const fd = new FormData(); fd.append('status', st);
+  const r = await fetch('/api/admin/feedback/' + fid, { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+}
+function toggleReply(fid) {
+  const el = document.getElementById('reply-' + fid);
+  el.style.display = el.style.display === 'none' ? 'block' : 'none';
+  if (el.style.display === 'block') document.getElementById('reply-text-' + fid).focus();
+}
+async function sendReply(fid) {
+  const txt = document.getElementById('reply-text-' + fid).value.trim();
+  if (!txt) { alert('Type a reply first'); return; }
+  const fd = new FormData();
+  fd.append('reply', txt);
+  fd.append('status', 'triaged');
+  const r = await fetch('/api/admin/feedback/' + fid, { method: 'POST', body: fd });
+  if (r.ok) location.reload();
+}
+</script>
+{% endblock %}

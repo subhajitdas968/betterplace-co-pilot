@@ -1,0 +1,53 @@
+{% extends "_base.html" %}
+{% block title %}{{ feature.title }} · Admin{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <span class="admin-status admin-status-{{ feature.status }}">
+      {% if feature.status == 'done' %}● Live
+      {% elif feature.status == 'partial' %}◐ Partial
+      {% else %}○ Pending
+      {% endif %}
+    </span>
+  </div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">{{ feature.title }}</h1>
+    <div class="admin-detail-summary">{{ feature.summary }}</div>
+    {% if feature.stat %}<div class="admin-detail-stat">{{ feature.stat }}</div>{% endif %}
+  </div>
+
+  <div class="admin-stub">
+    {% if feature.status == 'pending' %}
+    <div class="admin-stub-banner admin-stub-pending">
+      <div class="ass-icon">○</div>
+      <div>
+        <strong>Not built yet.</strong> This page will become the configuration UI
+        for this feature when it lands. The plan for this block is below.
+      </div>
+    </div>
+    {% else %}
+    <div class="admin-stub-banner admin-stub-done">
+      <div class="ass-icon">●</div>
+      <div>
+        <strong>Already running.</strong> Configuration UI for this section is
+        on the way. For now the section has been wired and its current state is
+        shown above.
+      </div>
+    </div>
+    {% endif %}
+
+    <div class="admin-stub-desc">{{ description }}</div>
+
+    <div class="admin-stub-actions">
+      <a href="/admin" class="admin-card-btn">← Back to all features</a>
+    </div>
+  </div>
+
+</main>
+
+{% endblock %}

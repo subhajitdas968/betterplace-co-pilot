@@ -1,0 +1,78 @@
+{% extends "_base.html" %}
+{% block title %}Admin &amp; Setup · BetterPlace Co-Pilot{% endblock %}
+{% block main %}
+
+<main class="main-pane admin-pane">
+
+  <div class="admin-hero">
+    <div>
+      <div class="admin-hero-eyebrow">Admin &amp; Setup</div>
+      <h1 class="admin-hero-title">Everything this tool does — and what's still coming</h1>
+      <div class="admin-hero-sub">
+        Each card is one capability. Click <strong>Configure</strong> to open its setup
+        page. Pending items list what we'll build, in order.
+      </div>
+    </div>
+    <div class="admin-hero-stats">
+      <div class="ahs-pill ahs-done">
+        <div class="ahs-num">{{ counts.done }}</div><div class="ahs-lbl">Live</div>
+      </div>
+      <div class="ahs-pill ahs-partial">
+        <div class="ahs-num">{{ counts.partial }}</div><div class="ahs-lbl">Partial</div>
+      </div>
+      <div class="ahs-pill ahs-pending">
+        <div class="ahs-num">{{ counts.pending }}</div><div class="ahs-lbl">Pending</div>
+      </div>
+    </div>
+  </div>
+
+  {% set categories = [
+    ('platform',    'Platform &amp; data',  'How tickets are stored and edited.'),
+    ('ai',          'AI &amp; insights',    'Claude integration: MCP server, headless worker, feedback loop.'),
+    ('workflow',    'Workflow &amp; UI',    'Views, ticket detail, replies, forms, SLA.'),
+    ('integration', 'Integrations',         'Zendesk, Gmail, Cloudflare Tunnel.'),
+    ('admin',       'Admin',                'Users, groups, fields, business hours.'),
+  ] %}
+
+  {% for cat_key, cat_title, cat_sub in categories %}
+  {% set cat_features = features|selectattr('category','equalto',cat_key)|list %}
+  {% if cat_features %}
+  <section class="admin-cat">
+    <div class="admin-cat-head">
+      <h2>{{ cat_title|safe }}</h2>
+      <div class="admin-cat-sub">{{ cat_sub }}</div>
+    </div>
+    <div class="admin-grid">
+      {% for f in cat_features %}
+      <div class="admin-card admin-card-{{ f.status }}">
+        <div class="admin-card-head">
+          <span class="admin-block">{{ f.block }}</span>
+          <span class="admin-status admin-status-{{ f.status }}">
+            {% if f.status == 'done' %}● Live
+            {% elif f.status == 'partial' %}◐ Partial
+            {% else %}○ Pending
+            {% endif %}
+          </span>
+        </div>
+        <div class="admin-card-title">{{ f.title }}</div>
+        <div class="admin-card-summary">{{ f.summary }}</div>
+        {% if f.stat %}<div class="admin-card-stat">{{ f.stat }}</div>{% endif %}
+        <div class="admin-card-actions">
+          {% if f.setup_url %}
+          <a href="{{ f.setup_url }}" class="admin-card-btn">
+            {% if f.status == 'done' or f.status == 'partial' %}Configure →{% else %}Plan / Setup →{% endif %}
+          </a>
+          {% else %}
+          <span class="admin-card-no-setup">No setup required</span>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+  </section>
+  {% endif %}
+  {% endfor %}
+
+</main>
+
+{% endblock %}

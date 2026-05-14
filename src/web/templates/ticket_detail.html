@@ -1,0 +1,1240 @@
+{% extends "_base.html" %}
+{% block title %}#{{ ticket.id }} · BetterPlace Co-Pilot{% endblock %}
+{% block main %}
+
+<main class="main-pane main-pane-detail">
+
+  <div class="back-link-row">
+    <a href="/views/{{ current_view }}" class="back-link">← Back to ticket list</a>
+    <span class="sla-pill sla-{{ ticket.sla.level }}">
+      <span class="sla-pill-dot"></span>
+      <span class="sla-pill-label">SLA</span>
+      <span class="sla-pill-value">{{ ticket.sla.label }}</span>
+    </span>
+  </div>
+
+  {% if ticket.insight and ticket.insight.pickup_flag %}
+  <div class="sla-banner urgent">
+    <span class="icon-pill">⚠</span>
+    <div>
+      <strong>{{ ticket.insight.pickup_flag.title or 'Untouched · needs pickup' }}</strong>
+      <div class="meta">{{ ticket.insight.pickup_flag.meta or ticket.insight.pickup_flag.reason or '' }}</div>
+    </div>
+    <div class="actions"><button class="banner-btn-urgent" type="button">Pick up</button></div>
+  </div>
+  {% endif %}
+
+  <div class="ticket-header">
+    <div class="ticket-id-row">
+      {% if ticket.source == 'native' and ticket.local_id %}
+        <span class="id-num">{{ ticket.local_id }}</span>
+        <span class="sep">·</span><span class="id-source-tag id-source-native">NATIVE</span>
+      {% else %}
+        <span class="id-num">#{{ ticket.id }}</span>
+        {% if ticket.external_id %}<span class="sep">·</span><span class="id-source-tag id-source-zd">Zendesk #{{ ticket.external_id }}</span>{% endif %}
+      {% endif %}
+      <span class="sep">·</span>
+      <span>Created {{ ticket.created_at|ist }}</span><span class="sep">·</span>
+      <span>Updated {{ ticket.updated_at|ist }}</span>
+      {% if ticket.has_local_overrides %}<span class="sep">·</span><span class="id-source-tag id-source-overridden">LOCAL EDITS</span>{% endif %}
+    </div>
+    <div class="ticket-subject">{{ ticket.subject }}</div>
+    <div class="ticket-meta-row">
+      <span class="badge b-{{ ticket.status }}">
+        {% if ticket.custom_status_label %}{{ ticket.custom_status_label }}{% else %}{{ ticket.status }}{% endif %}
+      </span>
+      {% if ticket.group %}<span class="badge {% if 'managed' in (ticket.group.name or '')|lower %}b-ms{% else %}b-ps{% endif %}">{{ ticket.group.name }}</span>{% endif %}
+      {% if ticket.organization %}<span class="badge b-cust">{{ ticket.organization.name }}</span>{% endif %}
+      {# F0+ · Inline assignment widget #}
+      <span class="badge {% if ticket.assignee %}b-grey{% else %}b-rose{% endif %}" id="assignee-badge"
+            style="display:inline-flex;align-items:center;gap:6px;">
+        <span id="assignee-label">
+          {% if ticket.assignee %}Assignee: {{ ticket.assignee.name }}{% else %}Unassigned{% endif %}
+        </span>
+        {% if has_perm(user, 'tickets.assign_self') or has_perm(user, 'tickets.assign_others') %}
+        <button type="button"
+                onclick="openAssignMenu(event)"
+                title="Reassign"
+                style="background:rgba(255,255,255,0.4);border:none;color:inherit;font-size:11px;padding:0 6px;border-radius:6px;cursor:pointer;">▾</button>
+        {% endif %}
+      </span>
+
+      {% if has_perm(user, 'tickets.assign_self') or has_perm(user, 'tickets.assign_others') %}
+      <div id="assign-menu" style="display:none;position:absolute;background:#fff;border:1px solid var(--border);border-radius:10px;box-shadow:0 8px 24px rgba(15,23,42,.15);padding:10px;min-width:280px;z-index:50;">
+        {% if user.zd_user_id and has_perm(user, 'tickets.assign_self') %}
+        <button type="button" onclick="assignTo({{ user.zd_user_id }}, '{{ user.name|e }} (you)')"
+                style="display:block;width:100%;text-align:left;padding:8px 10px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;cursor:pointer;font-size:12px;font-weight:600;margin-bottom:8px;">
+          ⭐ Assign to me
+        </button>
+        {% elif has_perm(user, 'tickets.assign_self') %}
+        <div style="background:#fef3c7;color:#92400e;padding:8px;border-radius:8px;font-size:11px;margin-bottom:8px;">
+          You're not mapped to a Zendesk user yet — ask an admin to map you in /admin/users.
+        </div>
+        {% endif %}
+        {% if has_perm(user, 'tickets.assign_others') %}
+        <input id="assign-search" placeholder="Search agents…"
+               oninput="filterAssignList(this.value)"
+               style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;font-size:11px;margin-bottom:6px;">
+        <div id="assign-list" style="max-height:240px;overflow-y:auto;display:flex;flex-direction:column;gap:2px;">
+          <div style="font-size:10px;color:#94a3b8;padding:4px;">Loading agents…</div>
+        </div>
+        <div style="border-top:1px solid var(--border);margin-top:8px;padding-top:8px;">
+          <button type="button" onclick="assignTo(null, 'Unassigned')"
+                  style="display:block;width:100%;text-align:left;padding:6px 8px;background:#fff1f2;border:1px solid #fecdd3;color:#be123c;border-radius:6px;cursor:pointer;font-size:11px;">
+            ⊘ Unassign
+          </button>
+        </div>
+        {% endif %}
+      </div>
+      {% endif %}
+      {% if ticket.requester %}
+        <span class="badge b-grey">
+          Requester: {{ ticket.requester.name }}{% if ticket.requester.email %} &lt;{{ ticket.requester.email }}&gt;{% endif %}
+        </span>
+      {% endif %}
+      {% if ticket.priority %}<span class="badge b-grey">Priority: {{ ticket.priority }}</span>{% endif %}
+    </div>
+  </div>
+
+  <div class="ticket-body" id="ticket-body">
+
+    <!-- LEFT: conversation (WhatsApp bubble style) -->
+    <div class="conv-col">
+
+      {% if ticket.mandatory_missing %}
+      <div class="mandatory-banner">
+        <span class="mandatory-icon">⚠</span>
+        <div>
+          <strong>Status change blocked.</strong>
+          {{ ticket.mandatory_missing|length }} mandatory field(s) empty:
+          <span class="mandatory-list">{{ ticket.mandatory_missing|join(', ') }}</span>
+        </div>
+      </div>
+      {% endif %}
+
+      <div class="conv-section-heading">Conversation · {{ ticket.comments|length }} message(s)</div>
+
+      <div class="bubble-stream">
+      {% for c in ticket.comments %}
+      {% set is_agent = c.author_role in ['agent','admin'] %}
+      {% set is_internal = not c.public %}
+      {% set body_clean = c.body|clean %}
+      <div class="bubble-row {% if is_agent %}row-right{% else %}row-left{% endif %}">
+        {% if not is_agent %}
+        <div class="bubble-avatar a-cust">{{ (c.author_name or '?')[0]|upper }}</div>
+        {% endif %}
+
+        <details class="bubble {% if is_internal %}bubble-internal{% elif is_agent %}bubble-agent{% else %}bubble-cust{% endif %}" {% if loop.last %}open{% endif %}>
+          <summary class="bubble-summary">
+            <span class="bubble-chev">▸</span>
+            <span class="bubble-name">{{ c.author_name or 'Unknown' }}</span>
+            {% if c.author_email %}<span class="bubble-email">{{ c.author_email }}</span>{% endif %}
+            {% if is_internal %}<span class="bubble-tag">Internal note</span>
+            {% elif is_agent %}<span class="bubble-tag bubble-tag-agent">Agent · public</span>
+            {% else %}<span class="bubble-tag bubble-tag-cust">Customer</span>
+            {% endif %}
+            <span class="bubble-time-summary">{{ c.created_at|ist }}</span>
+          </summary>
+          <div class="bubble-body">{{ body_clean[:3000] }}{% if (body_clean|length) > 3000 %}…{% endif %}</div>
+          {% if c.attachments %}
+          <div class="bubble-attachments">
+            {% for a in c.attachments %}
+            <a href="/api/attachments/{{ a.id }}/download" class="att-chip" title="{{ a.content_type or '' }} · {{ ((a.size_bytes or 0)/1024)|round(1) }} KB"
+               target="_blank" rel="noopener">
+              <span class="att-icon">{% if (a.content_type or '').startswith('image/') %}🖼{% elif (a.content_type or '').startswith('video/') %}🎬{% elif 'pdf' in (a.content_type or '') %}📄{% else %}📎{% endif %}</span>
+              <span class="att-name">{{ a.file_name }}</span>
+              <span class="att-size">{{ ((a.size_bytes or 0)/1024)|round(1) }} KB</span>
+            </a>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </details>
+
+        {% if is_agent %}
+        <div class="bubble-avatar {% if is_internal %}a-internal{% else %}a-agent{% endif %}">{{ (c.author_name or '?')[0]|upper }}</div>
+        {% endif %}
+      </div>
+      {% else %}
+      <div style="color:#64748b;font-size:12px;padding:12px;">No comments stored. They may still be syncing.</div>
+      {% endfor %}
+      </div>
+
+      <!-- REPLY BOX (upgraded: formatting toolbar + attachments + translate) -->
+      {# F0: Hidden entirely for users without any reply permission. View-only
+         engineers get a small "Read-only" pill instead so they know why. #}
+      {% set can_public_reply  = has_perm(user, 'tickets.public_reply') %}
+      {% set can_internal_note = has_perm(user, 'tickets.internal_note') %}
+      {% set can_translate     = has_perm(user, 'ai.translate') %}
+      {% if not (can_public_reply or can_internal_note) %}
+      <div class="reply-box reply-box-ro" style="background:#f8fafc;border:1px dashed var(--border);padding:14px;text-align:center;border-radius:10px;color:#64748b;font-size:13px;">
+        <strong>Read-only mode.</strong> Your role doesn't permit replies on tickets.
+        Ask an admin for the <code>Agent</code> role if you need to respond.
+      </div>
+      {% else %}
+      <div class="reply-box" id="reply-box" data-mode="public">
+        <div class="reply-tabs">
+          {% if can_public_reply %}<button type="button" class="reply-tab {% if can_public_reply %}active{% endif %}" data-mode="public" onclick="setReplyMode(this,'public')">Public reply</button>{% endif %}
+          {% if can_internal_note %}<button type="button" class="reply-tab {% if not can_public_reply %}active{% endif %}" data-mode="internal" onclick="setReplyMode(this,'internal')">📒 Internal note</button>{% endif %}
+        </div>
+
+        <!-- Formatting toolbar (Markdown, applies in both modes) -->
+        <div class="reply-toolbar" role="toolbar" aria-label="Formatting">
+          <button type="button" class="tb-btn" data-md="bold"   title="Bold (Ctrl/Cmd+B)"><strong>B</strong></button>
+          <button type="button" class="tb-btn" data-md="italic" title="Italic (Ctrl/Cmd+I)"><em>I</em></button>
+          <button type="button" class="tb-btn" data-md="strike" title="Strikethrough"><s>S</s></button>
+          <span class="tb-sep"></span>
+          <button type="button" class="tb-btn" data-md="code"   title="Inline code">&lt;/&gt;</button>
+          <button type="button" class="tb-btn" data-md="codeblock" title="Code block">{ }</button>
+          <button type="button" class="tb-btn" data-md="link"   title="Link">🔗</button>
+          <span class="tb-sep"></span>
+          <button type="button" class="tb-btn" data-md="ul" title="Bulleted list">•</button>
+          <button type="button" class="tb-btn" data-md="ol" title="Numbered list">1.</button>
+          <button type="button" class="tb-btn" data-md="quote" title="Quote">❝</button>
+          <span class="tb-sep"></span>
+          <label class="tb-attach" title="Attach a file">
+            📎 Attach
+            <input type="file" id="reply-file-input" multiple onchange="handleAttachFiles(this.files)" hidden>
+          </label>
+          <span class="tb-sep"></span>
+          {% if can_translate %}
+          <span class="tb-lang">
+            🌐
+            <select id="reply-lang" title="Translate draft to…">
+              <option value="">Translate…</option>
+              {% for l in translate_languages %}
+              <option value="{{ l.code }}">{{ l.name }}</option>
+              {% endfor %}
+            </select>
+            <button type="button" class="tb-translate-btn" onclick="translateDraft()">Go</button>
+          </span>
+          {% endif %}
+        </div>
+
+        <textarea id="reply-text" class="ph-autocomplete"
+                  placeholder="Type your reply. Markdown supported. Type {{ '{{' }} to insert a placeholder (ticket id, customer name, last comment, etc.)."></textarea>
+
+        <!-- Pending uploads chip row (populated by handleAttachFiles) -->
+        <div class="reply-attachments" id="reply-attachments" style="display:none;"></div>
+
+        <div class="reply-actions-row">
+          <button type="button" class="btn btn-ai" onclick="smartReply()" id="smart-reply-btn">✦ Improve with AI</button>
+          <button type="button" class="btn btn-primary" onclick="submitReply()">Save reply</button>
+          <button type="button" class="btn btn-secondary" onclick="copyReply()">Copy to clipboard</button>
+          <button type="button" class="btn btn-secondary" onclick="clearReply()">Clear</button>
+          <span class="smart-reply-status" id="smart-reply-status"></span>
+        </div>
+        <div class="reply-note">
+          Saved locally as a native comment under this ticket — never sent to Zendesk
+          (Block #1 policy).
+        </div>
+      </div>
+      {% endif %}{# /reply-box permission gate #}
+    </div>
+
+    <!-- RIGHT: Fields (collapsible) + AI panel -->
+    <div class="right-col">
+
+      <!-- History timeline — collapsed by default; pulls on first open -->
+      <details class="fields-panel" id="history-panel">
+        <summary class="fields-panel-summary" onclick="lazyLoadHistory()">
+          <span class="fp-label">History</span>
+          <span class="fp-count" id="history-count">…</span>
+          <button type="button" class="fp-chip fp-chip-imp" style="margin-left:auto;cursor:pointer;border:none;"
+                  onclick="event.preventDefault();event.stopPropagation();importZdAudits()" title="Pull historical events from Zendesk's audits API (one-time backfill)">
+            ⤓ Pull ZD audits
+          </button>
+        </summary>
+        <div class="fields-panel-body">
+          <div id="history-list" style="display:flex;flex-direction:column;gap:6px;font-size:12px;">
+            <div style="color:#94a3b8;padding:6px;">Loading…</div>
+          </div>
+        </div>
+      </details>
+
+      <!-- Collapsible fields panel — each row is editable in place; click to edit.
+           Default-collapsed; counter chips below the label tell the agent at a glance
+           whether they need to open it. -->
+      {% set empty_required = ticket.fields|selectattr('required')|selectattr('empty')|list|length %}
+      {% set empty_important = ticket.fields|selectattr('important')|selectattr('empty')|rejectattr('required')|list|length %}
+      <details class="fields-panel">
+        <summary class="fields-panel-summary">
+          <span class="fp-label">Ticket fields</span>
+          <span class="fp-count">{{ ticket.fields|length }}</span>
+          {% if empty_required %}<span class="fp-chip fp-chip-req">{{ empty_required }} required empty</span>{% endif %}
+          {% if empty_important %}<span class="fp-chip fp-chip-imp">{{ empty_important }} important empty</span>{% endif %}
+        </summary>
+        <div class="fields-panel-body">
+          {% for f in ticket.fields %}
+          <div class="field-row-clean {% if f.has_suggestion %}has-suggestion{% endif %}"
+               data-field-id="{{ f.id }}" data-field-type="{{ f.type }}" data-field-name="{{ f.name }}">
+            <div class="frc-name">
+              <span>{{ f.name }}</span>
+              {% if f.required %}<span class="frc-req" title="Mandatory in Zendesk">*</span>{% endif %}
+              {% if f.has_suggestion %}<span class="fix-chip" title="AI has suggested a correction">FIX</span>{% endif %}
+            </div>
+            <div class="frc-value-row">
+              <span class="frc-value {% if f.empty %}empty{% endif %}" onclick="editField(this)">
+                {{ f.value if f.value else 'empty · click to set' }}
+              </span>
+              <button type="button" class="frc-edit-btn" onclick="editField(this.previousElementSibling)" title="Edit">✎</button>
+            </div>
+            <div class="frc-editor" style="display:none;">
+              {% if f.type in ['tagger', 'multiselect'] %}
+                <select class="frc-input">
+                  <option value="">— empty —</option>
+                  {% for o in f.options %}
+                  <option value="{{ o.value }}" {% if f.raw_value == o.value %}selected{% endif %}>{{ o.name }}</option>
+                  {% endfor %}
+                </select>
+              {% elif f.type == 'integer' or f.type == 'decimal' %}
+                <input type="number" class="frc-input" value="{{ f.raw_value }}" {% if f.type == 'decimal' %}step="0.01"{% endif %}>
+              {% elif f.type == 'date' %}
+                <input type="date" class="frc-input" value="{{ f.raw_value }}">
+              {% elif f.type == 'checkbox' %}
+                <select class="frc-input">
+                  <option value="" {% if not f.raw_value %}selected{% endif %}>— empty —</option>
+                  <option value="true" {% if f.raw_value == True or f.raw_value == 'true' %}selected{% endif %}>Yes</option>
+                  <option value="false" {% if f.raw_value == False or f.raw_value == 'false' %}selected{% endif %}>No</option>
+                </select>
+              {% elif f.type == 'textarea' %}
+                <textarea class="frc-input frc-textarea" rows="3">{{ f.raw_value or '' }}</textarea>
+              {% else %}
+                <input type="text" class="frc-input" value="{{ f.raw_value or '' }}">
+              {% endif %}
+              <div class="frc-editor-actions">
+                <button type="button" class="frc-save" onclick="saveField(this)">Save</button>
+                <button type="button" class="frc-cancel" onclick="cancelField(this)">Cancel</button>
+                <span class="frc-status"></span>
+              </div>
+            </div>
+          </div>
+          {% else %}
+          <div style="color:#64748b;font-size:12px;padding:8px;">No custom fields populated.</div>
+          {% endfor %}
+        </div>
+      </details>
+
+      {% if ticket.insight %}
+      <details class="reply-panel">
+        <summary class="reply-panel-summary">
+          <span class="reply-chev">▾</span>
+          <span>✦ Suggested reply</span>
+          {% if ticket.insight.suggested_reply %}
+          <span class="pill-flag">{{ ticket.insight.suggested_reply.flag or 'reply incomplete' }}</span>
+          {% else %}
+          <span class="pill-flag" style="background:#dcfce7;color:#065f46;">no suggestion</span>
+          {% endif %}
+        </summary>
+        <div class="reply-panel-body">
+          {% if ticket.insight.suggested_reply %}
+            {% if ticket.insight.suggested_reply.flaws %}
+            <div class="reply-flaws">
+              <div class="label">⚠ Issues with current reply</div>
+              <ul>{% for f in ticket.insight.suggested_reply.flaws %}<li>{{ f|safe }}</li>{% endfor %}</ul>
+            </div>
+            {% endif %}
+            {% if ticket.insight.suggested_reply.current %}
+            <div class="reply-current"><strong>Current reply:</strong> "{{ ticket.insight.suggested_reply.current }}"</div>
+            {% endif %}
+            <div class="reply-suggest" id="ai-suggested-reply">{{ ticket.insight.suggested_reply.suggested|safe }}</div>
+            <div class="reply-actions">
+              <button type="button" class="pill-btn primary" onclick="useAiReply()">Use this reply ↩</button>
+              <button type="button" class="pill-btn" onclick="navigator.clipboard.writeText(document.getElementById('ai-suggested-reply').innerText); alert('Copied to clipboard')">Copy</button>
+            </div>
+          {% else %}
+            <div style="font-size:12.5px;color:#475569;line-height:1.55;">
+              AI didn't generate a suggested reply for this ticket.
+              <div style="margin-top:6px;font-size:11px;color:#94a3b8;">
+                Suggested replies fire when the most recent agent reply looks
+                incomplete (too short, missing root cause, missing action taken).
+                For tickets without an agent reply yet, or where the AI deems
+                the reply complete, this section is empty by design.
+              </div>
+            </div>
+          {% endif %}
+        </div>
+      </details>
+      {% endif %}
+
+      {% if ticket.insight and ticket.insight.kb_worthy %}
+      <div class="kb-banner">
+        <strong>KB-worthy:</strong> {{ ticket.insight.kb_topic or 'recurring failure mode — runbook recommended' }}
+      </div>
+      {% endif %}
+
+      {% if ticket.insight %}
+      <details class="ai-panel">
+        <summary class="ai-panel-head">
+          <h3><span class="ai-mark">✦</span> Claude AI Insights</h3>
+          <span class="meta">
+            {{ ticket.insight.created_at|ist }} · ${{ '%.4f'|format(ticket.insight.cost_usd or 0) }}
+            {% if not ticket.insight.is_history_aware %}<span style="background:#fef3c7;color:#92400e;padding:1px 6px;border-radius:6px;margin-left:6px;font-size:9px;">LEGACY</span>{% endif %}
+          </span>
+          {% if has_perm(user, 'ai.request_reanalyze') %}
+          <button type="button" id="reanalyze-btn"
+                  onclick="event.preventDefault();event.stopPropagation();reanalyzeThisTicket(this)"
+                  title="Re-analyze with history-aware AI (runs inline, ~20-40s)"
+                  style="background:rgba(255,255,255,.15);color:#fff;border:1px solid rgba(255,255,255,.3);padding:2px 10px;border-radius:6px;font-size:10.5px;cursor:pointer;margin-right:8px;">
+            ↻ Re-analyze
+          </button>
+          {% endif %}
+          <span class="ai-panel-chev">▸</span>
+        </summary>
+
+        {# ===== History-aware narrative sections (new) ===== #}
+        {% if ticket.insight.issue_summary %}
+        <details class="ai-section ai-collapsible" open>
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>📋 What this ticket is about</span></summary>
+          <div class="summary-glass">{{ ticket.insight.issue_summary|safe }}</div>
+        </details>
+        {% endif %}
+
+        {% if ticket.insight.historical_context %}
+        <details class="ai-section ai-collapsible" open>
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>📚 What we've seen before</span></summary>
+          <div class="summary-glass" style="white-space:pre-line;">{{ ticket.insight.historical_context|safe }}</div>
+          {% if ticket.insight.similar_with_reasoning %}
+          <div style="margin-top:8px;font-size:11px;color:rgba(255,255,255,.6);">Past tickets referenced:</div>
+          <div style="display:flex;flex-direction:column;gap:4px;margin-top:4px;">
+            {% for s in ticket.insight.similar_with_reasoning %}
+            <a href="/tickets/{{ s.ticket_id }}?view={{ current_view }}"
+               style="text-decoration:none;color:inherit;padding:6px 8px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.15);border-radius:6px;font-size:11.5px;display:block;">
+              <div style="display:flex;justify-content:space-between;align-items:center;">
+                <strong>#{{ s.ticket_id }}</strong>
+                <span style="font-size:10px;color:{% if s.applicability == 'high' %}#86efac{% elif s.applicability == 'medium' %}#fde047{% else %}#fca5a5{% endif %};">
+                  {{ s.applicability or 'medium' }} applicability{% if s.match_pct %} · {{ s.match_pct }}%{% endif %}
+                </span>
+              </div>
+              {% if s.why_relevant %}<div style="font-size:10.5px;color:rgba(255,255,255,.7);margin-top:2px;">{{ s.why_relevant|safe }}</div>{% endif %}
+              {% if s.how_resolved %}<div style="font-size:10.5px;color:rgba(255,255,255,.55);margin-top:2px;">→ {{ s.how_resolved|safe }}</div>{% endif %}
+            </a>
+            {% endfor %}
+          </div>
+          {% endif %}
+        </details>
+        {% endif %}
+
+        {% if ticket.insight.current_state %}
+        <details class="ai-section ai-collapsible" open>
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>📍 Current state</span></summary>
+          <div class="summary-glass">{{ ticket.insight.current_state|safe }}</div>
+        </details>
+        {% endif %}
+
+        {% if ticket.insight.recommended_action %}
+        <details class="ai-section ai-collapsible" open>
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>▶ Recommended next step</span></summary>
+          <div class="summary-glass" style="border-left:3px solid #6ee7b7;">{{ ticket.insight.recommended_action|safe }}</div>
+        </details>
+        {% endif %}
+
+        {# ===== Legacy summary (renders only when no new narrative fields exist) ===== #}
+        {% if ticket.insight.summary and not ticket.insight.is_history_aware %}
+        <details class="ai-section ai-collapsible" open>
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>Conversation summary</span><span style="margin-left:6px;font-size:9px;color:#fde047;">legacy — click ↻ Re-analyze for rich version</span></summary>
+          <div class="summary-glass">{{ ticket.insight.summary|safe }}</div>
+        </details>
+        {% endif %}
+
+        {% if ticket.insight.recommendations %}
+        <details class="ai-section ai-collapsible">
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>Suggested field corrections</span><span class="heading-pill">{{ ticket.insight.recommendations|length }}</span></summary>
+          {% for r in ticket.insight.recommendations %}
+          {% set fb = ticket.feedback_by_field.get((r.field or '')|lower) %}
+          <div class="rec-card {% if r.propose_new_option %}rec-card-new-option{% endif %}" data-field="{{ r.field }}">
+            <div class="rec-row">
+              <span class="field-name">{{ r.field }}{% if r.propose_new_option %} <span class="new-opt-badge">NEW OPTION</span>{% endif %}</span>
+              {% if r.confidence %}
+              <div class="ring-wrap">
+                <svg width="36" height="36" viewBox="0 0 36 36">
+                  <circle class="ring-bg" cx="18" cy="18" r="14"/>
+                  <circle class="ring-fg" cx="18" cy="18" r="14"
+                    stroke="{% if r.confidence >= 0.9 %}#10b981{% elif r.confidence >= 0.75 %}#f59e0b{% else %}#fbbf24{% endif %}"
+                    stroke-dasharray="{{ (r.confidence * 87.96)|round(2) }} 87.96"/>
+                </svg>
+                <div class="ring-text">{{ (r.confidence * 100)|round|int }}</div>
+              </div>
+              {% endif %}
+            </div>
+            <div class="change">
+              {% if r.current %}<span class="from">{{ r.current }}</span><span class="arrow">→</span>{% endif %}
+              <span class="to {% if r.review %}review{% endif %}{% if r.propose_new_option %} new-opt{% endif %}">{{ r.suggest }}</span>
+            </div>
+            {% if r.propose_new_option %}
+            <div class="new-opt-note">
+              ✦ This value isn't in the dropdown yet. Approving will add it as a new option to Zendesk
+              <em>and</em> our local repository, then apply it to this ticket.
+            </div>
+            {% endif %}
+            {% if r.reason %}<div class="reason">{{ r.reason|safe }}</div>{% endif %}
+
+            {% if fb %}
+            <div class="rec-feedback-status fb-{{ fb.decision }}">
+              {% if fb.decision == 'approved' %}✓ Approved by you · {{ fb.created_at[:16] }}
+              {% elif fb.decision == 'rejected' %}✕ Rejected · final value: <strong>{{ fb.final_value or '(none)' }}</strong>
+              {% else %}✎ Edited to <strong>{{ fb.final_value }}</strong>{% endif %}
+            </div>
+            {% else %}
+            {% if has_perm(user, 'ai.feedback') and has_perm(user, 'tickets.edit_fields') %}
+            <div class="rec-actions">
+              {% if r.propose_new_option %}
+              <button type="button" class="rec-btn rec-btn-approve" onclick="recApproveNewOption(this)"
+                data-suggest="{{ r.suggest }}">
+                ✓ Add option &amp; apply
+              </button>
+              {% else %}
+              <button type="button" class="rec-btn rec-btn-approve" onclick="recApprove(this)"
+                data-confidence="{{ r.confidence or '' }}" data-current="{{ r.current or '' }}" data-suggest="{{ r.suggest }}">
+                ✓ Approve
+              </button>
+              {% endif %}
+              <button type="button" class="rec-btn rec-btn-reject" onclick="recRejectOpen(this)">
+                ✕ Reject
+              </button>
+            </div>
+            {% else %}
+            <div class="rec-actions" style="opacity:0.55;font-size:11px;color:#94a3b8;font-style:italic;padding:6px;">
+              Read-only — your role can't approve/reject AI suggestions.
+            </div>
+            {% endif %}
+            <form class="rec-reject-form" style="display:none;" onsubmit="return recRejectSubmit(event, this)">
+              <input type="hidden" name="confidence" value="{{ r.confidence or '' }}">
+              <input type="hidden" name="current" value="{{ r.current or '' }}">
+              <input type="hidden" name="suggest" value="{{ r.suggest }}">
+              <label class="rrf-label">Correct value (or leave blank if no value applies):</label>
+              <input type="text" name="final_value" class="rrf-input" placeholder="What should the value actually be?">
+              <label class="rrf-label">Why was the AI's suggestion wrong? (helps the AI learn)</label>
+              <input type="text" name="rejection_reason" class="rrf-input" placeholder="e.g. customer is Reliance::Retail, not Reliance::O2C">
+              <div class="rrf-actions">
+                <button type="submit" class="rec-btn rec-btn-reject">Save rejection</button>
+                <button type="button" class="rec-btn rec-btn-cancel" onclick="recRejectCancel(this)">Cancel</button>
+              </div>
+            </form>
+            {% endif %}
+          </div>
+          {% endfor %}
+        </details>
+        {% endif %}
+
+        {% if ticket.insight.completeness %}
+        <details class="ai-section ai-collapsible">
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>Completeness check</span></summary>
+          <ul class="checklist">
+            {% for cc in ticket.insight.completeness %}
+            <li class="{{ cc.state }}">
+              <span class="marker {% if cc.state == 'ok' %}ok-marker{% elif cc.state == 'miss' %}miss-marker{% else %}thin-marker{% endif %}">{% if cc.state == 'ok' %}✓{% else %}!{% endif %}</span>
+              {{ cc.text|safe }}
+              {% if cc.hint %}<span class="miss-hint">{{ cc.hint|safe }}</span>{% endif %}
+            </li>
+            {% endfor %}
+          </ul>
+        </details>
+        {% endif %}
+
+        <details class="ai-section ai-collapsible">
+          <summary class="ai-section-summary">
+            <span class="ai-chev">▾</span><span>Similar past tickets</span>
+            <span class="heading-pill">{{ ticket.similar|length if ticket.similar else 0 }}</span>
+          </summary>
+          {% if ticket.similar %}
+            {% for s in ticket.similar %}
+            <a href="/tickets/{{ s.id }}?view={{ current_view }}" class="sim">
+              <div class="sim-head">
+                <span class="sim-id">#{{ s.id }} · {{ s.status }}{% if s.solved_at %} · solved {{ s.solved_at }}{% endif %}</span>
+                <span class="sim-match {% if s.match_pct < 70 %}med{% endif %}">{{ s.match_pct }}% match</span>
+              </div>
+              <div class="sim-subj">{{ s.subject }}</div>
+              {% if s.summary %}<div class="sim-meta">{{ s.summary[:200] }}{% if s.summary|length > 200 %}…{% endif %}</div>{% endif %}
+            </a>
+            {% endfor %}
+          {% else %}
+            <div style="padding:10px 4px;font-size:12px;color:rgba(255,255,255,.6);line-height:1.55;">
+              No similar past tickets found.
+              <div style="margin-top:6px;font-size:11px;color:rgba(255,255,255,.45);">
+                Matcher looks at solved/closed tickets from the last 90 days where the
+                customer, product, module, or root-cause overlap with this ticket.
+                Add a customer or RC1 value to surface matches.
+              </div>
+            </div>
+          {% endif %}
+        </details>
+
+        <details class="ai-section ai-collapsible">
+          <summary class="ai-section-summary"><span class="ai-chev">▾</span><span>Auto-drafted documentation</span><span class="heading-pill">Confluence</span></summary>
+          <div class="doc-actions">
+            <button type="button" class="pill primary" onclick="generateDoc()">✦ Generate from ticket</button>
+            <button type="button" class="pill" onclick="copyDoc()">Copy markdown</button>
+            <span class="doc-status" id="doc-status"></span>
+          </div>
+          <textarea class="doc-textarea" id="doc-textarea" placeholder="Click 'Generate from ticket' to draft a Confluence-ready runbook from this ticket's history. You can edit the result before publishing."></textarea>
+          <div class="doc-help">Phase 2 will add a "Publish to Confluence" button that uses the Atlassian API. For now, edit and copy.</div>
+        </details>
+      </details>
+      {% else %}
+      <div class="panel"><div class="panel-body" style="color:#64748b;font-size:12px;line-height:1.55;">
+        <strong style="color:var(--ink);">AI insights pending.</strong>
+        Open Claude Desktop and run the <code>analyze_ticket</code> prompt with ticket id
+        <code>{{ ticket.id }}</code>. The insight will save here automatically and appear on next reload.
+      </div></div>
+      {% endif %}
+
+    </div><!-- /.right-col -->
+  </div><!-- /.ticket-body -->
+
+</main>
+
+<script>
+// Run history-aware AI re-analysis on this ticket INLINE (not queued).
+// Spawns claude -p server-side, blocks 20-40s, then reloads with rich insight.
+let _reanalyzeRunning = false;
+async function reanalyzeThisTicket(btnOrEvent) {
+  if (_reanalyzeRunning) return;
+  if (!confirm('Re-analyze this ticket with the history-aware AI prompt?\n\n' +
+               'Runs as a separate subprocess (~20-40s) so the UI stays responsive. ' +
+               'Page reloads when the new insight is saved.')) return;
+  _reanalyzeRunning = true;
+  const btn = (btnOrEvent && btnOrEvent.tagName === 'BUTTON')
+              ? btnOrEvent
+              : document.getElementById('reanalyze-btn');
+  const origHtml = btn ? btn.innerHTML : null;
+  if (btn) { btn.disabled = true; btn.innerHTML = '⏳ Spawning… 0s'; }
+  const t0 = Date.now();
+
+  // 1. Kick off the subprocess (returns immediately with pid)
+  try {
+    const r = await fetch(`/api/tickets/${TICKET_ID}/reanalyze`, { method: 'POST' });
+    if (!r.ok) {
+      const txt = await r.text();
+      throw new Error(txt.length < 300 ? txt : (txt.slice(0, 300) + '…'));
+    }
+  } catch (e) {
+    if (btn) { btn.disabled = false; btn.innerHTML = origHtml || '↻ Re-analyze'; }
+    alert('Re-analyze failed to start:\n\n' + e.message);
+    _reanalyzeRunning = false;
+    return;
+  }
+
+  // 2. Poll the status endpoint every 2s until done/stopped/error
+  const tick = setInterval(async () => {
+    const elapsed = Math.floor((Date.now() - t0) / 1000);
+    try {
+      const r = await fetch('/api/admin/reanalyze/status', { cache: 'no-store' });
+      if (!r.ok) {
+        if (btn) btn.innerHTML = '⏳ ' + elapsed + 's …';
+        return;
+      }
+      const out = await r.json();
+      if (out.state === 'done') {
+        clearInterval(tick);
+        if (btn) btn.innerHTML = '✓ Done ' + elapsed + 's';
+        setTimeout(() => location.reload(), 600);
+        return;
+      }
+      if (out.state === 'error' || out.state === 'stopped') {
+        clearInterval(tick);
+        if (btn) { btn.disabled = false; btn.innerHTML = origHtml || '↻ Re-analyze'; }
+        alert('Re-analyze ended: ' + (out.state) +
+              (out.error ? ('\n\n' + out.error) : ''));
+        _reanalyzeRunning = false;
+        return;
+      }
+      // running / booting — update the label
+      if (btn) btn.innerHTML = '⏳ ' + (out.state || 'running') + ' · ' + elapsed + 's';
+    } catch (e) {
+      // network blip — keep polling
+    }
+  }, 2000);
+}
+
+// Carries the AI-suggested reply text into the reply textarea.
+function useAiReply() {
+  const src = document.getElementById('ai-suggested-reply');
+  if (!src) return;
+  const ta = document.getElementById('reply-text');
+  ta.value = src.innerText;
+  ta.focus();
+  ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+// ----- Approve / Reject feedback on AI field suggestions -----
+const TICKET_ID = {{ ticket.id }};
+
+async function postFeedback(payload) {
+  const fd = new FormData();
+  for (const [k, v] of Object.entries(payload)) fd.append(k, v == null ? '' : v);
+  const r = await fetch(`/api/tickets/${TICKET_ID}/feedback`, { method: 'POST', body: fd });
+  if (!r.ok) {
+    const t = await r.text();
+    throw new Error(`Feedback failed: ${r.status} ${t}`);
+  }
+  return r.json();
+}
+
+async function recApprove(btn) {
+  const card = btn.closest('.rec-card');
+  const field = card.dataset.field;
+  const suggested = btn.dataset.suggest;
+  try {
+    const result = await postFeedback({
+      field, decision: 'approved',
+      ai_current: btn.dataset.current,
+      ai_suggested: suggested,
+      confidence: btn.dataset.confidence,
+      final_value: suggested,
+    });
+    card.querySelector('.rec-actions').remove();
+    const status = document.createElement('div');
+    status.className = 'rec-feedback-status fb-approved';
+    if (result.write_status === 'synced_to_zendesk') {
+      status.innerHTML = '✓ Approved · synced to Zendesk · field updated below';
+      // Reflect change in the Ticket fields panel without reload
+      updateFieldsPanel(field, suggested);
+    } else if (result.write_status && result.write_status.startsWith('zendesk_error')) {
+      status.classList.remove('fb-approved');
+      status.classList.add('fb-rejected');
+      status.innerHTML = `✗ Recorded as approved, but Zendesk write failed: ${result.write_status}`;
+    } else {
+      status.innerHTML = `✓ Approved · ${result.write_status || 'saved'}`;
+    }
+    card.appendChild(status);
+  } catch (e) { alert(e.message); }
+}
+
+async function recApproveNewOption(btn) {
+  const card = btn.closest('.rec-card');
+  const field = card.dataset.field;
+  const optionName = btn.dataset.suggest;
+  if (!confirm(`Add "${optionName}" as a new option to the "${field}" dropdown in Zendesk and apply it to this ticket?`)) {
+    return;
+  }
+  try {
+    const fd = new FormData();
+    fd.append('field', field);
+    fd.append('option_name', optionName);
+    const r = await fetch(`/api/tickets/${TICKET_ID}/add-field-option`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    card.querySelector('.rec-actions').remove();
+    const status = document.createElement('div');
+    status.className = 'rec-feedback-status fb-approved';
+    status.innerHTML = out.already_existed
+      ? `✓ Option already existed · applied to this ticket`
+      : `✓ Added "${out.option_name}" as a new option to ${field} · applied to this ticket`;
+    card.appendChild(status);
+    updateFieldsPanel(field, out.display);
+  } catch (e) {
+    alert('Failed: ' + e.message);
+  }
+}
+
+function updateFieldsPanel(fieldName, displayValue) {
+  // Find the matching row in the fields panel and update its visible value
+  const rows = document.querySelectorAll('.fields-panel-body .field-row-clean');
+  for (const row of rows) {
+    if ((row.dataset.fieldName || '').toLowerCase() === (fieldName || '').toLowerCase()) {
+      const valEl = row.querySelector('.frc-value');
+      if (valEl) {
+        valEl.textContent = displayValue || 'empty · click to set';
+        valEl.classList.toggle('empty', !displayValue);
+      }
+      const fix = row.querySelector('.fix-chip');
+      if (fix) fix.remove();
+      row.classList.remove('has-suggestion');
+      // brief highlight to confirm the change visually
+      row.style.transition = 'background-color .8s';
+      const orig = row.style.backgroundColor;
+      row.style.backgroundColor = '#d1fae5';
+      setTimeout(() => { row.style.backgroundColor = orig; }, 1200);
+      break;
+    }
+  }
+}
+
+function recRejectOpen(btn) {
+  const card = btn.closest('.rec-card');
+  card.querySelector('.rec-actions').style.display = 'none';
+  card.querySelector('.rec-reject-form').style.display = 'block';
+  card.querySelector('.rrf-input').focus();
+}
+
+function recRejectCancel(btn) {
+  const card = btn.closest('.rec-card');
+  card.querySelector('.rec-actions').style.display = '';
+  card.querySelector('.rec-reject-form').style.display = 'none';
+}
+
+// ----- Inline field editing (writes to Zendesk) -----
+function editField(el) {
+  const row = el.closest('.field-row-clean');
+  row.querySelector('.frc-value-row').style.display = 'none';
+  const ed = row.querySelector('.frc-editor');
+  ed.style.display = 'block';
+  const inp = ed.querySelector('.frc-input');
+  inp && inp.focus();
+}
+function cancelField(btn) {
+  const row = btn.closest('.field-row-clean');
+  row.querySelector('.frc-editor').style.display = 'none';
+  row.querySelector('.frc-value-row').style.display = '';
+  row.querySelector('.frc-status').textContent = '';
+}
+async function saveField(btn) {
+  const row = btn.closest('.field-row-clean');
+  const fieldId = row.dataset.fieldId;
+  const inp = row.querySelector('.frc-input');
+  const value = inp.tagName === 'SELECT' ? inp.value : inp.value;
+  const status = row.querySelector('.frc-status');
+  status.textContent = 'Saving…'; status.style.color = '#64748b';
+  try {
+    const fd = new FormData();
+    fd.append('field_id', fieldId);
+    fd.append('value', value);
+    const r = await fetch(`/api/tickets/${TICKET_ID}/field`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    const valEl = row.querySelector('.frc-value');
+    valEl.textContent = out.display || 'empty · click to set';
+    valEl.classList.toggle('empty', !out.raw_value);
+    row.querySelector('.frc-editor').style.display = 'none';
+    row.querySelector('.frc-value-row').style.display = '';
+    status.textContent = 'Saved · synced to Zendesk';
+    status.style.color = '#047857';
+    setTimeout(() => { status.textContent = ''; }, 3500);
+  } catch (e) {
+    status.textContent = 'Failed: ' + e.message;
+    status.style.color = '#be123c';
+  }
+}
+
+// ----- Auto-doc generation -----
+async function generateDoc() {
+  const ta = document.getElementById('doc-textarea');
+  const st = document.getElementById('doc-status');
+  st.textContent = 'Generating…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch(`/api/tickets/${TICKET_ID}/generate-doc`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    ta.value = out.markdown || '';
+    st.textContent = 'Drafted · edit then copy to Confluence';
+    st.style.color = '#6ee7b7';
+  } catch (e) {
+    st.textContent = 'Failed: ' + e.message; st.style.color = '#fca5a5';
+  }
+}
+function copyDoc() {
+  const ta = document.getElementById('doc-textarea');
+  if (!ta.value) { alert('Generate first.'); return; }
+  navigator.clipboard.writeText(ta.value);
+  document.getElementById('doc-status').textContent = 'Copied to clipboard';
+}
+
+// ----- Smart reply -----
+async function smartReply() {
+  const ta = document.getElementById('reply-text');
+  const st = document.getElementById('smart-reply-status');
+  const btn = document.getElementById('smart-reply-btn');
+  st.textContent = 'Thinking…'; st.style.color = '#64748b';
+  btn.disabled = true;
+  try {
+    const fd = new FormData(); fd.append('draft', ta.value);
+    const r = await fetch(`/api/tickets/${TICKET_ID}/smart-reply`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const reply = await r.json();
+    if (confirm('AI suggested:\n\n' + (reply.suggested || '') + '\n\nReplace your draft?')) {
+      ta.value = reply.suggested || ta.value;
+    }
+    st.textContent = 'Suggestion ready'; st.style.color = '#047857';
+    setTimeout(() => st.textContent = '', 3000);
+  } catch (e) {
+    st.textContent = 'Failed: ' + e.message; st.style.color = '#be123c';
+  } finally {
+    btn.disabled = false;
+  }
+}
+
+// ===== History timeline ===========================================
+let HISTORY_LOADED = false;
+async function lazyLoadHistory() {
+  if (HISTORY_LOADED) return;
+  // First click opens the <details>; load events the first time only
+  setTimeout(loadHistory, 50);
+}
+async function loadHistory() {
+  HISTORY_LOADED = true;
+  const list = document.getElementById('history-list');
+  list.innerHTML = '<div style="color:#94a3b8;padding:6px;">Loading…</div>';
+  try {
+    const r = await fetch(`/api/tickets/${TICKET_ID}/history?limit=300`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    document.getElementById('history-count').textContent = out.count;
+    list.innerHTML = '';
+    if (!out.events.length) {
+      list.innerHTML = '<div style="color:#94a3b8;padding:6px;">No history yet. Click <strong>⤓ Pull ZD audits</strong> to backfill from Zendesk.</div>';
+      return;
+    }
+    for (const ev of out.events) renderHistoryItem(list, ev);
+  } catch (e) {
+    list.innerHTML = `<div style="color:#be123c;padding:6px;">Failed: ${e.message}</div>`;
+  }
+}
+
+function renderHistoryItem(host, ev) {
+  const row = document.createElement('div');
+  const palette = histPalette(ev.event_type);
+  row.style.cssText = `display:grid;grid-template-columns:24px 1fr;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:6px;border:1px solid ${palette.border};background:${palette.bg};`;
+  const when = formatIst(ev.created_at);
+  const actor = ev.actor_email || 'system';
+  row.innerHTML = `
+    <div style="font-size:14px;line-height:1.2;color:${palette.fg};">${palette.icon}</div>
+    <div>
+      <div style="font-size:12px;color:#0f172a;"><strong>${escapeHtml(ev.event_summary || ev.event_type)}</strong></div>
+      <div style="font-size:10.5px;color:#64748b;font-family:'JetBrains Mono',monospace;">
+        ${escapeHtml(when)} · ${escapeHtml(actor)} · <span style="background:${palette.tagBg};color:${palette.tagFg};padding:1px 5px;border-radius:8px;">${escapeHtml(ev.event_type)}</span>
+        ${ev.source === 'zendesk' ? '<span style="margin-left:6px;color:#94a3b8;">via ZD</span>' : ''}
+      </div>
+    </div>
+  `;
+  host.appendChild(row);
+}
+
+function histPalette(t) {
+  if (t.startsWith('comment')) return {icon:'💬',fg:'#1d4ed8',bg:'#eff6ff',border:'#bfdbfe',tagBg:'#dbeafe',tagFg:'#1d4ed8'};
+  if (t.startsWith('note'))    return {icon:'📒',fg:'#92400e',bg:'#fefce8',border:'#fde68a',tagBg:'#fef3c7',tagFg:'#92400e'};
+  if (t === 'status.changed')  return {icon:'🔁',fg:'#7c3aed',bg:'#faf5ff',border:'#ddd6fe',tagBg:'#ede9fe',tagFg:'#7c3aed'};
+  if (t.startsWith('field'))   return {icon:'✎',fg:'#0369a1',bg:'#f0f9ff',border:'#bae6fd',tagBg:'#e0f2fe',tagFg:'#0369a1'};
+  if (t.startsWith('tag'))     return {icon:'🏷',fg:'#0d9488',bg:'#f0fdfa',border:'#99f6e4',tagBg:'#ccfbf1',tagFg:'#0d9488'};
+  if (t.startsWith('sla'))     return {icon:'⏱',fg:'#be123c',bg:'#fff1f2',border:'#fecdd3',tagBg:'#ffe4e6',tagFg:'#be123c'};
+  if (t.startsWith('rule'))    return {icon:'⚙',fg:'#4f46e5',bg:'#eef2ff',border:'#c7d2fe',tagBg:'#e0e7ff',tagFg:'#4f46e5'};
+  if (t.startsWith('ai'))      return {icon:'✦',fg:'#a21caf',bg:'#fdf4ff',border:'#f5d0fe',tagBg:'#fae8ff',tagFg:'#a21caf'};
+  if (t.startsWith('webhook')) return {icon:'⇋',fg:'#7c2d12',bg:'#fff7ed',border:'#fed7aa',tagBg:'#ffedd5',tagFg:'#7c2d12'};
+  return {icon:'•',fg:'#475569',bg:'#f8fafc',border:'#e2e8f0',tagBg:'#f1f5f9',tagFg:'#475569'};
+}
+
+function formatIst(iso) {
+  if (!iso) return '';
+  try {
+    const d = new Date(iso);
+    const opts = {year:'numeric',month:'short',day:'2-digit',hour:'2-digit',minute:'2-digit',hour12:false,timeZone:'Asia/Kolkata'};
+    return d.toLocaleString('en-IN', opts) + ' IST';
+  } catch(e) { return iso; }
+}
+
+async function importZdAudits() {
+  const list = document.getElementById('history-list');
+  const orig = list.innerHTML;
+  list.innerHTML = '<div style="color:#64748b;padding:6px;">⏳ Pulling history from Zendesk…</div>';
+  try {
+    const r = await fetch(`/api/tickets/${TICKET_ID}/import-zd-audits`, { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    HISTORY_LOADED = false;
+    loadHistory();   // refresh
+    // brief success flash via the count badge
+    const cnt = document.getElementById('history-count');
+    const prev = cnt.textContent;
+    cnt.textContent = `+${out.events_inserted} new`;
+    setTimeout(() => loadHistory(), 200);
+  } catch (e) {
+    list.innerHTML = `<div style="color:#be123c;padding:6px;">Failed: ${escapeHtml(e.message)}</div>`;
+    setTimeout(() => { list.innerHTML = orig; }, 4000);
+  }
+}
+
+function escapeHtml(s) {
+  return String(s == null ? '' : s).replace(/[&<>"']/g, c =>
+    ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// ===== Reply-box block ============================================
+// Pending uploads — populated by handleAttachFiles, drained by submitReply.
+const PENDING_ATTACHMENTS = [];
+
+function setReplyMode(btn, mode) {
+  document.querySelectorAll('.reply-tab').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+  document.getElementById('reply-box').dataset.mode = mode;
+  // The internal-note theme is purely CSS; data-mode flips the chrome.
+}
+
+function clearReply() {
+  document.getElementById('reply-text').value = '';
+  PENDING_ATTACHMENTS.length = 0;
+  renderReplyAttachments();
+}
+
+function copyReply() {
+  const ta = document.getElementById('reply-text');
+  navigator.clipboard.writeText(ta.value);
+  const st = document.getElementById('smart-reply-status');
+  st.textContent = 'Copied'; st.style.color = '#047857';
+  setTimeout(() => st.textContent = '', 1500);
+}
+
+function renderReplyAttachments() {
+  const host = document.getElementById('reply-attachments');
+  if (!PENDING_ATTACHMENTS.length) { host.style.display = 'none'; host.innerHTML = ''; return; }
+  host.style.display = '';
+  host.innerHTML = PENDING_ATTACHMENTS.map((a, i) =>
+    `<span class="att-chip pending"><span class="att-icon">📎</span>
+       <span class="att-name">${a.file_name}</span>
+       <span class="att-size">${((a.size_bytes || 0)/1024).toFixed(1)} KB</span>
+       <button type="button" class="att-rm" title="Remove" onclick="rmPending(${i})">×</button>
+     </span>`
+  ).join('');
+}
+
+function rmPending(i) {
+  PENDING_ATTACHMENTS.splice(i, 1);
+  renderReplyAttachments();
+}
+
+async function handleAttachFiles(files) {
+  for (const f of files) {
+    const fd = new FormData();
+    fd.append('file', f);
+    try {
+      const r = await fetch(`/api/tickets/${TICKET_ID}/upload-attachment`, { method: 'POST', body: fd });
+      if (!r.ok) throw new Error(await r.text());
+      const out = await r.json();
+      PENDING_ATTACHMENTS.push(out);
+    } catch (e) {
+      alert(`Upload failed for ${f.name}: ${e.message}`);
+    }
+  }
+  document.getElementById('reply-file-input').value = '';
+  renderReplyAttachments();
+}
+
+async function translateDraft() {
+  const ta = document.getElementById('reply-text');
+  const lang = document.getElementById('reply-lang').value;
+  const st = document.getElementById('smart-reply-status');
+  if (!lang) { st.textContent = 'Pick a language'; st.style.color = '#be123c'; return; }
+  if (!ta.value.trim()) { st.textContent = 'Type a draft first'; st.style.color = '#be123c'; return; }
+  // Animated dots so the wait feels alive (Haiku usually ~1-2s; CLI fallback ~10s)
+  let dots = 0;
+  st.style.color = '#64748b';
+  const tick = setInterval(() => {
+    dots = (dots + 1) % 4;
+    st.textContent = '⏳ Translating' + '.'.repeat(dots) + ' (Haiku)';
+  }, 350);
+  const t0 = Date.now();
+  try {
+    const fd = new FormData();
+    fd.append('draft', ta.value);
+    fd.append('target_lang', lang);
+    const r = await fetch(`/api/tickets/${TICKET_ID}/translate-draft`, { method: 'POST', body: fd });
+    clearInterval(tick);
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    const ms = Date.now() - t0;
+    const elapsed = (ms/1000).toFixed(1);
+    const viaCli = out.via_cli_fallback;
+    // Friendly model label — show "Haiku" when API hit, "CLI fallback" when the
+    // metered API key isn't configured and we shelled out to `claude -p`.
+    const modelLabel = viaCli ? 'CLI fallback (slow)' : 'Haiku API';
+    let preview = `Translated to ${lang} in ${elapsed}s via ${modelLabel} (source: ${out.source_lang || 'auto'}).`;
+    if (viaCli) {
+      preview += `\n\nTip: set ANTHROPIC_API_KEY in .env to drop this to ~1-2s. The CLI path boots claude-code on every call (~8-10s overhead).`;
+    }
+    preview += '\n\nReplace your draft?';
+    if (confirm(preview)) {
+      ta.dataset.sourceLang = out.source_lang || '';
+      ta.value = out.translated;
+    }
+    st.textContent = `✓ ${elapsed}s · ${modelLabel}`;
+    st.style.color = viaCli ? '#b45309' : '#047857';
+    setTimeout(() => st.textContent = '', viaCli ? 8000 : 3000);
+  } catch (e) {
+    clearInterval(tick);
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c';
+  }
+}
+
+// ----- Markdown toolbar -----
+function applyMd(action) {
+  const ta = document.getElementById('reply-text');
+  const start = ta.selectionStart, end = ta.selectionEnd;
+  const sel = ta.value.slice(start, end);
+  let inserted = sel || '', wrap = ['', ''];
+  switch (action) {
+    case 'bold':       wrap = ['**', '**']; inserted = sel || 'bold text'; break;
+    case 'italic':     wrap = ['*',  '*'];  inserted = sel || 'italic text'; break;
+    case 'strike':     wrap = ['~~', '~~']; inserted = sel || 'strikethrough'; break;
+    case 'code':       wrap = ['`',  '`'];  inserted = sel || 'code'; break;
+    case 'codeblock':  wrap = ['\n```\n', '\n```\n']; inserted = sel || 'code\nblock'; break;
+    case 'link':       wrap = ['[', '](https://)']; inserted = sel || 'link text'; break;
+    case 'ul':         wrap = ['\n- ', '']; inserted = sel || 'item'; break;
+    case 'ol':         wrap = ['\n1. ', '']; inserted = sel || 'item'; break;
+    case 'quote':      wrap = ['\n> ', '']; inserted = sel || 'quote'; break;
+  }
+  const before = ta.value.slice(0, start);
+  const after  = ta.value.slice(end);
+  ta.value = before + wrap[0] + inserted + wrap[1] + after;
+  ta.focus();
+  const cursor = before.length + wrap[0].length + inserted.length + wrap[1].length;
+  ta.selectionStart = ta.selectionEnd = cursor;
+}
+
+document.addEventListener('click', (ev) => {
+  const btn = ev.target.closest('.tb-btn');
+  if (btn && btn.dataset.md) { ev.preventDefault(); applyMd(btn.dataset.md); }
+});
+
+document.addEventListener('keydown', (ev) => {
+  const ta = document.getElementById('reply-text');
+  if (!ta || document.activeElement !== ta) return;
+  if (!(ev.ctrlKey || ev.metaKey)) return;
+  const k = ev.key.toLowerCase();
+  if (k === 'b') { ev.preventDefault(); applyMd('bold'); }
+  else if (k === 'i') { ev.preventDefault(); applyMd('italic'); }
+  else if (k === 'k') { ev.preventDefault(); applyMd('link'); }
+});
+
+async function submitReply() {
+  const ta = document.getElementById('reply-text');
+  const mode = document.getElementById('reply-box').dataset.mode || 'public';
+  const st = document.getElementById('smart-reply-status');
+  if (!ta.value.trim() && PENDING_ATTACHMENTS.length === 0) {
+    st.textContent = 'Nothing to save'; st.style.color = '#be123c'; return;
+  }
+  st.textContent = 'Saving…'; st.style.color = '#64748b';
+  try {
+    const fd = new FormData();
+    fd.append('body', ta.value);
+    fd.append('mode', mode);
+    fd.append('body_format', 'markdown');
+    if (PENDING_ATTACHMENTS.length) {
+      fd.append('attachment_ids', PENDING_ATTACHMENTS.map(a => a.id).join(','));
+    }
+    if (ta.dataset.sourceLang) fd.append('source_language', ta.dataset.sourceLang);
+    const r = await fetch(`/api/tickets/${TICKET_ID}/reply`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = `Saved (${out.mode}${out.attachments_linked ? ', ' + out.attachments_linked + ' attached' : ''}) — reloading…`;
+    st.style.color = '#047857';
+    setTimeout(() => location.reload(), 600);
+  } catch (e) {
+    st.textContent = 'Failed: ' + e.message; st.style.color = '#be123c';
+  }
+}
+
+async function recRejectSubmit(ev, form) {
+  ev.preventDefault();
+  const card = form.closest('.rec-card');
+  const field = card.dataset.field;
+  const data = Object.fromEntries(new FormData(form));
+  try {
+    await postFeedback({
+      field, decision: 'rejected',
+      ai_current: data.current,
+      ai_suggested: data.suggest,
+      confidence: data.confidence,
+      final_value: data.final_value,
+      rejection_reason: data.rejection_reason,
+    });
+    form.remove();
+    const status = document.createElement('div');
+    status.className = 'rec-feedback-status fb-rejected';
+    status.innerHTML = `✕ Rejected · final value: <strong>${data.final_value || '(none)'}</strong>`;
+    card.appendChild(status);
+  } catch (e) { alert(e.message); }
+  return false;
+}
+
+// ===== F0+ T6 · Inline assignment widget =====
+// Toggle the assign-menu popover off the assignee badge. Lazy-loads the
+// agent list on first open (single fetch per page-load), then filters
+// client-side as the user types. Uses /api/tickets/{id}/field with
+// field_id=ASSIGNEE_FIELD_ID — already permission-gated server-side.
+const TICKET_ID = {{ ticket.id }};
+let ASSIGN_AGENTS_CACHE = null;
+
+function openAssignMenu(e) {
+  e.stopPropagation();
+  const menu = document.getElementById('assign-menu');
+  if (menu.style.display === 'block') {
+    menu.style.display = 'none';
+    return;
+  }
+  // Position under the badge
+  const badge = document.getElementById('assignee-badge');
+  const rect = badge.getBoundingClientRect();
+  menu.style.left = rect.left + 'px';
+  menu.style.top = (rect.bottom + window.scrollY + 4) + 'px';
+  menu.style.display = 'block';
+  if (!ASSIGN_AGENTS_CACHE) loadAssignAgents();
+}
+
+document.addEventListener('click', (e) => {
+  const menu = document.getElementById('assign-menu');
+  if (!menu) return;
+  if (!menu.contains(e.target) && !e.target.closest('#assignee-badge')) {
+    menu.style.display = 'none';
+  }
+});
+
+async function loadAssignAgents() {
+  // Pull the group's agents (or all agents) from the existing admin search endpoint.
+  // For an MVP just fetch all agents from /api/admin/tickets/search? We don't
+  // have one — but we DO have native_agents data exposed via /admin/agents. The
+  // simplest path: ask the existing admin/agents page's JSON form, or add a
+  // shared lightweight endpoint. For today, hit the new helper below.
+  try {
+    const r = await fetch('/api/agents/list?for_ticket=' + TICKET_ID, { cache: 'no-store' });
+    if (!r.ok) throw new Error(r.status);
+    ASSIGN_AGENTS_CACHE = await r.json();
+    renderAssignList('');
+  } catch (e) {
+    document.getElementById('assign-list').innerHTML =
+      `<div style="color:#be123c;padding:6px;font-size:11px;">Couldn't load agents: ${e.message}</div>`;
+  }
+}
+
+function renderAssignList(filter) {
+  if (!ASSIGN_AGENTS_CACHE) return;
+  const f = (filter || '').trim().toLowerCase();
+  const matched = ASSIGN_AGENTS_CACHE.agents
+    .filter(a => !f || (a.name || '').toLowerCase().includes(f) || (a.email || '').toLowerCase().includes(f))
+    .slice(0, 30);
+  const list = document.getElementById('assign-list');
+  if (!matched.length) {
+    list.innerHTML = '<div style="color:#94a3b8;padding:6px;font-size:11px;font-style:italic;">No matches.</div>';
+    return;
+  }
+  list.innerHTML = matched.map(a => `
+    <button type="button" onclick='assignTo(${a.id}, ${JSON.stringify(a.name || a.email)})'
+            style="display:flex;flex-direction:column;align-items:flex-start;padding:6px 8px;background:#fff;border:1px solid var(--border);border-radius:6px;cursor:pointer;text-align:left;">
+      <strong style="font-size:11px;">${a.name || '(no name)'}</strong>
+      <span style="font-size:10px;color:#64748b;">${a.email || ''}</span>
+    </button>
+  `).join('');
+}
+
+function filterAssignList(text) { renderAssignList(text); }
+
+async function assignTo(zdUserId, displayName) {
+  const menu = document.getElementById('assign-menu');
+  const label = document.getElementById('assignee-label');
+  const badge = document.getElementById('assignee-badge');
+  label.textContent = zdUserId ? ('Assignee: ' + displayName) : 'Unassigned';
+  badge.classList.remove('b-grey', 'b-rose');
+  badge.classList.add(zdUserId ? 'b-grey' : 'b-rose');
+  menu.style.display = 'none';
+  const fd = new FormData();
+  // assignee is a real column on tickets, not a custom field.
+  fd.append('field_id', '-1');  // sentinel — see route below
+  fd.append('value', zdUserId || '');
+  fd.append('field_kind', 'assignee');
+  const r = await fetch('/api/tickets/' + TICKET_ID + '/field', { method: 'POST', body: fd });
+  if (!r.ok) {
+    const body = await r.json().catch(() => ({}));
+    alert('Assignment failed: ' + (body.detail || 'unknown'));
+    location.reload();
+  }
+}
+</script>
+
+{% endblock %}

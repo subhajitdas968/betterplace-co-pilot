@@ -1,0 +1,184 @@
+{% extends "_base.html" %}
+{% block title %}Google SSO setup · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block or 'F2' }}</div>
+    <h1 class="admin-detail-title">Google SSO setup</h1>
+    <div class="admin-detail-summary">
+      Sign-in is restricted to <code>@betterplace.co.in</code> Google accounts. New
+      users land as <strong>View-only</strong>; promote them to Agent/Admin from
+      <a href="/admin/users" style="color:var(--accent);">/admin/users</a>.
+    </div>
+  </div>
+
+  <!-- State summary -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;">
+      Current state
+      <span style="font-size:11px;padding:2px 8px;border-radius:10px;
+                   background:{% if state.auth_enabled %}#dcfce7;color:#166534{% else %}#fef3c7;color:#92400e{% endif %};">
+        {% if state.auth_enabled %}✓ enabled{% else %}⚠ not enabled{% endif %}
+      </span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:10px;font-size:12px;">
+      <div>
+        <strong>GOOGLE_CLIENT_ID</strong>
+        <span style="float:right;color:{% if state.has_client_id %}#047857{% else %}#be123c{% endif %};">
+          {{ '✓ set' if state.has_client_id else '✗ missing' }}
+        </span>
+      </div>
+      <div>
+        <strong>GOOGLE_CLIENT_SECRET</strong>
+        <span style="float:right;color:{% if state.has_client_secret %}#047857{% else %}#be123c{% endif %};">
+          {{ '✓ set' if state.has_client_secret else '✗ missing' }}
+        </span>
+      </div>
+      <div>
+        <strong>SESSION_SECRET</strong>
+        <span style="float:right;color:{% if state.has_session_secret %}#047857{% else %}#b45309{% endif %};">
+          {{ '✓ rotated' if state.has_session_secret else '⚠ default (insecure for prod)' }}
+        </span>
+      </div>
+      <div>
+        <strong>APP_PUBLIC_URL</strong>
+        <span style="float:right;color:{% if state.public_url_set %}#047857{% else %}#b45309{% endif %};">
+          {{ '✓ set' if state.public_url_set else '⚠ localhost (OK for testing)' }}
+        </span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Step 1: Create OAuth client -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Step 1 · Create an OAuth client in Google Cloud Console</div>
+    <ol style="margin-top:10px;padding-left:22px;font-size:13px;line-height:1.7;">
+      <li>Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="color:var(--accent);">console.cloud.google.com / Credentials</a> (sign in with a betterplace.co.in account).</li>
+      <li>Click <strong>+ Create Credentials → OAuth client ID</strong>.</li>
+      <li>If prompted, configure the OAuth consent screen first: User type = <strong>Internal</strong>, app name = <code>BetterPlace Co-Pilot</code>, user support email = yours.</li>
+      <li>Back at "Create OAuth client ID": Application type = <strong>Web application</strong>, name = <code>Co-Pilot Web</code>.</li>
+      <li>Add these <strong>Authorized redirect URIs</strong> (both — one for localhost dev, one for the public tunnel URL you'll set up next):
+        <div style="background:#f8fafc;border:1px solid var(--border);padding:8px 10px;border-radius:6px;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:11px;">
+          {{ state.localhost_callback_url }}<br>
+          {{ state.callback_url }}
+        </div>
+        <button type="button" onclick="copyCallbacks(this)"
+                style="margin-top:4px;font-size:10px;background:transparent;border:1px solid var(--border);padding:2px 8px;border-radius:6px;cursor:pointer;">Copy both</button>
+      </li>
+      <li>Click <strong>Create</strong>. Copy the Client ID and Client Secret it shows you.</li>
+    </ol>
+  </div>
+
+  <!-- Step 2: Paste into env -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Step 2 · Paste credentials here — we'll write them to <code>.env</code></div>
+    <form id="env-form" onsubmit="return saveEnv(event)" style="margin-top:10px;display:flex;flex-direction:column;gap:10px;">
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">GOOGLE_CLIENT_ID</span>
+        <input name="google_client_id" required placeholder="123456789-abc.apps.googleusercontent.com"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:monospace;font-size:12px;">
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">GOOGLE_CLIENT_SECRET</span>
+        <input name="google_client_secret" required type="password" placeholder="GOCSPX-…"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:monospace;font-size:12px;">
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">APP_PUBLIC_URL <em>(optional now — set once tunnel is up)</em></span>
+        <input name="app_public_url" placeholder="https://copilot.betterplace.co.in"
+               style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:monospace;font-size:12px;"
+               value="{% if state.public_url_set %}{{ state.public_url }}{% endif %}">
+      </label>
+      <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+        <input type="checkbox" name="rotate_session_secret" value="1" {% if not state.has_session_secret %}checked{% endif %}>
+        Rotate <code>SESSION_SECRET</code> (recommended — login sessions get re-signed with a fresh random key)
+      </label>
+      <div style="display:flex;align-items:center;gap:10px;justify-content:flex-end;">
+        <span id="save-status" style="font-size:12px;color:var(--muted);"></span>
+        <button type="submit" class="admin-card-btn"
+                style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">
+          Write to .env
+        </button>
+      </div>
+    </form>
+    <div style="margin-top:8px;font-size:11px;color:var(--muted);">
+      Target file: <code>{{ state.env_path }}</code> · permissions reset to <code>600</code>.
+    </div>
+  </div>
+
+  <!-- Step 3: Restart -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Step 3 · Restart uvicorn so .env reloads</div>
+    <div style="font-size:13px;line-height:1.7;margin-top:6px;">
+      The app reads <code>.env</code> only at boot. After saving above, stop uvicorn
+      (<kbd>Ctrl-C</kbd> in the terminal where you started it) and run it again:
+      <div style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:11px;">
+        $ make run<br>
+        <span style="color:#94a3b8;"># or: uvicorn src.web.app:app --reload</span>
+      </div>
+      Once back up, you'll see the "✓ enabled" tag at the top of this page.
+    </div>
+  </div>
+
+  <!-- Step 4: Test -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Step 4 · Test the login</div>
+    <div style="font-size:13px;line-height:1.7;margin-top:6px;">
+      In a separate browser (or incognito), open <a href="/auth/login" target="_blank" style="color:var(--accent);">/auth/login</a>.
+      You should get redirected to Google, then back here as the new user.
+      Their entry will appear under <a href="/admin/users" style="color:var(--accent);">/admin/users</a>
+      with the <strong>View-only</strong> role auto-assigned.
+    </div>
+  </div>
+
+  <!-- Recent logins (proves it's working) -->
+  {% if recent_logins %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Recent sign-ins ({{ recent_logins|length }})</div>
+    <table class="admin-table" style="margin-top:6px;">
+      <thead><tr><th>User</th><th>Email</th><th>Last login</th></tr></thead>
+      <tbody>
+        {% for u in recent_logins %}
+        <tr>
+          <td>{{ u.name or '(unnamed)' }}</td>
+          <td>{{ u.email }}</td>
+          <td>{{ u.last_login_at | ist }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% endif %}
+</main>
+
+<script>
+function copyCallbacks(btn) {
+  const txt = `{{ state.localhost_callback_url }}\n{{ state.callback_url }}`;
+  navigator.clipboard.writeText(txt).then(() => {
+    const orig = btn.textContent;
+    btn.textContent = '✓ Copied';
+    setTimeout(() => btn.textContent = orig, 1500);
+  });
+}
+
+async function saveEnv(e) {
+  e.preventDefault();
+  const status = document.getElementById('save-status');
+  status.textContent = 'Saving…';
+  status.style.color = '';
+  const fd = new FormData(e.target);
+  const r = await fetch('/api/admin/auth/save-env', { method: 'POST', body: fd });
+  if (r.ok) {
+    const out = await r.json();
+    status.textContent = '✓ Saved to .env. ' + out.note;
+    status.style.color = '#047857';
+  } else {
+    const body = await r.json().catch(() => ({}));
+    status.textContent = '✗ ' + (body.detail || 'failed');
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+</script>
+{% endblock %}

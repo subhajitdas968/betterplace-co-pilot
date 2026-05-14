@@ -1,0 +1,1480 @@
+{% extends "_base.html" %}
+{% block title %}Automations · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <div style="display:flex;gap:8px;align-items:center;">
+      <button type="button" class="admin-card-btn" onclick="importFromZd()"
+              title="Pull every Zendesk trigger + automation and create native, editable copies here">
+        ⤓ Import from Zendesk
+      </button>
+      <button type="button" class="admin-card-btn" onclick="newRule()">+ New {% if current_category == 'scheduler' %}scheduler{% else %}trigger{% endif %}</button>
+      <span id="imp-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block }}</div>
+    <h1 class="admin-detail-title">Automations &amp; Triggers</h1>
+    <div class="admin-detail-summary">
+      Build rules visually — no JSON to write. Two flavours:
+      <strong>Triggers</strong> fire instantly on ticket events (created, status
+      changed, comment added, SLA breach, AI insight…).
+      <strong>Schedulers</strong> fire on a clock (every N hours, at 9am
+      weekdays, after a ticket has been Open for 24h…). Conditions can read
+      anything on the ticket including custom fields, SLA state, AI signals,
+      and form state. Actions can change the ticket, notify people, call AI,
+      hit a webhook, or apply a macro.
+    </div>
+  </div>
+
+  <!-- Category tabs -->
+  <div style="margin-top:14px;display:flex;gap:4px;border-bottom:1px solid var(--border);">
+    <a href="/admin/automations?category=trigger"
+       style="padding:10px 16px;font-weight:700;font-size:13px;text-decoration:none;
+              color:{% if current_category == 'trigger' %}var(--indigo){% else %}var(--muted){% endif %};
+              border-bottom:2px solid {% if current_category == 'trigger' %}var(--indigo){% else %}transparent{% endif %};">
+      ⚡ Triggers <span style="color:var(--muted);font-weight:400;">({{ cat_counts.trigger }})</span>
+    </a>
+    <a href="/admin/automations?category=scheduler"
+       style="padding:10px 16px;font-weight:700;font-size:13px;text-decoration:none;
+              color:{% if current_category == 'scheduler' %}var(--indigo){% else %}var(--muted){% endif %};
+              border-bottom:2px solid {% if current_category == 'scheduler' %}var(--indigo){% else %}transparent{% endif %};">
+      ⏰ Schedulers <span style="color:var(--muted);font-weight:400;">({{ cat_counts.scheduler }})</span>
+    </a>
+  </div>
+
+  <!-- Filter + search bar — all client-side so it's instant -->
+  <div style="margin-top:14px;padding:12px;background:var(--card);border:1px solid var(--border);border-radius:10px;box-shadow:var(--shadow-sm);">
+    <div style="display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr 1fr 1fr;gap:8px;">
+      <label style="font-size:11px;color:var(--muted);">
+        Search by name / description
+        <input id="flt-search" placeholder="e.g. notify, escalate, Reliance…"
+               style="display:block;width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+      </label>
+      <label style="font-size:11px;color:var(--muted);">
+        Active state
+        <select id="flt-active" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="any">— any —</option>
+          <option value="1">Active only</option>
+          <option value="0">Inactive only</option>
+        </select>
+      </label>
+      {% if current_category == 'trigger' %}
+      <label style="font-size:11px;color:var(--muted);">
+        Trigger event
+        <select id="flt-event" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="">— any —</option>
+          {% for grp, items in trigger_event_groups.items() %}
+          <optgroup label="{{ grp }}">
+            {% for e in items %}<option value="{{ e.key }}">{{ e.label }}</option>{% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </label>
+      {% else %}
+      <label style="font-size:11px;color:var(--muted);">
+        Schedule kind
+        <select id="flt-kind" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="">— any —</option>
+          {% for k in scheduler_kinds %}<option value="{{ k.key }}">{{ k.label }}</option>{% endfor %}
+        </select>
+      </label>
+      {% endif %}
+      <label style="font-size:11px;color:var(--muted);">
+        Uses action
+        <select id="flt-action" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="">— any —</option>
+          {% for grp, items in action_type_groups.items() %}
+          <optgroup label="{{ grp }}">
+            {% for a in items %}<option value="{{ a.key }}">{{ a.label }}</option>{% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </label>
+      <label style="font-size:11px;color:var(--muted);">
+        Uses condition on
+        <select id="flt-condition" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="">— any —</option>
+          {% for grp, items in condition_field_groups.items() %}
+          <optgroup label="{{ grp }}">
+            {% for f in items %}<option value="{{ f.key }}">{{ f.label }}</option>{% endfor %}
+          </optgroup>
+          {% endfor %}
+        </select>
+      </label>
+      <label style="font-size:11px;color:var(--muted);">
+        Source
+        <select id="flt-source" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="any">— any —</option>
+          <option value="zd">Imported from Zendesk</option>
+          <option value="native">Built natively here</option>
+        </select>
+      </label>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr 2fr;gap:8px;margin-top:8px;">
+      <label style="font-size:11px;color:var(--muted);">
+        Has fired
+        <select id="flt-fired" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="any">— any —</option>
+          <option value="yes">Has fired ≥ 1 time</option>
+          <option value="no">Never fired</option>
+        </select>
+      </label>
+      <label style="font-size:11px;color:var(--muted);">
+        Sort by
+        <select id="flt-sort" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:7px;font-size:12.5px;margin-top:3px;">
+          <option value="position_asc">Position (low → high)</option>
+          <option value="name_asc">Name (A → Z)</option>
+          <option value="name_desc">Name (Z → A)</option>
+          <option value="run_desc">Most fired first</option>
+          <option value="last_desc">Most recently fired</option>
+          <option value="cond_desc">Most conditions</option>
+          <option value="act_desc">Most actions</option>
+        </select>
+      </label>
+      <div style="grid-column:3 / span 2;"></div>
+      <div style="display:flex;align-items:flex-end;justify-content:flex-end;gap:8px;">
+        <span id="flt-count" style="font-size:11.5px;color:var(--muted);align-self:center;"></span>
+        <button type="button" class="admin-card-btn" onclick="resetFilters()" style="font-size:11px;padding:5px 10px;">Reset</button>
+      </div>
+    </div>
+  </div>
+
+  <style>
+    /* Block-flow style for rules — each card looks like a step in a pipeline,
+       with a drag handle on the left and an arrow connector below pointing to
+       the next rule (position order). */
+    .rule-block {
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      box-shadow: var(--shadow-sm);
+      padding: 12px 14px 12px 38px;
+      position: relative;
+      transition: border-color .14s, box-shadow .14s, transform .12s;
+    }
+    .rule-block:hover { box-shadow: var(--shadow-md); }
+    .rule-block.dragging { opacity: 0.45; }
+    .rule-block.drop-above { border-top: 3px solid var(--indigo); }
+    .rule-block.drop-below { border-bottom: 3px solid var(--indigo); }
+    .rule-block.editing { border-color: var(--indigo); box-shadow: 0 0 0 3px rgba(79,70,229,.12); }
+    .rule-block.inactive { opacity: 0.6; background: #fafbff; }
+    .rule-handle {
+      position: absolute; left: 8px; top: 50%; transform: translateY(-50%);
+      width: 22px; height: 40px;
+      display: flex; align-items: center; justify-content: center;
+      color: #94a3b8; cursor: grab; user-select: none;
+      font-size: 12px; line-height: 1;
+      border-radius: 5px;
+    }
+    .rule-handle:hover { background: #f1f5f9; color: var(--indigo); }
+    .rule-handle:active { cursor: grabbing; }
+    .rule-pos {
+      position: absolute; left: 6px; top: 8px;
+      font-family: 'JetBrains Mono', monospace; font-size: 10px;
+      color: var(--muted); font-weight: 700;
+      background: #f1f5f9; padding: 1px 5px; border-radius: 8px;
+      pointer-events: none;
+    }
+    .rule-arrow {
+      display: flex; align-items: center; justify-content: center;
+      color: var(--indigo); font-size: 18px; line-height: 1;
+      margin: -4px 0 -4px;
+      pointer-events: none;
+    }
+    .rule-arrow.scheduler-arrow { color: #f59e0b; }
+    .inline-editor {
+      margin-top: 12px; padding-top: 14px; border-top: 1px dashed var(--border);
+    }
+    .inline-editor.hidden { display: none; }
+  </style>
+
+  <div id="autos" style="margin-top:18px;display:flex;flex-direction:column;gap:0;">
+    {% for a in automations %}
+    {% set cond_keys = (a.conditions_json|map(attribute='field')|select|list)|join(' ') %}
+    {% set act_keys  = (a.actions_json|map(attribute='type')|select|list)|join(' ') %}
+    {% set is_zd     = '1' if (a.name or '').lower().startswith(('zd trigger', 'zd automation', 'zd:')) else '0' %}
+    <div class="rule-block rule-card {% if not a.active %}inactive{% endif %}"
+         draggable="true"
+         data-id="{{ a.id }}"
+         data-name="{{ (a.name or '')|lower }}"
+         data-desc="{{ (a.description or '')|lower }}"
+         data-active="{{ '1' if a.active else '0' }}"
+         data-event="{{ a.trigger_type or '' }}"
+         data-kind="{{ a.schedule_json.kind or '' }}"
+         data-conds="{{ cond_keys }}"
+         data-actions="{{ act_keys }}"
+         data-source="{{ 'zd' if is_zd == '1' else 'native' }}"
+         data-runcount="{{ a.run_count or 0 }}"
+         data-lastrun="{{ a.last_run_at or '' }}"
+         data-position="{{ a.position or 100 }}"
+         data-condcount="{{ a.conditions_json|length }}"
+         data-actcount="{{ a.actions_json|length }}">
+      <span class="rule-pos">#{{ loop.index }}</span>
+      <span class="rule-handle" title="Drag to reorder">⋮⋮</span>
+
+      <div class="rule-summary">
+        <div style="display:flex;gap:10px;justify-content:space-between;align-items:flex-start;">
+          <div style="flex:1;min-width:0;">
+            <strong style="font-size:14px;">{{ a.name }}</strong>
+            {% if a.description %}<div style="font-size:11.5px;color:#475569;margin-top:3px;">{{ a.description }}</div>{% endif %}
+          </div>
+          <div style="display:flex;gap:6px;align-items:center;flex-shrink:0;">
+            <span class="admin-status admin-status-{% if a.active %}done{% else %}pending{% endif %}">
+              {% if a.active %}● Active{% else %}○ Off{% endif %}
+            </span>
+            <button type="button" class="admin-card-btn" onclick="openTest({{ a.id }}, '{{ a.name|e }}')" title="Run on a ticket">🧪 Test</button>
+            <button type="button" class="admin-card-btn rule-edit-btn" onclick="toggleInlineEdit({{ a.id }}, '{{ current_category }}')">✎ Edit</button>
+            <button type="button" class="admin-card-btn" onclick="deleteRule({{ a.id }})" style="color:#be123c;border-color:#fecdd3;background:#fff1f2;" title="Delete">×</button>
+          </div>
+        </div>
+        <div style="margin-top:8px;display:grid;grid-template-columns:1.4fr 1fr 1fr 1fr;gap:8px;font-size:12px;">
+          <div><span class="admin-block">{% if current_category == 'scheduler' %}schedule{% else %}event{% endif %}</span>
+            {% if current_category == 'scheduler' %}{{ a.schedule_json.kind or '—' }}{% else %}{{ a.trigger_type }}{% endif %}</div>
+          <div><span class="admin-block">conditions</span> {{ a.conditions_json|length }}</div>
+          <div><span class="admin-block">actions</span> {{ a.actions_json|length }}</div>
+          <div style="text-align:right;color:var(--muted);font-size:11px;">
+            Fired {{ a.run_count or 0 }}× · last {{ a.last_run_at[:16] if a.last_run_at else '—' }}
+          </div>
+        </div>
+      </div>
+
+      <!-- Inline editor — populated on demand from the existing modal form, but
+           mounted INSIDE the card so it feels like editing the block in place. -->
+      <div class="inline-editor hidden" id="inline-editor-{{ a.id }}"></div>
+    </div>
+    {# Arrows are NOT rendered server-side — they're injected from JS only
+       between VISIBLE cards (after filters apply), otherwise hidden cards
+       leave stacks of orphaned arrows. #}
+    {% else %}
+    <div class="admin-stub-banner admin-stub-pending">
+      <div class="ass-icon">○</div>
+      <div><strong>No {% if current_category == 'scheduler' %}schedulers{% else %}triggers{% endif %} yet.</strong>
+      Click <strong>+ New</strong> above, or import from Zendesk.</div>
+    </div>
+    {% endfor %}
+  </div>
+
+  <!-- ===================== Test modal ===================== -->
+  <div id="test-bg" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:101;overflow:auto;" onclick="closeTest(event)">
+    <div style="background:#fff;max-width:780px;margin:30px auto;padding:24px;border-radius:12px;box-shadow:var(--shadow-lg);" onclick="event.stopPropagation()">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;">
+        <h2 style="margin-bottom:6px;">🧪 Test rule: <span id="test-rule-name"></span></h2>
+        <button type="button" class="admin-card-btn" onclick="closeTest()">Close</button>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:14px;">
+        Pick a ticket to dry-run this rule against. The breakdown below shows
+        each condition's pass/fail, and what each action <em>would</em> do.
+        <strong>Execute now</strong> runs the actions for real — changes are
+        saved and logged in the ticket's history.
+      </div>
+      <div style="margin-bottom:12px;">
+        <label style="font-size:12px;display:block;">
+          <span style="color:var(--muted);">Search a ticket — by ID, BP-NNNNNN, or words in the subject</span>
+          <input id="ticket-search" placeholder="Type to search · empty = recent open tickets"
+                 autocomplete="off"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <div id="ticket-results" style="margin-top:8px;max-height:240px;overflow:auto;border:1px solid var(--border);border-radius:8px;background:#fafbff;">
+          <div style="padding:10px;color:#94a3b8;font-size:12px;">Loading…</div>
+        </div>
+        <div id="ticket-selected" style="display:none;margin-top:8px;padding:8px 12px;background:#eef2ff;border:1px solid #c7d2fe;border-radius:8px;font-size:12.5px;">
+          <strong style="color:var(--indigo);">Selected:</strong> <span id="sel-display"></span>
+        </div>
+      </div>
+      <div style="display:flex;gap:8px;align-items:center;justify-content:flex-end;margin-bottom:12px;">
+        <button type="button" class="admin-card-btn" onclick="runTest(false)"
+                style="background:#fff;border:1px solid var(--indigo);color:var(--indigo);">👁 Visual test (dry-run)</button>
+        <button type="button" class="admin-card-btn" onclick="runTest(true)"
+                style="background:linear-gradient(135deg,#10b981,#14b8a6);color:#fff;border:none;">▶ Execute now</button>
+      </div>
+      <div id="test-status" style="font-size:12px;color:var(--muted);margin-bottom:8px;"></div>
+
+      <div id="test-result" style="display:none;">
+        <!-- Outcome banner -->
+        <div id="test-banner" style="padding:10px 14px;border-radius:8px;font-weight:700;margin-bottom:10px;"></div>
+
+        <!-- Conditions breakdown -->
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-bottom:6px;">Conditions</div>
+        <div id="test-conds" style="display:flex;flex-direction:column;gap:4px;margin-bottom:14px;"></div>
+
+        <!-- Actions outcome -->
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--muted);font-weight:700;margin-bottom:6px;">Actions</div>
+        <div id="test-actions" style="display:flex;flex-direction:column;gap:4px;"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- ===================== Edit modal ===================== -->
+  <div id="modal-bg" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,.5);z-index:100;overflow:auto;" onclick="closeModal(event)">
+    <div style="background:#fff;max-width:900px;margin:30px auto;padding:24px;border-radius:12px;box-shadow:var(--shadow-lg);" onclick="event.stopPropagation()">
+      <h2 id="modal-title" style="margin-bottom:14px;">Edit rule</h2>
+      <form id="rule-form" onsubmit="return saveRule(event)">
+        <input type="hidden" name="automation_id" value="0">
+        <input type="hidden" name="category" value="{{ current_category }}">
+
+        <!-- Basics -->
+        <div style="display:grid;grid-template-columns:2fr 1fr;gap:8px;margin-bottom:10px;">
+          <label style="font-size:12px;">Name
+            <input name="name" required style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+          <label style="font-size:12px;">Position (lower = earlier)
+            <input name="position" type="number" value="100" style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+        </div>
+        <label style="font-size:12px;display:block;margin-bottom:10px;">Description
+          <input name="description" placeholder="What this rule does, in plain English"
+                 style="display:block;width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;margin-top:4px;"></label>
+
+        <!-- WHEN — trigger event OR schedule -->
+        <div id="when-trigger" style="margin-bottom:14px;{% if current_category == 'scheduler' %}display:none;{% endif %}">
+          <div style="font-size:12px;font-weight:700;color:var(--indigo);margin-bottom:6px;">WHEN this event happens</div>
+          <select name="trigger_type" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+            {% for grp, items in trigger_event_groups.items() %}
+            <optgroup label="{{ grp }}">
+              {% for e in items %}<option value="{{ e.key }}">{{ e.label }}</option>{% endfor %}
+            </optgroup>
+            {% endfor %}
+          </select>
+          <div id="trigger-params" style="margin-top:6px;"></div>
+        </div>
+        <div id="when-scheduler" style="margin-bottom:14px;{% if current_category != 'scheduler' %}display:none;{% endif %}">
+          <div style="font-size:12px;font-weight:700;color:var(--indigo);margin-bottom:6px;">RUN on this schedule</div>
+          <select id="sched-kind" style="width:100%;padding:8px;border:1px solid var(--border);border-radius:8px;font-size:13px;">
+            {% for k in scheduler_kinds %}<option value="{{ k.key }}">{{ k.label }}</option>{% endfor %}
+          </select>
+          <div id="sched-params" style="margin-top:6px;display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:8px;"></div>
+        </div>
+
+        <!-- IF conditions -->
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:12px;font-weight:700;color:var(--indigo);">IF (all conditions match)</div>
+            <button type="button" class="admin-card-btn" onclick="addCondition()" style="font-size:11px;padding:3px 8px;">+ Add condition</button>
+          </div>
+          <div id="conditions" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;"></div>
+        </div>
+
+        <!-- THEN actions -->
+        <div style="margin-bottom:14px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;">
+            <div style="font-size:12px;font-weight:700;color:var(--indigo);">THEN (do these actions in order)</div>
+            <button type="button" class="admin-card-btn" onclick="addAction()" style="font-size:11px;padding:3px 8px;">+ Add action</button>
+          </div>
+          <div id="actions" style="margin-top:6px;display:flex;flex-direction:column;gap:6px;"></div>
+        </div>
+
+        <label style="font-size:12px;display:flex;align-items:center;gap:6px;">
+          <input type="checkbox" name="active" checked> Active
+        </label>
+
+        <div style="margin-top:14px;display:flex;gap:8px;align-items:center;border-top:1px solid var(--border);padding-top:14px;">
+          <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 16px;">Save rule</button>
+          <button type="button" class="admin-card-btn" onclick="closeModal()">Cancel</button>
+          <button type="button" class="admin-card-btn" onclick="toggleRaw()" style="margin-left:auto;font-size:11px;">⚙ Show raw JSON (advanced)</button>
+          <span id="rule-status" style="font-size:12px;color:var(--muted);"></span>
+        </div>
+
+        <div id="raw-view" style="display:none;margin-top:12px;border-top:1px dashed var(--border);padding-top:10px;">
+          <div style="font-size:11px;color:var(--muted);margin-bottom:6px;">Raw JSON view (read-only — for debugging).</div>
+          <pre id="raw-json" style="background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;font-size:11px;max-height:240px;overflow:auto;"></pre>
+        </div>
+      </form>
+    </div>
+  </div>
+</main>
+
+<script>
+// ============================================================================
+// Data (catalog + resources)
+// ============================================================================
+const CATALOG = {
+  triggerEvents:   {{ trigger_events       | tojson }},
+  schedulerKinds:  {{ scheduler_kinds      | tojson }},
+  conditionFields: {{ condition_fields     | tojson }},
+  opsByType:       {{ ops_by_type          | tojson }},
+  actionTypes:     {{ action_types         | tojson }},
+};
+const RESOURCES = {
+  groups:          {{ groups               | tojson }},
+  agents:          {{ agents               | tojson }},
+  customStatuses:  {{ custom_statuses      | tojson }},
+  fields:          {{ all_fields           | tojson }},
+  customers:       {{ customers            | tojson }},
+  forms:           {{ native_forms         | tojson }},
+  autoReplies:     {{ auto_replies         | tojson }},
+  slaPolicies:     {{ sla_policies         | tojson }},
+  languages:       {{ translate_languages  | tojson }},
+};
+const FIELDS_BY_ID = Object.fromEntries(RESOURCES.fields.map(f => [String(f.id), f]));
+const ALL_AUTOS = {{ all_automations | tojson }};
+const CURRENT_CATEGORY = {{ current_category | tojson }};
+
+// ============================================================================
+// Drag-to-reorder — updates position field server-side
+// ============================================================================
+let DRAG_FROM = null;
+const CURRENT_CAT = {{ current_category | tojson }};
+
+function wireDrag() {
+  const host = document.getElementById('autos');
+  if (!host) return;
+  const cards = host.querySelectorAll('.rule-block');
+  for (const c of cards) {
+    c.addEventListener('dragstart', (ev) => {
+      DRAG_FROM = c;
+      c.classList.add('dragging');
+      try { ev.dataTransfer.setData('text/plain', c.dataset.id); } catch (e) {}
+      ev.dataTransfer.effectAllowed = 'move';
+    });
+    c.addEventListener('dragend', () => {
+      DRAG_FROM = null;
+      host.querySelectorAll('.rule-block').forEach(x => {
+        x.classList.remove('dragging', 'drop-above', 'drop-below');
+      });
+    });
+    c.addEventListener('dragover', (ev) => {
+      if (!DRAG_FROM || DRAG_FROM === c) return;
+      ev.preventDefault();
+      const r = c.getBoundingClientRect();
+      const above = (ev.clientY - r.top) < r.height / 2;
+      c.classList.toggle('drop-above', above);
+      c.classList.toggle('drop-below', !above);
+    });
+    c.addEventListener('dragleave', () => {
+      c.classList.remove('drop-above', 'drop-below');
+    });
+    c.addEventListener('drop', (ev) => {
+      ev.preventDefault();
+      if (!DRAG_FROM || DRAG_FROM === c) return;
+      const r = c.getBoundingClientRect();
+      const above = (ev.clientY - r.top) < r.height / 2;
+      // Insert DRAG_FROM either before or after c. We also have to move the
+      // arrow that was paired with DRAG_FROM, but the simplest approach is to
+      // re-render arrows after we re-stamp positions.
+      if (above) c.parentNode.insertBefore(DRAG_FROM, c);
+      else       c.parentNode.insertBefore(DRAG_FROM, c.nextSibling);
+      persistOrder();
+      renumberAndArrows();
+    });
+  }
+}
+
+function renumberAndArrows() {
+  const host = document.getElementById('autos');
+  // Always strip every existing arrow first — covers both the JS-injected ones
+  // and any stray ones left over from older renders.
+  host.querySelectorAll('.rule-arrow').forEach(a => a.remove());
+  // ONLY consider currently-visible cards (filters may have hidden some).
+  const cards = Array.from(host.querySelectorAll('.rule-block'))
+                .filter(c => c.style.display !== 'none');
+  cards.forEach((c, i) => {
+    const posEl = c.querySelector('.rule-pos');
+    if (posEl) posEl.textContent = '#' + (i + 1);
+  });
+  // Inject one arrow after each visible card EXCEPT the last.
+  for (let i = 0; i < cards.length - 1; i++) {
+    const arrow = document.createElement('div');
+    arrow.className = 'rule-arrow' + (CURRENT_CAT === 'scheduler' ? ' scheduler-arrow' : '');
+    arrow.textContent = '↓';
+    cards[i].insertAdjacentElement('afterend', arrow);
+  }
+}
+
+// Reorder feedback banner — sits sticky at the top so the user can see it
+// even when the moved card scrolled off-screen.
+function showReorderStatus(text, color) {
+  let banner = document.getElementById('reorder-banner');
+  if (!banner) {
+    banner = document.createElement('div');
+    banner.id = 'reorder-banner';
+    banner.style.cssText = 'position:sticky;top:8px;z-index:50;margin:8px 0;padding:8px 14px;border-radius:8px;font-size:12.5px;font-weight:700;text-align:center;';
+    document.getElementById('autos').prepend(banner);
+  }
+  banner.textContent = text;
+  banner.style.background = color === 'ok' ? '#d1fae5' : (color === 'busy' ? '#fef3c7' : '#fee2e2');
+  banner.style.color      = color === 'ok' ? '#065f46' : (color === 'busy' ? '#b45309' : '#be123c');
+  banner.style.display    = 'block';
+  if (color === 'ok') setTimeout(() => { banner.style.display = 'none'; }, 2200);
+}
+
+async function persistOrder() {
+  // Send ALL cards (visible + hidden) in current DOM order. Reason:
+  //   - Hidden cards still occupy DOM positions sorted by their old `position`
+  //     value (Jinja rendered them by position ASC).
+  //   - Drag-and-drop only moves VISIBLE cards within the DOM; hidden cards
+  //     stay where they were.
+  //   - Sending ALL ids lets the server re-stamp every card with sequential,
+  //     gap-free positions (0, 10, 20, …). Without this, hidden cards keep
+  //     their original positions (e.g. 1, 2, 3 from ZD import) and the next
+  //     page-load sort interleaves them with the freshly-stamped visible ones.
+  const ids = Array.from(document.querySelectorAll('#autos .rule-block'))
+              .map(c => c.dataset.id);
+  if (!ids.length) return;
+  const fd = new FormData();
+  fd.append('ordered_ids', ids.join(','));
+  fd.append('category', CURRENT_CAT);
+  showReorderStatus('⏳ Saving new order…', 'busy');
+  try {
+    const r = await fetch('/api/admin/automations/reorder', { method: 'POST', body: fd });
+    if (!r.ok) {
+      const txt = await r.text();
+      showReorderStatus('✗ Reorder save failed: ' + txt.slice(0, 200), 'err');
+      console.warn('reorder failed:', txt);
+      return;
+    }
+    const out = await r.json();
+    showReorderStatus(`✓ New order saved (${out.updated || ids.length} rules)`, 'ok');
+  } catch (e) {
+    showReorderStatus('✗ Reorder request failed: ' + e.message, 'err');
+    console.warn('reorder error', e);
+  }
+}
+
+// ============================================================================
+// Inline edit — re-uses the same modal form, mounted inside the card
+// ============================================================================
+function toggleInlineEdit(id, category) {
+  const card = document.querySelector(`.rule-block[data-id="${id}"]`);
+  if (!card) return;
+  const host = card.querySelector('.inline-editor');
+  const summary = card.querySelector('.rule-summary');
+  if (!host.classList.contains('hidden')) {
+    host.classList.add('hidden'); host.innerHTML = '';
+    card.classList.remove('editing');
+    summary.style.opacity = '';
+    return;
+  }
+  // Borrow the modal form by cloning it
+  const modalForm = document.getElementById('rule-form');
+  const clone = modalForm.cloneNode(true);
+  clone.id = `inline-form-${id}`;
+  // Wire it up the same way as the modal — but submit inline
+  clone.onsubmit = (ev) => inlineSaveRule(ev, id);
+  // Add a Close button
+  const closeBtn = document.createElement('button');
+  closeBtn.type = 'button';
+  closeBtn.className = 'admin-card-btn';
+  closeBtn.textContent = '✕ Close inline editor';
+  closeBtn.style.cssText = 'margin-left:auto;float:right;';
+  closeBtn.onclick = () => toggleInlineEdit(id, category);
+
+  host.innerHTML = '';
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;align-items:center;margin-bottom:8px;';
+  const title = document.createElement('div');
+  title.style.cssText = 'font-size:11px;font-weight:700;color:var(--indigo);text-transform:uppercase;letter-spacing:.06em;';
+  title.textContent = '✎ Editing block #' + (card.querySelector('.rule-pos')?.textContent || '');
+  header.appendChild(title);
+  header.appendChild(closeBtn);
+  host.appendChild(header);
+  host.appendChild(clone);
+  // Populate the clone with this rule's data
+  const a = ALL_AUTOS.find(x => x.id === id);
+  if (a) populateInlineForm(clone, a);
+  host.classList.remove('hidden');
+  card.classList.add('editing');
+  host.scrollIntoView({ behavior: 'smooth', block: 'center' });
+}
+
+function populateInlineForm(formEl, a) {
+  formEl.automation_id.value = a.id;
+  formEl.name.value = a.name || '';
+  formEl.description.value = a.description || '';
+  formEl.position.value = a.position || 100;
+  formEl.active.checked = !!a.active;
+  formEl.category.value = a.category || 'trigger';
+  if ((a.category || 'trigger') === 'trigger') {
+    if (formEl.trigger_type) formEl.trigger_type.value = a.trigger_type || 'ticket.created';
+    formEl.querySelector('#when-trigger').style.display = '';
+    formEl.querySelector('#when-scheduler').style.display = 'none';
+  } else {
+    const kindSel = formEl.querySelector('#sched-kind');
+    const kind = (a.schedule_json && a.schedule_json.kind) || CATALOG.schedulerKinds[0].key;
+    if (kindSel) kindSel.value = kind;
+    const paramsHost = formEl.querySelector('#sched-params');
+    // Use the same render helper but scoped — temporarily swap IDs
+    // Simpler: just write the host directly
+    if (paramsHost) {
+      paramsHost.innerHTML = '';
+      const k = CATALOG.schedulerKinds.find(x => x.key === kind);
+      if (k && k.params) {
+        for (const p of k.params) {
+          const cur = (a.schedule_json || {})[p.key] !== undefined
+                      ? (a.schedule_json || {})[p.key] : p.default;
+          const wrap = document.createElement('label');
+          wrap.style.cssText = 'font-size:11.5px;color:var(--muted);';
+          wrap.innerHTML = `<span>${escapeHtml(p.label)}</span>` + renderParamInput(p, cur, 'sched-param', p.key);
+          paramsHost.appendChild(wrap);
+        }
+      }
+    }
+    formEl.querySelector('#when-trigger').style.display = 'none';
+    formEl.querySelector('#when-scheduler').style.display = '';
+  }
+  // Conditions + actions — clear and re-populate INSIDE this clone
+  const condHost = formEl.querySelector('#conditions');
+  const actHost  = formEl.querySelector('#actions');
+  // The id is duplicated now (modal + clone), so be precise: pick the descendant of formEl.
+  if (condHost) condHost.innerHTML = '';
+  if (actHost)  actHost.innerHTML  = '';
+  // makeConditionRow/makeActionRow append to elements with id "conditions"/"actions" — globally.
+  // To target the inline copy, temporarily set the modal versions' ids aside.
+  const modalConds = document.getElementById('rule-form').querySelector('#conditions');
+  const modalActs  = document.getElementById('rule-form').querySelector('#actions');
+  if (modalConds === condHost) {
+    // We're already targeting the right node — fine.
+  } else {
+    // Swap ids: the inline copy temporarily becomes id="conditions" while we
+    // populate, then we swap back.
+    const origCondId = modalConds.id; modalConds.id = '_orig_conditions';
+    const origActId  = modalActs.id;  modalActs.id  = '_orig_actions';
+    condHost.id = 'conditions'; actHost.id = 'actions';
+    (a.conditions_json || []).forEach(c => makeConditionRow(c));
+    (a.actions_json    || []).forEach(c => makeActionRow(c));
+    condHost.id = origCondId; actHost.id = origActId;
+    modalConds.id = 'conditions'; modalActs.id = 'actions';
+  }
+}
+
+async function inlineSaveRule(ev, id) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  fd.append('automation_id', id);
+  fd.append('name', f.name.value);
+  fd.append('description', f.description.value);
+  fd.append('active', f.active.checked ? 1 : 0);
+  fd.append('category', f.category.value);
+  fd.append('position', f.position.value || 100);
+  fd.append('trigger_type', f.trigger_type ? f.trigger_type.value : '');
+  fd.append('trigger_params_json', '{}');
+  // Schedule + conditions + actions — collect from this form's descendants
+  if (f.category.value === 'scheduler') {
+    const kind = f.querySelector('#sched-kind').value;
+    const params = {};
+    f.querySelectorAll('#sched-params .sched-param').forEach(el => {
+      params[el.dataset.key] = (el.type === 'checkbox') ? el.checked : el.value;
+    });
+    fd.append('schedule_json', JSON.stringify({kind, ...params}));
+  } else {
+    fd.append('schedule_json', '{}');
+  }
+  const conds = [];
+  f.querySelectorAll('#conditions .cond-row').forEach(row => {
+    const fieldSel = row.querySelector('.c-field');
+    const customInp = row.querySelector('.c-custom-field');
+    const opSel = row.querySelector('.c-op');
+    const def = currentCondFieldDef(fieldSel, customInp);
+    const op = opSel.value;
+    let value;
+    if (op === 'between') {
+      value = (row.querySelector('.c-val-from')?.value || '') + '..' + (row.querySelector('.c-val-to')?.value || '');
+    } else if (op === 'within_last' || op === 'older_than') {
+      value = (row.querySelector('.c-val-amount')?.value || '1') + ' ' + (row.querySelector('.c-val-unit')?.value || 'hours');
+    } else {
+      const vEl = row.querySelector('.c-val'); value = vEl ? vEl.value : '';
+    }
+    const entry = {field: fieldSel.value, op, value};
+    if (fieldSel.value === 'custom_field') entry.custom_field_id = def.custom_field_id || null;
+    conds.push(entry);
+  });
+  fd.append('conditions_json', JSON.stringify(conds));
+  const acts = [];
+  f.querySelectorAll('#actions .act-row').forEach(row => {
+    const typeSel = row.querySelector('.a-type');
+    const params = {};
+    row.querySelectorAll('.a-param').forEach(el => {
+      params[el.dataset.key] = (el.type === 'checkbox') ? el.checked : el.value;
+    });
+    acts.push({type: typeSel.value, params});
+  });
+  fd.append('actions_json', JSON.stringify(acts));
+
+  try {
+    const r = await fetch('/api/admin/automations', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    location.reload();
+  } catch (e) { alert('Save failed: ' + e.message); }
+  return false;
+}
+
+// ============================================================================
+// Filter + sort bar — all client-side over the cards already in the DOM
+// ============================================================================
+const FILTER_INPUTS = ['flt-search', 'flt-active', 'flt-event', 'flt-kind',
+                       'flt-action', 'flt-condition', 'flt-source', 'flt-fired', 'flt-sort'];
+
+function applyFilters() {
+  const q       = (document.getElementById('flt-search')?.value || '').trim().toLowerCase();
+  const active  = document.getElementById('flt-active')?.value || 'any';
+  const event   = document.getElementById('flt-event')?.value  || '';
+  const kind    = document.getElementById('flt-kind')?.value   || '';
+  const action  = document.getElementById('flt-action')?.value || '';
+  const cond    = document.getElementById('flt-condition')?.value || '';
+  const source  = document.getElementById('flt-source')?.value || 'any';
+  const fired   = document.getElementById('flt-fired')?.value  || 'any';
+  const sortBy  = document.getElementById('flt-sort')?.value   || 'position_asc';
+  const cards = Array.from(document.querySelectorAll('#autos .rule-card'));
+  let visible = 0;
+  for (const c of cards) {
+    let ok = true;
+    if (q) {
+      ok = c.dataset.name.includes(q) || (c.dataset.desc || '').includes(q);
+    }
+    if (ok && active !== 'any') ok = c.dataset.active === active;
+    if (ok && event)            ok = c.dataset.event === event;
+    if (ok && kind)             ok = c.dataset.kind === kind;
+    if (ok && action) {
+      const acts = ' ' + (c.dataset.actions || '') + ' ';
+      ok = acts.includes(' ' + action + ' ');
+    }
+    if (ok && cond) {
+      const conds = ' ' + (c.dataset.conds || '') + ' ';
+      ok = conds.includes(' ' + cond + ' ');
+    }
+    if (ok && source !== 'any') ok = c.dataset.source === source;
+    if (ok && fired === 'yes')  ok = parseInt(c.dataset.runcount || 0) > 0;
+    if (ok && fired === 'no')   ok = parseInt(c.dataset.runcount || 0) === 0;
+    c.style.display = ok ? '' : 'none';
+    if (ok) visible += 1;
+  }
+
+  // Sort visible cards by reordering DOM children
+  const host = document.getElementById('autos');
+  const sorted = cards.slice().sort((a, b) => sortCompare(a, b, sortBy));
+  sorted.forEach(c => host.appendChild(c));
+
+  // Counter
+  const cnt = document.getElementById('flt-count');
+  if (cnt) cnt.textContent = visible === cards.length
+    ? `${cards.length} rules`
+    : `Showing ${visible} of ${cards.length}`;
+  // Re-stamp positions + arrows so the flow only shows visible cards.
+  // renumberAndArrows() is defined below; we call it safely via window.
+  if (typeof renumberAndArrows === 'function') renumberAndArrows();
+}
+
+function sortCompare(a, b, mode) {
+  const num = (el, k) => parseInt(el.dataset[k] || 0) || 0;
+  switch (mode) {
+    case 'name_asc':     return a.dataset.name.localeCompare(b.dataset.name);
+    case 'name_desc':    return b.dataset.name.localeCompare(a.dataset.name);
+    case 'run_desc':     return num(b,'runcount') - num(a,'runcount');
+    case 'last_desc':    return (b.dataset.lastrun || '').localeCompare(a.dataset.lastrun || '');
+    case 'cond_desc':    return num(b,'condcount') - num(a,'condcount');
+    case 'act_desc':     return num(b,'actcount')  - num(a,'actcount');
+    case 'position_asc':
+    default:             return num(a,'position')  - num(b,'position');
+  }
+}
+
+function resetFilters() {
+  for (const id of FILTER_INPUTS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    if (el.tagName === 'SELECT') el.selectedIndex = 0;
+    else el.value = '';
+  }
+  applyFilters();
+}
+
+(function wireFilters() {
+  for (const id of FILTER_INPUTS) {
+    const el = document.getElementById(id);
+    if (!el) continue;
+    el.addEventListener(el.tagName === 'INPUT' ? 'input' : 'change', applyFilters);
+  }
+  // Apply once on load so the counter reflects reality
+  if (document.readyState === 'loading') {
+    document.addEventListener('DOMContentLoaded', () => { applyFilters(); wireDrag(); });
+  } else {
+    applyFilters();
+    wireDrag();
+  }
+})();
+
+// ============================================================================
+// Modal show/hide
+// ============================================================================
+function newRule() {
+  document.getElementById('modal-title').textContent =
+    CURRENT_CATEGORY === 'scheduler' ? 'New scheduler' : 'New trigger';
+  const f = document.getElementById('rule-form');
+  f.reset();
+  f.automation_id.value = 0;
+  f.name.value = '';
+  f.description.value = '';
+  f.position.value = 100;
+  f.active.checked = true;
+  document.getElementById('conditions').innerHTML = '';
+  document.getElementById('actions').innerHTML = '';
+  document.getElementById('sched-params').innerHTML = '';
+  document.getElementById('trigger-params').innerHTML = '';
+  if (CURRENT_CATEGORY === 'scheduler') {
+    renderSchedulerParams(CATALOG.schedulerKinds[0].key, {});
+  }
+  document.getElementById('modal-bg').style.display = 'block';
+}
+
+function editRule(id) {
+  const a = ALL_AUTOS.find(x => x.id === id);
+  if (!a) return;
+  document.getElementById('modal-title').textContent = 'Edit rule: ' + (a.name || '');
+  const f = document.getElementById('rule-form');
+  f.automation_id.value = a.id;
+  f.name.value = a.name || '';
+  f.description.value = a.description || '';
+  f.position.value = a.position || 100;
+  f.active.checked = !!a.active;
+  f.category.value = a.category || 'trigger';
+  if ((a.category || 'trigger') === 'trigger') {
+    if (f.trigger_type) f.trigger_type.value = a.trigger_type || 'ticket.created';
+    document.getElementById('when-trigger').style.display = '';
+    document.getElementById('when-scheduler').style.display = 'none';
+  } else {
+    const kind = (a.schedule_json && a.schedule_json.kind) || CATALOG.schedulerKinds[0].key;
+    document.getElementById('sched-kind').value = kind;
+    renderSchedulerParams(kind, a.schedule_json || {});
+    document.getElementById('when-trigger').style.display = 'none';
+    document.getElementById('when-scheduler').style.display = '';
+  }
+  // Conditions + actions
+  document.getElementById('conditions').innerHTML = '';
+  (a.conditions_json || []).forEach(c => makeConditionRow(c));
+  document.getElementById('actions').innerHTML = '';
+  (a.actions_json || []).forEach(c => makeActionRow(c));
+  document.getElementById('modal-bg').style.display = 'block';
+}
+
+function closeModal(ev) {
+  if (ev && ev.target.id !== 'modal-bg') return;
+  document.getElementById('modal-bg').style.display = 'none';
+  document.getElementById('raw-view').style.display = 'none';
+}
+
+// ============================================================================
+// Scheduler params
+// ============================================================================
+document.getElementById('sched-kind').addEventListener('change', (ev) => {
+  renderSchedulerParams(ev.target.value, {});
+});
+
+function renderSchedulerParams(kindKey, existing) {
+  const kind = CATALOG.schedulerKinds.find(k => k.key === kindKey);
+  const host = document.getElementById('sched-params');
+  host.innerHTML = '';
+  if (!kind || !kind.params) return;
+  for (const p of kind.params) {
+    const wrap = document.createElement('label');
+    wrap.style.cssText = 'font-size:11.5px;color:var(--muted);';
+    const cur = existing[p.key] !== undefined ? existing[p.key] : p.default;
+    wrap.innerHTML = `<span>${escapeHtml(p.label)}</span>` + renderParamInput(p, cur, 'sched-param', p.key);
+    host.appendChild(wrap);
+  }
+}
+
+// ============================================================================
+// Condition rows
+// ============================================================================
+function addCondition() { makeConditionRow({}); }
+
+function makeConditionRow(cond) {
+  const row = document.createElement('div');
+  row.className = 'cond-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1.4fr 1fr 1.6fr 32px;gap:6px;align-items:end;background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px;';
+  const fieldKey = cond.field || CATALOG.conditionFields[0].key;
+  const op = cond.op || '';
+  const value = cond.value !== undefined ? cond.value : '';
+  row.innerHTML = `
+    <div>
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;">When field</div>
+      <select class="c-field" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+        ${buildFieldOptions(fieldKey, cond.custom_field_id)}
+      </select>
+      <input class="c-custom-field" list="dl-fields" value="${fieldKey === 'custom_field' && cond.custom_field_id ? escapeAttr(fieldTitle(cond.custom_field_id)) : ''}" placeholder="Search custom field…"
+             style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;display:${fieldKey === 'custom_field' ? 'block' : 'none'};">
+    </div>
+    <div>
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;">Op</div>
+      <select class="c-op" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;"></select>
+    </div>
+    <div class="c-val-wrap">
+      <div style="color:#64748b;font-size:11px;margin-bottom:2px;">Value</div>
+      <div class="c-val-inner"></div>
+    </div>
+    <div>
+      <button type="button" onclick="this.closest('.cond-row').remove()"
+              style="border:1px solid #fecdd3;background:#fff;color:#be123c;border-radius:6px;padding:6px 8px;cursor:pointer;">×</button>
+    </div>
+  `;
+  document.getElementById('conditions').appendChild(row);
+  const fieldSel = row.querySelector('.c-field');
+  const customInp = row.querySelector('.c-custom-field');
+  const opSel = row.querySelector('.c-op');
+  const valInner = row.querySelector('.c-val-inner');
+
+  function refreshAll() {
+    const fieldDef = currentCondFieldDef(fieldSel, customInp);
+    const t = fieldDef.type;
+    customInp.style.display = fieldSel.value === 'custom_field' ? 'block' : 'none';
+    // ops
+    const ops = CATALOG.opsByType[t] || [];
+    opSel.innerHTML = ops.map(o => `<option value="${o.v}" ${o.v === op ? 'selected' : ''}>${escapeHtml(o.l)}</option>`).join('');
+    if (!ops.find(o => o.v === op) && ops.length) opSel.value = ops[0].v;
+    // value control
+    renderConditionValue(valInner, fieldDef, opSel.value, value);
+  }
+  fieldSel.addEventListener('change', refreshAll);
+  customInp.addEventListener('change', refreshAll);
+  customInp.addEventListener('input', refreshAll);
+  opSel.addEventListener('change', () => {
+    const fieldDef = currentCondFieldDef(fieldSel, customInp);
+    renderConditionValue(valInner, fieldDef, opSel.value, '');
+  });
+  refreshAll();
+}
+
+function buildFieldOptions(selectedKey, customFid) {
+  const groups = {};
+  for (const f of CATALOG.conditionFields) {
+    (groups[f.group] = groups[f.group] || []).push(f);
+  }
+  let html = '';
+  for (const grp of Object.keys(groups)) {
+    html += `<optgroup label="${escapeAttr(grp)}">`;
+    for (const f of groups[grp]) {
+      html += `<option value="${f.key}" ${f.key === selectedKey ? 'selected' : ''}>${escapeHtml(f.label)}</option>`;
+    }
+    html += `</optgroup>`;
+  }
+  return html;
+}
+
+function currentCondFieldDef(fieldSel, customInp) {
+  const def = CATALOG.conditionFields.find(f => f.key === fieldSel.value) || CATALOG.conditionFields[0];
+  if (def.key === 'custom_field') {
+    const title = customInp.value || '';
+    const f = RESOURCES.fields.find(x => (x.title || '').toLowerCase() === title.toLowerCase());
+    if (f) {
+      // Synthesize a field def from the actual ticket field
+      return {
+        key: 'custom_field',
+        label: f.title,
+        type: (f.type === 'tagger' || f.type === 'multiselect') ? 'custom_field' : 'text',
+        options: (f.options || []).map(o => ({v: o.value, l: o.name})),
+        custom_field_id: f.id,
+      };
+    }
+  }
+  return def;
+}
+
+function fieldTitle(fid) {
+  const f = FIELDS_BY_ID[String(fid)];
+  return f ? f.title : '';
+}
+
+function renderConditionValue(host, def, op, currentVal) {
+  if (op === 'is_set' || op === 'is_unset' || op === 'is_true' || op === 'is_false'
+      || op === 'is_empty' || op === 'is_not_empty' || op === 'is_current_user') {
+    host.innerHTML = '<div style="font-size:11px;color:#94a3b8;padding:6px;">(no value needed)</div>';
+    return;
+  }
+  if (op === 'between') {
+    host.innerHTML = `<div style="display:flex;gap:4px;">
+      <input class="c-val c-val-from" placeholder="from" value="${escapeAttr(splitBetween(currentVal,0))}" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;">
+      <input class="c-val c-val-to"   placeholder="to"   value="${escapeAttr(splitBetween(currentVal,1))}" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;">
+    </div>`;
+    return;
+  }
+  if (op === 'within_last' || op === 'older_than') {
+    const [n, unit] = parseDuration(currentVal);
+    host.innerHTML = `<div style="display:flex;gap:4px;">
+      <input class="c-val c-val-amount" type="number" value="${escapeAttr(n)}" style="width:80px;padding:6px;border:1px solid var(--border);border-radius:6px;">
+      <select class="c-val c-val-unit" style="flex:1;padding:6px;border:1px solid var(--border);border-radius:6px;">
+        <option value="minutes" ${unit==='minutes'?'selected':''}>minutes</option>
+        <option value="hours"   ${unit==='hours'?'selected':''}>hours</option>
+        <option value="days"    ${unit==='days'?'selected':''}>days</option>
+      </select>
+    </div>`;
+    return;
+  }
+  host.innerHTML = renderValueControl(def, currentVal);
+}
+
+function renderValueControl(def, currentVal) {
+  const t = def.type;
+  if (t === 'enum' || t === 'custom_field') {
+    const opts = (def.options || []).map(o =>
+      `<option value="${escapeAttr(o.v)}" ${String(o.v)===String(currentVal||'')?'selected':''}>${escapeHtml(o.l)}</option>`).join('');
+    return `<select class="c-val" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+      <option value="">— pick —</option>${opts}
+    </select>`;
+  }
+  if (t === 'group') return resourceSelect('c-val', RESOURCES.groups, 'id', 'name', currentVal);
+  if (t === 'agent') return resourceSelect('c-val', RESOURCES.agents, 'id', 'name', currentVal);
+  if (t === 'native_form') return resourceSelect('c-val', RESOURCES.forms, 'id', 'name', currentVal);
+  if (t === 'custom_status') return resourceSelect('c-val', RESOURCES.customStatuses, 'id', 'agent_label', currentVal);
+  if (t === 'customer') return resourceSelect('c-val', RESOURCES.customers, 'value', 'name', currentVal);
+  if (t === 'sla_policy') return resourceSelect('c-val', RESOURCES.slaPolicies, 'id', 'name', currentVal);
+  if (t === 'bool') return ''; // handled by op
+  if (t === 'tags') return `<input class="c-val" value="${escapeAttr(currentVal||'')}" placeholder="comma-separated tags" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">`;
+  if (t === 'number' || t === 'duration') return `<input class="c-val" type="number" value="${escapeAttr(currentVal||'')}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">`;
+  if (t === 'datetime') return `<input class="c-val" type="datetime-local" value="${escapeAttr(currentVal||'')}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">`;
+  // text fallback
+  return `<input class="c-val" value="${escapeAttr(currentVal||'')}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">`;
+}
+
+function resourceSelect(cls, items, idKey, labelKey, currentVal) {
+  const opts = items.map(r =>
+    `<option value="${escapeAttr(r[idKey])}" ${String(r[idKey])===String(currentVal||'')?'selected':''}>${escapeHtml(r[labelKey])}</option>`).join('');
+  return `<select class="${cls}" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+    <option value="">— pick —</option>${opts}
+  </select>`;
+}
+
+function splitBetween(v, idx) {
+  if (typeof v === 'string' && v.indexOf('..') > 0) return v.split('..')[idx] || '';
+  if (Array.isArray(v)) return String(v[idx] || '');
+  return '';
+}
+function parseDuration(v) {
+  if (typeof v === 'string') {
+    const m = v.match(/^(\d+)\s*(minutes|hours|days)$/);
+    if (m) return [m[1], m[2]];
+  }
+  if (typeof v === 'object' && v) return [v.amount || 1, v.unit || 'hours'];
+  return [1, 'hours'];
+}
+
+// ============================================================================
+// Action rows
+// ============================================================================
+function addAction() { makeActionRow({}); }
+
+function makeActionRow(act) {
+  const row = document.createElement('div');
+  row.className = 'act-row';
+  row.style.cssText = 'background:#fff;border:1px solid var(--border);border-radius:8px;padding:8px;';
+  const typeKey = act.type || CATALOG.actionTypes[0].key;
+  row.innerHTML = `
+    <div style="display:grid;grid-template-columns:1.4fr 1fr 32px;gap:6px;align-items:end;">
+      <div>
+        <div style="color:#64748b;font-size:11px;margin-bottom:2px;">Action</div>
+        <select class="a-type" style="width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;">
+          ${buildActionOptions(typeKey)}
+        </select>
+      </div>
+      <div></div>
+      <div>
+        <button type="button" onclick="this.closest('.act-row').remove()"
+                style="border:1px solid #fecdd3;background:#fff;color:#be123c;border-radius:6px;padding:6px 8px;cursor:pointer;">×</button>
+      </div>
+    </div>
+    <div class="a-params" style="margin-top:8px;display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:6px;"></div>
+  `;
+  document.getElementById('actions').appendChild(row);
+  const typeSel = row.querySelector('.a-type');
+  const paramsHost = row.querySelector('.a-params');
+  function refresh() {
+    paramsHost.innerHTML = '';
+    const def = CATALOG.actionTypes.find(a => a.key === typeSel.value);
+    if (!def || !def.params) return;
+    for (const p of def.params) {
+      const cur = (act.params && act.params[p.key]) !== undefined ? act.params[p.key] : p.default;
+      const wrap = document.createElement('label');
+      wrap.style.cssText = 'font-size:11.5px;color:var(--muted);';
+      wrap.innerHTML = `<span>${escapeHtml(p.label)}${p.required ? ' <span style="color:#be123c;">*</span>' : ''}</span>` + renderParamInput(p, cur, 'a-param', p.key);
+      if (p.desc) {
+        const d = document.createElement('div');
+        d.style.cssText = 'font-size:10.5px;color:#94a3b8;margin-top:2px;';
+        d.textContent = p.desc;
+        wrap.appendChild(d);
+      }
+      paramsHost.appendChild(wrap);
+    }
+  }
+  typeSel.addEventListener('change', () => { act = {type: typeSel.value, params: {}}; refresh(); });
+  refresh();
+}
+
+function buildActionOptions(selectedKey) {
+  const groups = {};
+  for (const a of CATALOG.actionTypes) {
+    (groups[a.group] = groups[a.group] || []).push(a);
+  }
+  let html = '';
+  for (const grp of Object.keys(groups)) {
+    html += `<optgroup label="${escapeAttr(grp)}">`;
+    for (const a of groups[grp]) {
+      html += `<option value="${a.key}" ${a.key === selectedKey ? 'selected' : ''}>${escapeHtml(a.label)}</option>`;
+    }
+    html += `</optgroup>`;
+  }
+  return html;
+}
+
+// Renders an input control for a param. Used by action params + scheduler params.
+function renderParamInput(p, cur, cls, key) {
+  const k = p.kind;
+  const v = cur === undefined || cur === null ? '' : cur;
+  if (k === 'status') {
+    return `<select class="${cls}" data-key="${key}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">
+      ${['new','open','pending','hold','solved','closed'].map(s => `<option value="${s}" ${s===v?'selected':''}>${s}</option>`).join('')}
+    </select>`;
+  }
+  if (k === 'priority') {
+    return `<select class="${cls}" data-key="${key}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">
+      ${['low','normal','high','urgent'].map(s => `<option value="${s}" ${s===v?'selected':''}>${s}</option>`).join('')}
+    </select>`;
+  }
+  if (k === 'group')    return wrapResource(cls, key, RESOURCES.groups, 'id', 'name', v);
+  if (k === 'agent')    return wrapResource(cls, key, RESOURCES.agents, 'id', 'name', v);
+  if (k === 'agent_with_specials') {
+    const specials = [{id:'__round_robin__', name:'⚙ Round-robin within group'},
+                      {id:'__unassign__',    name:'○ Unassign'},
+                      {id:'__current_user__', name:'👤 Current user'}];
+    return wrapResource(cls, key, [...specials, ...RESOURCES.agents], 'id', 'name', v);
+  }
+  if (k === 'native_form')  return wrapResource(cls, key, RESOURCES.forms, 'id', 'name', v);
+  if (k === 'custom_status')return wrapResource(cls, key, RESOURCES.customStatuses, 'id', 'agent_label', v);
+  if (k === 'auto_reply')   return wrapResource(cls, key, RESOURCES.autoReplies, 'id', 'name', v);
+  if (k === 'lang_select')  return wrapResource(cls, key, RESOURCES.languages, 'code', 'name', v);
+  if (k === 'field_picker') {
+    return `<select class="${cls}" data-key="${key}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">
+      <option value="">— pick —</option>
+      ${RESOURCES.fields.map(f => `<option value="${f.id}" ${String(f.id)===String(v)?'selected':''}>${escapeHtml(f.title)}</option>`).join('')}
+    </select>`;
+  }
+  if (k === 'option_picker') {
+    // Render as text — value is paired with the field_id, agent fills it in
+    return `<input class="${cls}" data-key="${key}" value="${escapeAttr(v)}" placeholder="(value)" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">`;
+  }
+  if (k === 'tag_picker')   return `<input class="${cls}" data-key="${key}" value="${escapeAttr(v)}" placeholder="tag" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">`;
+  if (k === 'macro')        return `<input class="${cls}" data-key="${key}" value="${escapeAttr(v)}" placeholder="macro id" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">`;
+  if (k === 'webhook_method') {
+    return `<select class="${cls}" data-key="${key}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">
+      ${['POST','PUT','PATCH','GET','DELETE'].map(m => `<option value="${m}" ${m===v?'selected':''}>${m}</option>`).join('')}
+    </select>`;
+  }
+  if (k === 'number')   return `<input class="${cls}" data-key="${key}" type="number" value="${escapeAttr(v)}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">`;
+  if (k === 'select') {
+    return `<select class="${cls}" data-key="${key}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">
+      ${(p.options || []).map(o => `<option value="${o.v}" ${o.v===v?'selected':''}>${escapeHtml(o.l)}</option>`).join('')}
+    </select>`;
+  }
+  if (k === 'textarea') return `<textarea class="${cls} ph-autocomplete" data-key="${key}" rows="3" placeholder="${escapeAttr(p.placeholder||'')}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;font-family:inherit;">${escapeHtml(v)}</textarea>`;
+  if (k === 'bool')     return `<input class="${cls}" data-key="${key}" type="checkbox" ${v?'checked':''} style="display:block;margin-top:4px;">`;
+  // text fallback — wired with ph-autocomplete so subject lines, webhook URLs,
+  // and any single-line action params can use placeholders too.
+  return `<input class="${cls} ph-autocomplete" data-key="${key}" value="${escapeAttr(v)}" placeholder="${escapeAttr(p.placeholder||'')}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">`;
+}
+
+function wrapResource(cls, key, items, idK, labelK, currentVal) {
+  const opts = items.map(r => `<option value="${escapeAttr(r[idK])}" ${String(r[idK])===String(currentVal||'')?'selected':''}>${escapeHtml(r[labelK])}</option>`).join('');
+  return `<select class="${cls}" data-key="${key}" style="display:block;width:100%;padding:6px;border:1px solid var(--border);border-radius:6px;margin-top:4px;">
+    <option value="">— pick —</option>${opts}
+  </select>`;
+}
+
+// ============================================================================
+// Save
+// ============================================================================
+function collectConditions() {
+  const out = [];
+  document.querySelectorAll('#conditions .cond-row').forEach(row => {
+    const fieldSel = row.querySelector('.c-field');
+    const customInp = row.querySelector('.c-custom-field');
+    const opSel = row.querySelector('.c-op');
+    const def = currentCondFieldDef(fieldSel, customInp);
+    const op = opSel.value;
+    let value;
+    if (op === 'between') {
+      value = (row.querySelector('.c-val-from')?.value || '') + '..' + (row.querySelector('.c-val-to')?.value || '');
+    } else if (op === 'within_last' || op === 'older_than') {
+      value = (row.querySelector('.c-val-amount')?.value || '1') + ' ' + (row.querySelector('.c-val-unit')?.value || 'hours');
+    } else {
+      const vEl = row.querySelector('.c-val');
+      value = vEl ? vEl.value : '';
+    }
+    const entry = {field: fieldSel.value, op, value};
+    if (fieldSel.value === 'custom_field') entry.custom_field_id = def.custom_field_id || null;
+    out.push(entry);
+  });
+  return out;
+}
+
+function collectActions() {
+  const out = [];
+  document.querySelectorAll('#actions .act-row').forEach(row => {
+    const typeSel = row.querySelector('.a-type');
+    const params = {};
+    row.querySelectorAll('.a-param').forEach(el => {
+      const k = el.dataset.key;
+      params[k] = (el.type === 'checkbox') ? el.checked : el.value;
+    });
+    out.push({type: typeSel.value, params});
+  });
+  return out;
+}
+
+function collectSchedule() {
+  const kind = document.getElementById('sched-kind').value;
+  const params = {};
+  document.querySelectorAll('#sched-params .sched-param').forEach(el => {
+    params[el.dataset.key] = (el.type === 'checkbox') ? el.checked : el.value;
+  });
+  return {kind, ...params};
+}
+
+async function saveRule(ev) {
+  ev.preventDefault();
+  const f = ev.target;
+  const fd = new FormData();
+  fd.append('automation_id', f.automation_id.value);
+  fd.append('name', f.name.value);
+  fd.append('description', f.description.value);
+  fd.append('active', f.active.checked ? 1 : 0);
+  fd.append('category', f.category.value);
+  fd.append('position', f.position.value || 100);
+  if (f.category.value === 'trigger') {
+    fd.append('trigger_type', f.trigger_type ? f.trigger_type.value : '');
+    fd.append('trigger_params_json', '{}');
+    fd.append('schedule_json', '{}');
+  } else {
+    fd.append('trigger_type', '');
+    fd.append('trigger_params_json', '{}');
+    fd.append('schedule_json', JSON.stringify(collectSchedule()));
+  }
+  fd.append('conditions_json', JSON.stringify(collectConditions()));
+  fd.append('actions_json', JSON.stringify(collectActions()));
+
+  const st = document.getElementById('rule-status');
+  st.textContent = 'Saving…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/automations', { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    st.textContent = '✓ Saved';
+    setTimeout(() => location.reload(), 500);
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  return false;
+}
+
+// ============================================================================
+// Visual test
+// ============================================================================
+let TEST_RULE_ID = null;
+let TEST_SELECTED_TICKET = null;        // {id, display_id, subject, …}
+let _ticketSearchTimer = null;
+
+function openTest(id, name) {
+  TEST_RULE_ID = id;
+  TEST_SELECTED_TICKET = null;
+  document.getElementById('test-rule-name').textContent = name || ('rule #' + id);
+  document.getElementById('ticket-search').value = '';
+  document.getElementById('ticket-selected').style.display = 'none';
+  document.getElementById('test-result').style.display = 'none';
+  document.getElementById('test-status').textContent = '';
+  document.getElementById('test-bg').style.display = 'block';
+  searchTickets('');   // load recent open tickets immediately
+}
+function closeTest(ev) {
+  if (ev && ev.target.id !== 'test-bg') return;
+  document.getElementById('test-bg').style.display = 'none';
+}
+
+document.getElementById('ticket-search').addEventListener('input', (ev) => {
+  clearTimeout(_ticketSearchTimer);
+  const q = ev.target.value;
+  _ticketSearchTimer = setTimeout(() => searchTickets(q), 200);
+});
+
+async function searchTickets(q) {
+  const host = document.getElementById('ticket-results');
+  host.innerHTML = '<div style="padding:10px;color:#94a3b8;font-size:12px;">Searching…</div>';
+  try {
+    const r = await fetch('/api/admin/tickets/search?limit=30&q=' + encodeURIComponent(q || ''));
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    host.innerHTML = '';
+    if (!out.tickets.length) {
+      host.innerHTML = '<div style="padding:10px;color:#94a3b8;font-size:12px;">No tickets match.</div>';
+      return;
+    }
+    for (const t of out.tickets) {
+      const row = document.createElement('div');
+      row.style.cssText = 'padding:8px 12px;border-bottom:1px solid #f1f5f9;cursor:pointer;display:grid;grid-template-columns:90px 1fr 80px 90px;gap:8px;align-items:center;font-size:12.5px;';
+      row.innerHTML = `
+        <code style="background:#eef2ff;color:#4f46e5;padding:2px 6px;border-radius:4px;font-size:11px;">${escapeHtml(t.display_id)}</code>
+        <div>
+          <div>${escapeHtml(t.subject || '(no subject)')}</div>
+          ${t.customer ? `<div style="font-size:11px;color:#64748b;">Customer: ${escapeHtml(t.customer)}</div>` : ''}
+        </div>
+        <span class="admin-status admin-status-${t.status === 'solved' || t.status === 'closed' ? 'done' : 'partial'}" style="font-size:10px;">${t.status}</span>
+        <span style="font-size:11px;color:#64748b;text-align:right;">${t.priority || ''}</span>
+      `;
+      row.addEventListener('mouseenter', () => row.style.background = '#eef2ff');
+      row.addEventListener('mouseleave', () => row.style.background = '');
+      row.addEventListener('click', () => selectTicket(t));
+      host.appendChild(row);
+    }
+  } catch (e) {
+    host.innerHTML = `<div style="padding:10px;color:#be123c;font-size:12px;">Failed: ${escapeHtml(e.message)}</div>`;
+  }
+}
+
+function selectTicket(t) {
+  TEST_SELECTED_TICKET = t;
+  const sel = document.getElementById('ticket-selected');
+  sel.style.display = 'block';
+  document.getElementById('sel-display').innerHTML =
+    `<code>${escapeHtml(t.display_id)}</code> · ${escapeHtml(t.subject)}`;
+}
+
+async function runTest(execute) {
+  if (!TEST_SELECTED_TICKET) {
+    document.getElementById('test-status').textContent = 'Pick a ticket from the list first.';
+    document.getElementById('test-status').style.color = '#be123c';
+    return;
+  }
+  const tid = TEST_SELECTED_TICKET.id;
+  const disp = TEST_SELECTED_TICKET.display_id;
+  if (execute && !confirm(`Execute the rule on ${disp} (${TEST_SELECTED_TICKET.subject}) for real?\n\nChanges will be saved and recorded in the ticket's history. Cannot be undone.`)) return;
+  const fd = new FormData();
+  fd.append('ticket_id', tid);
+  fd.append('execute', execute ? 1 : 0);
+  const st = document.getElementById('test-status');
+  st.textContent = execute ? '⏳ Running for real…' : '⏳ Running dry-run…';
+  st.style.color = '#64748b';
+  try {
+    const r = await fetch(`/api/admin/automations/${TEST_RULE_ID}/test`, { method: 'POST', body: fd });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    renderTestResult(out, execute);
+    st.textContent = '✓ Done';
+    st.style.color = '#047857';
+  } catch (e) {
+    st.textContent = '✗ ' + e.message;
+    st.style.color = '#be123c';
+  }
+}
+
+function renderTestResult(out, executed) {
+  const result = document.getElementById('test-result');
+  result.style.display = 'block';
+
+  // Banner
+  const banner = document.getElementById('test-banner');
+  if (out.all_conditions_passed) {
+    banner.textContent = executed
+      ? `▶ Conditions matched on ticket #${out.ticket_id}. Actions executed.`
+      : `👁 Conditions WOULD match on ticket #${out.ticket_id}. Actions previewed below.`;
+    banner.style.background = '#d1fae5'; banner.style.color = '#065f46';
+  } else {
+    banner.textContent = `✕ Conditions did NOT match on ticket #${out.ticket_id}. Actions skipped.`;
+    banner.style.background = '#fee2e2'; banner.style.color = '#be123c';
+  }
+
+  // Conditions breakdown
+  const condsHost = document.getElementById('test-conds');
+  condsHost.innerHTML = '';
+  if (!out.conditions.length) {
+    condsHost.innerHTML = '<div style="font-size:12px;color:#94a3b8;padding:6px;">No conditions — always passes.</div>';
+  }
+  for (const cnd of out.conditions) {
+    const row = document.createElement('div');
+    const ok = cnd.passed;
+    row.style.cssText = `display:grid;grid-template-columns:24px 1fr 110px 1fr 1fr;gap:8px;align-items:center;padding:6px 10px;border-radius:6px;font-size:12.5px;background:${ok ? '#ecfdf5' : '#fef2f2'};border:1px solid ${ok ? '#a7f3d0' : '#fecaca'};`;
+    row.innerHTML = `
+      <div style="font-size:16px;color:${ok ? '#047857' : '#be123c'};font-weight:700;">${ok ? '✓' : '✕'}</div>
+      <div><strong>${escapeHtml(cnd.label || cnd.field)}</strong></div>
+      <div style="color:#64748b;font-size:11px;">${escapeHtml(cnd.op_label || cnd.op)}</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;">expected: <strong>${escapeHtml(cnd.expected || '∅')}</strong></div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;">actual: <strong>${escapeHtml(cnd.actual || '∅')}</strong></div>
+    `;
+    condsHost.appendChild(row);
+  }
+
+  // Actions outcome
+  const actsHost = document.getElementById('test-actions');
+  actsHost.innerHTML = '';
+  if (!out.all_conditions_passed) {
+    actsHost.innerHTML = '<div style="font-size:12px;color:#94a3b8;padding:6px;">(actions only run when all conditions match)</div>';
+    return;
+  }
+  if (!out.actions.length) {
+    actsHost.innerHTML = '<div style="font-size:12px;color:#94a3b8;padding:6px;">No actions defined on this rule.</div>';
+    return;
+  }
+  for (const a of out.actions) {
+    const ok = a.ok !== false;
+    const row = document.createElement('div');
+    row.style.cssText = `display:grid;grid-template-columns:24px 1fr 2fr;gap:8px;align-items:center;padding:6px 10px;border-radius:6px;font-size:12.5px;background:${ok ? '#eef2ff' : '#fef2f2'};border:1px solid ${ok ? '#c7d2fe' : '#fecaca'};`;
+    row.innerHTML = `
+      <div style="font-size:16px;color:${ok ? 'var(--indigo)' : '#be123c'};font-weight:700;">${executed ? (ok ? '▶' : '✕') : '👁'}</div>
+      <div><strong>${escapeHtml(a.label || a.action)}</strong>
+        <div style="font-size:10.5px;color:#64748b;font-family:'JetBrains Mono',monospace;">${escapeHtml(JSON.stringify(a.params || {}))}</div>
+      </div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:11px;color:${ok ? '#1e293b' : '#be123c'};">
+        ${escapeHtml(a.summary || a.error || '(no output)')}
+      </div>
+    `;
+    actsHost.appendChild(row);
+  }
+}
+
+async function deleteRule(id) {
+  if (!confirm('Delete this rule?')) return;
+  const r = await fetch(`/api/admin/automations/${id}/delete`, { method: 'POST' });
+  if (r.ok) location.reload();
+}
+
+function toggleRaw() {
+  const v = document.getElementById('raw-view');
+  if (v.style.display === 'none') {
+    document.getElementById('raw-json').textContent = JSON.stringify({
+      category: document.querySelector('input[name="category"]').value,
+      trigger_type: document.querySelector('select[name="trigger_type"]')?.value || null,
+      schedule: collectSchedule(),
+      conditions: collectConditions(),
+      actions: collectActions(),
+    }, null, 2);
+    v.style.display = 'block';
+  } else { v.style.display = 'none'; }
+}
+
+// ============================================================================
+// Import from ZD
+// ============================================================================
+async function importFromZd() {
+  const st = document.getElementById('imp-status');
+  st.textContent = '⏳ Pulling triggers + automations…'; st.style.color = '#64748b';
+  try {
+    const r = await fetch('/api/admin/automations/import-from-zd', { method: 'POST' });
+    if (!r.ok) throw new Error(await r.text());
+    const out = await r.json();
+    st.textContent = `✓ ${out.triggers.created}+${out.automations.created} created · ${out.triggers.updated}+${out.automations.updated} updated`;
+    st.style.color = '#047857';
+    setTimeout(() => location.reload(), 900);
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+}
+
+// ============================================================================
+// Datalist for custom-field search
+// ============================================================================
+(function() {
+  const dl = document.createElement('datalist');
+  dl.id = 'dl-fields';
+  dl.innerHTML = RESOURCES.fields.map(f => `<option value="${escapeAttr(f.title)}">`).join('');
+  document.body.appendChild(dl);
+})();
+
+// ============================================================================
+// Helpers
+// ============================================================================
+function escapeHtml(s) { return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function escapeAttr(s) { return escapeHtml(s); }
+</script>
+{% endblock %}

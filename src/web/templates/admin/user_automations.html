@@ -1,0 +1,420 @@
+{% extends "_base.html" %}
+{% block title %}User automations · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">{{ feature.block or 'F6' }}</div>
+    <h1 class="admin-detail-title">User automations</h1>
+    <div class="admin-detail-summary">
+      Event-driven rules that fire on user lifecycle events: login, availability
+      change, work-day start, idle during work hours, leave set/cleared, role
+      grants, etc. Two defaults are seeded — fully editable. Time-based rules
+      (idle/work-day) need the user scheduler running below.
+    </div>
+  </div>
+
+  <!-- Scheduler thread state — read-only, auto-managed -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;font-size:12px;color:#475569;">
+    <div style="display:flex;align-items:center;gap:10px;">
+      <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:{% if scheduler_state.running %}#dcfce7;color:#166534{% else %}#fee2e2;color:#991b1b{% endif %};">
+        {% if scheduler_state.running %}▶ Rule scheduler thread alive{% else %}■ scheduler thread NOT running{% endif %}
+      </span>
+      <span>Each rule below has its own active toggle + interval. The thread just dispatches due rules — no manual start/stop needed.</span>
+    </div>
+    {% if scheduler_state.last_tick %}
+    <div style="margin-top:4px;font-size:11px;color:#64748b;">
+      Last tick {{ scheduler_state.last_tick.at }} · {{ scheduler_state.last_tick.due_rules or 0 }} rules due · {{ scheduler_state.last_tick.fired_rules or 0 }} fired · {{ scheduler_state.last_tick.elapsed_ms or 0 }}ms
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Rules table — each rule is its own unit of control -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;padding:0;overflow-x:auto;">
+    <table class="admin-table">
+      <thead><tr>
+        <th style="width:26%;">Rule</th>
+        <th style="width:18%;">Trigger</th>
+        <th style="width:16%;">Conditions</th>
+        <th style="width:14%;">Actions</th>
+        <th style="width:9%;">Schedule</th>
+        <th style="width:9%;">Last fire / fires</th>
+        <th style="width:8%;">Run state</th>
+      </tr></thead>
+      <tbody>
+        {% for r in rules %}
+        <tr style="{% if not r.active %}opacity:0.55;background:#fafbff;{% endif %}{% if r.last_error %}background:#fff7ed;{% endif %}">
+          <td>
+            <strong>{{ r.name }}</strong>
+            {% if r.is_system_default %}<span style="font-size:10px;background:#fef3c7;color:#92400e;padding:1px 5px;border-radius:6px;margin-left:6px;">seeded</span>{% endif %}
+            {% if r.description %}<div style="font-size:11px;color:#64748b;margin-top:2px;">{{ r.description }}</div>{% endif %}
+            {% if r.last_error %}<div style="font-size:10px;color:#be123c;margin-top:4px;font-family:monospace;background:#fef2f2;padding:3px 5px;border-radius:4px;border:1px solid #fecaca;">⚠ {{ r.last_error[:120] }}</div>{% endif %}
+          </td>
+          <td>
+            <code style="font-size:11px;">{{ r.trigger_event }}</code>
+            <div style="font-size:10px;color:#94a3b8;margin-top:2px;">{{ r.category }}</div>
+          </td>
+          <td>
+            {% set crules = r._conditions.get('rules', []) %}
+            {% if crules %}
+              <div style="font-size:10px;color:#475569;">{{ r._conditions.get('match', 'all')|upper }} of {{ crules|length }}</div>
+              {% for cr in crules[:2] %}
+              <div style="font-size:10px;color:#64748b;font-family:monospace;">{{ cr.field }} {{ cr.op }} {{ cr.value }}</div>
+              {% endfor %}
+              {% if crules|length > 2 %}<div style="font-size:10px;color:#94a3b8;">… +{{ crules|length - 2 }}</div>{% endif %}
+            {% else %}<em style="font-size:11px;color:#94a3b8;">always</em>{% endif %}
+          </td>
+          <td>
+            {% for act in r._actions[:3] %}
+            <div style="font-size:10px;color:#64748b;font-family:monospace;">{{ act.type }}</div>
+            {% endfor %}
+            {% if r._actions|length > 3 %}<div style="font-size:10px;color:#94a3b8;">… +{{ r._actions|length - 3 }}</div>{% endif %}
+          </td>
+          <td style="font-size:11px;">
+            {% if r.category == 'scheduler' %}
+              <div>every <strong>{{ r.interval_minutes or 5 }}m</strong></div>
+              {% if r.next_fire_at %}
+              <div style="font-size:10px;color:#64748b;">next: {{ r.next_fire_at | ist('%H:%M') }}</div>
+              {% else %}
+              <div style="font-size:10px;color:#0ea5e9;">due now</div>
+              {% endif %}
+            {% else %}
+              <span style="font-size:10px;color:#94a3b8;">on event</span>
+            {% endif %}
+          </td>
+          <td style="font-size:11px;">
+            {% if r.last_fired_at %}
+            <div title="{{ r.last_fired_at }}">{{ r.last_fired_at | ist('%d %b %H:%M') }}</div>
+            {% else %}
+            <em style="color:#94a3b8;">never</em>
+            {% endif %}
+            <div style="font-size:10px;color:#64748b;">total: <strong>{{ r.fire_count or 0 }}</strong></div>
+          </td>
+          <td style="white-space:nowrap;">
+            <label style="font-size:11px;display:flex;align-items:center;gap:5px;cursor:pointer;padding:3px 6px;background:{% if r.active %}#dcfce7{% else %}#f1f5f9{% endif %};border-radius:6px;">
+              <input type="checkbox" {% if r.active %}checked{% endif %}
+                     onchange="toggleRule({{ r.id }}, this.checked ? 1 : 0)">
+              {{ 'active' if r.active else 'paused' }}
+            </label>
+            <div style="display:flex;gap:3px;margin-top:5px;">
+              <button type="button" onclick="runNow({{ r.id }}, this)" title="Fire this rule now"
+                      style="font-size:10px;padding:3px 7px;background:#eef2ff;color:#3730a3;border:1px solid #c7d2fe;border-radius:5px;cursor:pointer;">▶ Run now</button>
+              <button type="button" onclick="openEditor({{ r.id }})" title="Edit"
+                      style="font-size:10px;padding:3px 7px;background:#fff;border:1px solid var(--border);border-radius:5px;cursor:pointer;">⚙</button>
+              {% if not r.is_system_default %}
+              <button type="button" onclick="deleteRule({{ r.id }}, '{{ r.name|e }}')" title="Delete"
+                      style="font-size:10px;padding:3px 7px;background:#fff1f2;color:#be123c;border:1px solid #fecdd3;border-radius:5px;cursor:pointer;">×</button>
+              {% endif %}
+            </div>
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <div style="margin-top:14px;">
+    <button type="button" onclick="openEditor(null)" class="admin-card-btn"
+            style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 16px;">
+      + New rule
+    </button>
+  </div>
+
+  <!-- Reference -->
+  <details class="admin-card admin-card-done" style="margin-top:14px;">
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;">▸</span><strong>Reference: triggers, condition fields, actions</strong>
+    </summary>
+    <div style="margin-top:10px;display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px;font-size:11px;">
+      <div>
+        <div style="font-weight:600;color:#475569;margin-bottom:4px;">Triggers</div>
+        {% for key, label, desc, fires_from in trigger_events %}
+        <div style="padding:4px 0;border-bottom:1px solid #f1f5f9;">
+          <code>{{ key }}</code> <span style="font-size:9px;color:#94a3b8;">({{ fires_from }})</span>
+          <div style="color:#64748b;font-size:10px;">{{ desc }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <div>
+        <div style="font-weight:600;color:#475569;margin-bottom:4px;">Condition fields</div>
+        {% for key, label, ftype in condition_fields %}
+        <div style="padding:4px 0;border-bottom:1px solid #f1f5f9;">
+          <code>{{ key }}</code> <span style="font-size:9px;color:#94a3b8;">{{ ftype }}</span>
+          <div style="color:#64748b;font-size:10px;">{{ label }}</div>
+        </div>
+        {% endfor %}
+      </div>
+      <div>
+        <div style="font-weight:600;color:#475569;margin-bottom:4px;">Actions</div>
+        {% for key, label, hint in action_types %}
+        <div style="padding:4px 0;border-bottom:1px solid #f1f5f9;">
+          <code>{{ key }}</code>
+          <div style="color:#64748b;font-size:10px;">{{ label }} — {{ hint }}</div>
+        </div>
+        {% endfor %}
+      </div>
+    </div>
+  </details>
+</main>
+
+<!-- Editor modal -->
+<div id="ua-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.5);z-index:9999;align-items:center;justify-content:center;">
+  <div style="background:#fff;border-radius:12px;padding:22px;max-width:780px;width:92%;max-height:88vh;overflow-y:auto;">
+    <h2 id="ua-title" style="margin:0 0 14px 0;font-size:18px;">New rule</h2>
+    <form id="ua-form" onsubmit="return saveRule(event)">
+      <input type="hidden" id="ua-id">
+      <div style="display:grid;grid-template-columns:2fr 3fr;gap:10px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Name</span>
+          <input id="ua-name" required style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Description</span>
+          <input id="ua-desc" style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+      </div>
+      <label style="display:block;font-size:12px;margin-top:10px;">
+        <span style="color:var(--muted);">Trigger event</span>
+        <select id="ua-trigger" required onchange="onTriggerChange()"
+                style="display:block;width:100%;padding:7px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:monospace;font-size:12px;">
+          {% for key, label, desc, fires_from in trigger_events %}
+          <option value="{{ key }}" data-fires-from="{{ fires_from }}">{{ key }} — {{ label }} ({{ fires_from }})</option>
+          {% endfor %}
+        </select>
+      </label>
+
+      <div id="ua-schedule-block" style="display:none;margin-top:10px;padding:10px;background:#f8fafc;border:1px solid var(--border);border-radius:8px;">
+        <div style="font-size:12px;font-weight:600;margin-bottom:6px;">⏰ Schedule (this rule decides its own cadence)</div>
+        <label style="font-size:11px;display:flex;align-items:center;gap:8px;">
+          <span>Check every</span>
+          <input type="number" id="ua-interval" min="1" max="1440" value="30" style="width:70px;padding:4px;border:1px solid var(--border);border-radius:6px;">
+          <span>minutes</span>
+        </label>
+        <div style="font-size:10px;color:#64748b;margin-top:4px;">Common: 1 (very chatty), 5 (auto-online), 15, 30 (idle warning), 60, 240, 1440 (daily)</div>
+      </div>
+      <input type="hidden" id="ua-category" value="trigger">
+
+      <div style="margin-top:14px;">
+        <div style="display:flex;align-items:center;gap:10px;">
+          <strong style="font-size:12px;">Conditions</strong>
+          <select id="ua-match" style="padding:3px;border:1px solid var(--border);border-radius:6px;font-size:11px;">
+            <option value="all">match ALL</option>
+            <option value="any">match ANY</option>
+          </select>
+        </div>
+        <div id="ua-conditions" style="display:flex;flex-direction:column;gap:5px;margin-top:8px;"></div>
+        <button type="button" onclick="addCondition()" class="admin-card-btn" style="margin-top:5px;font-size:11px;">+ Condition</button>
+      </div>
+
+      <div style="margin-top:14px;">
+        <strong style="font-size:12px;">Actions</strong>
+        <div id="ua-actions" style="display:flex;flex-direction:column;gap:8px;margin-top:8px;"></div>
+        <button type="button" onclick="addAction()" class="admin-card-btn" style="margin-top:5px;font-size:11px;">+ Action</button>
+      </div>
+
+      <label style="display:flex;align-items:center;gap:6px;margin-top:14px;font-size:12px;">
+        <input type="checkbox" id="ua-active" checked> Active
+      </label>
+
+      <div style="display:flex;gap:8px;justify-content:flex-end;margin-top:18px;">
+        <span id="ua-status" style="font-size:12px;color:var(--muted);align-self:center;flex:1;"></span>
+        <button type="button" onclick="closeEditor()" class="admin-card-btn">Cancel</button>
+        <button type="submit" class="admin-card-btn" style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">Save rule</button>
+      </div>
+    </form>
+  </div>
+</div>
+
+<script>
+const RULES = {{ rules | tojson }};
+const CONDITION_FIELDS = {{ condition_fields | tojson }};
+const OPS_BY_TYPE = {{ ops_by_type | tojson }};
+const ACTION_TYPES = {{ action_types | tojson }};
+const ROLES_LIST = {{ roles_list | tojson }};
+const GROUPS_LIST = {{ groups_list | tojson }};
+
+function openEditor(id) {
+  const rule = id ? RULES.find(r => r.id === id) : null;
+  document.getElementById('ua-title').textContent = rule ? `Edit · ${rule.name}` : 'New rule';
+  document.getElementById('ua-id').value = id || '';
+  document.getElementById('ua-name').value = rule ? rule.name : '';
+  document.getElementById('ua-desc').value = rule ? (rule.description || '') : '';
+  document.getElementById('ua-trigger').value = rule ? rule.trigger_event : '{{ trigger_events[0][0] }}';
+  document.getElementById('ua-active').checked = rule ? !!rule.active : true;
+  document.getElementById('ua-interval').value = rule ? (rule.interval_minutes || 5) : 30;
+  const cond = rule ? rule._conditions : {match: 'all', rules: []};
+  document.getElementById('ua-match').value = (cond && cond.match) || 'all';
+  document.getElementById('ua-conditions').innerHTML = '';
+  ((cond && cond.rules) || []).forEach(addCondition);
+  document.getElementById('ua-actions').innerHTML = '';
+  (rule ? rule._actions : []).forEach(addAction);
+  if (!rule) { addCondition(); addAction(); }
+  document.getElementById('ua-status').textContent = '';
+  document.getElementById('ua-modal').style.display = 'flex';
+  onTriggerChange();  // show/hide the schedule block based on trigger fires_from
+}
+
+function onTriggerChange() {
+  const sel = document.getElementById('ua-trigger');
+  const opt = sel.options[sel.selectedIndex];
+  const fires = opt ? opt.dataset.firesFrom : 'request';
+  const block = document.getElementById('ua-schedule-block');
+  const cat = document.getElementById('ua-category');
+  if (fires === 'scheduler') {
+    block.style.display = 'block';
+    cat.value = 'scheduler';
+  } else {
+    block.style.display = 'none';
+    cat.value = 'trigger';
+  }
+}
+
+function closeEditor() {
+  document.getElementById('ua-modal').style.display = 'none';
+}
+
+function addCondition(prefill) {
+  const wrap = document.getElementById('ua-conditions');
+  const row = document.createElement('div');
+  row.className = 'ua-cond-row';
+  row.style.cssText = 'display:grid;grid-template-columns:1.4fr 0.8fr 1.5fr auto;gap:5px;align-items:center;';
+  row.innerHTML = `
+    <select class="cc-field" style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:monospace;">
+      ${CONDITION_FIELDS.map(f => `<option value="${f[0]}">${f[0]}</option>`).join('')}
+    </select>
+    <select class="cc-op" style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:11px;"></select>
+    <input class="cc-val" style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:11px;">
+    <button type="button" onclick="this.closest('.ua-cond-row').remove()" style="background:transparent;border:none;cursor:pointer;color:#94a3b8;font-size:14px;">×</button>
+  `;
+  wrap.appendChild(row);
+  if (prefill) {
+    row.querySelector('.cc-field').value = prefill.field || CONDITION_FIELDS[0][0];
+  }
+  refreshOps(row);
+  if (prefill && prefill.op) row.querySelector('.cc-op').value = prefill.op;
+  if (prefill && prefill.value !== undefined) row.querySelector('.cc-val').value = prefill.value;
+  row.querySelector('.cc-field').addEventListener('change', () => refreshOps(row));
+}
+
+function refreshOps(row) {
+  const fieldKey = row.querySelector('.cc-field').value;
+  const meta = CONDITION_FIELDS.find(f => f[0] === fieldKey);
+  const ftype = meta ? meta[2] : 'text';
+  const ops = OPS_BY_TYPE[ftype] || ['eq'];
+  const sel = row.querySelector('.cc-op');
+  sel.innerHTML = ops.map(o => `<option value="${o}">${o.replace('_', ' ')}</option>`).join('');
+}
+
+function addAction(prefill) {
+  const wrap = document.getElementById('ua-actions');
+  const row = document.createElement('div');
+  row.className = 'ua-act-row';
+  row.style.cssText = 'display:flex;flex-direction:column;gap:5px;padding:8px;border:1px solid var(--border);border-radius:8px;background:#fafbff;';
+  row.innerHTML = `
+    <div style="display:flex;gap:5px;align-items:center;">
+      <select class="ac-type" onchange="refreshActionParams(this.closest('.ua-act-row'))" style="flex:1;padding:5px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:monospace;">
+        ${ACTION_TYPES.map(a => `<option value="${a[0]}">${a[0]} — ${a[1]}</option>`).join('')}
+      </select>
+      <button type="button" onclick="this.closest('.ua-act-row').remove()" style="background:transparent;border:none;cursor:pointer;color:#94a3b8;font-size:14px;">×</button>
+    </div>
+    <textarea class="ac-params" rows="3" placeholder='{"key": "value"}' style="padding:5px;border:1px solid var(--border);border-radius:6px;font-size:11px;font-family:monospace;"></textarea>
+    <div class="ac-hint" style="font-size:10px;color:#94a3b8;"></div>
+  `;
+  wrap.appendChild(row);
+  if (prefill) {
+    row.querySelector('.ac-type').value = prefill.type || ACTION_TYPES[0][0];
+    row.querySelector('.ac-params').value = JSON.stringify(prefill.params || {}, null, 2);
+  }
+  refreshActionParams(row);
+}
+
+function refreshActionParams(row) {
+  const t = row.querySelector('.ac-type').value;
+  const meta = ACTION_TYPES.find(a => a[0] === t);
+  row.querySelector('.ac-hint').textContent = meta ? meta[2] : '';
+  if (!row.querySelector('.ac-params').value.trim()) {
+    row.querySelector('.ac-params').placeholder = `{} // ${meta ? meta[2] : ''}`;
+  }
+}
+
+async function saveRule(e) {
+  e.preventDefault();
+  const status = document.getElementById('ua-status');
+  status.textContent = 'Saving…'; status.style.color = '';
+  const id = document.getElementById('ua-id').value;
+  const conditions = {
+    match: document.getElementById('ua-match').value,
+    rules: Array.from(document.querySelectorAll('.ua-cond-row')).map(r => ({
+      field: r.querySelector('.cc-field').value,
+      op: r.querySelector('.cc-op').value,
+      value: r.querySelector('.cc-val').value,
+    })).filter(r => r.field),
+  };
+  const actions = Array.from(document.querySelectorAll('.ua-act-row')).map(r => {
+    let p = {};
+    try { p = JSON.parse(r.querySelector('.ac-params').value || '{}'); }
+    catch (e) { throw new Error('Invalid JSON in action params for ' + r.querySelector('.ac-type').value); }
+    return { type: r.querySelector('.ac-type').value, params: p };
+  });
+  const fd = new FormData();
+  fd.append('name', document.getElementById('ua-name').value.trim());
+  fd.append('description', document.getElementById('ua-desc').value.trim());
+  fd.append('trigger_event', document.getElementById('ua-trigger').value);
+  fd.append('conditions_json', JSON.stringify(conditions));
+  fd.append('actions_json', JSON.stringify(actions));
+  fd.append('active', document.getElementById('ua-active').checked ? 1 : 0);
+  fd.append('category', document.getElementById('ua-category').value);
+  fd.append('interval_minutes', document.getElementById('ua-interval').value || 5);
+  try {
+    const url = id ? '/api/admin/user-automations/' + id : '/api/admin/user-automations';
+    const r = await fetch(url, { method: 'POST', body: fd });
+    if (!r.ok) {
+      const body = await r.json().catch(() => ({}));
+      throw new Error(body.detail || 'Save failed');
+    }
+    status.textContent = '✓ Saved'; status.style.color = '#047857';
+    setTimeout(() => location.reload(), 400);
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.style.color = '#be123c';
+  }
+  return false;
+}
+
+async function toggleRule(id, active) {
+  const fd = new FormData(); fd.append('active', active);
+  await fetch('/api/admin/user-automations/' + id + '/toggle', { method: 'POST', body: fd });
+}
+
+async function deleteRule(id, name) {
+  if (!confirm('Delete "' + name + '"?')) return;
+  const r = await fetch('/api/admin/user-automations/' + id + '/delete', { method: 'POST' });
+  if (r.ok) location.reload();
+}
+
+async function runNow(rid, btn) {
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = '⏳…';
+  try {
+    const r = await fetch('/api/admin/user-automations/' + rid + '/run-now', { method: 'POST' });
+    const out = await r.json();
+    if (out.ok) {
+      btn.textContent = '✓ ' + (out.rules_fired || 0) + '/' + (out.users_checked || 0);
+      setTimeout(() => location.reload(), 1200);
+    } else {
+      btn.textContent = '✗ failed';
+      alert('Run failed: ' + (out.error || 'unknown'));
+      btn.disabled = false;
+      setTimeout(() => btn.textContent = orig, 1500);
+    }
+  } catch (e) {
+    btn.disabled = false; btn.textContent = orig;
+    alert('Network error: ' + e.message);
+  }
+}
+
+document.getElementById('ua-modal').addEventListener('click', (e) => {
+  if (e.target.id === 'ua-modal') closeEditor();
+});
+</script>
+{% endblock %}
