@@ -794,6 +794,38 @@ body {
 .ticket-table-row { cursor: pointer; transition: background .14s; }
 .ticket-table-row:hover { background: #fafbff; }
 .ticket-table-row:last-child td { border-bottom: none; }
+
+/* Status-tinted row backgrounds — kept very subtle so they don't fight the
+   selected/hover states. Open/new = warm yellow (needs attention), pending
+   = blue (waiting on customer), hold = soft red (blocked), solved/closed
+   = near-neutral grey (cooled). Hover override keeps the click affordance
+   obvious regardless of status. */
+.ticket-table-row.row-status-open    { background: #fefce8; }   /* warm yellow tint */
+.ticket-table-row.row-status-new     { background: #fefce8; }
+.ticket-table-row.row-status-pending { background: #eff6ff; }   /* soft blue */
+.ticket-table-row.row-status-hold    { background: #fef2f2; }   /* gentle red */
+.ticket-table-row.row-status-solved  { background: #f8fafc; }   /* near-neutral */
+.ticket-table-row.row-status-closed  { background: #f1f5f9; }   /* slightly darker */
+.ticket-table-row.row-status-open:hover,
+.ticket-table-row.row-status-new:hover,
+.ticket-table-row.row-status-pending:hover,
+.ticket-table-row.row-status-hold:hover,
+.ticket-table-row.row-status-solved:hover,
+.ticket-table-row.row-status-closed:hover { background: #eef2ff; }
+
+/* Same tints reused for the end-user view ticket list (plain <tr> rows). */
+tr.row-status-open    { background: #fefce8; }
+tr.row-status-new     { background: #fefce8; }
+tr.row-status-pending { background: #eff6ff; }
+tr.row-status-hold    { background: #fef2f2; }
+tr.row-status-solved  { background: #f8fafc; }
+tr.row-status-closed  { background: #f1f5f9; }
+tr.row-status-open:hover,
+tr.row-status-new:hover,
+tr.row-status-pending:hover,
+tr.row-status-hold:hover,
+tr.row-status-solved:hover,
+tr.row-status-closed:hover { background: #eef2ff; }
 .td-id { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--indigo); white-space: nowrap; }
 .td-customer { font-weight: 600; color: var(--ink); white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
 .td-subject { color: #1e293b; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

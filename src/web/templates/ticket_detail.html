@@ -247,10 +247,10 @@
         </summary>
         <div class="fields-panel-body" style="padding:10px 12px;display:flex;flex-direction:column;gap:12px;">
 
-          <!-- Identity -->
+          <!-- Identity (name is a link → full read-only user page) -->
           <div>
             <div style="font-size:14px;font-weight:600;color:#0f172a;">
-              👤 {{ customer.identity.name }}
+              👤 <a href="/end-users/{{ customer.identity.id }}" style="color:#0f172a;text-decoration:none;border-bottom:1px dashed #cbd5e1;" title="See full profile + every ticket from this user">{{ customer.identity.name }}</a>
               {% if customer.identity.role == 'agent' or customer.identity.role == 'admin' %}
               <span style="font-size:10px;color:#1e40af;background:#dbeafe;padding:1px 5px;border-radius:4px;margin-left:4px;font-weight:500;">{{ customer.identity.role }}</span>
               {% endif %}
@@ -261,6 +261,7 @@
             <div style="font-size:12px;color:#475569;margin-top:2px;">
               {% if customer.identity.email %}<a href="mailto:{{ customer.identity.email }}" style="color:#475569;">{{ customer.identity.email }}</a>{% endif %}
               {% if customer.identity.phone %} · <span>{{ customer.identity.phone }}</span>{% endif %}
+              · <a href="/end-users/{{ customer.identity.id }}" style="color:#4f46e5;font-size:11px;">see all →</a>
             </div>
             {% if customer.orgs %}
             <div style="font-size:12px;color:#475569;margin-top:4px;">
@@ -296,6 +297,30 @@
             <div>
               <div style="color:#64748b;font-size:10px;">Avg resolution</div>
               <div style="font-weight:500;">{{ customer.stats.avg_resolution_human }}</div>
+            </div>
+            <!-- CSAT spans both columns -->
+            <div style="grid-column:1/3;padding-top:6px;border-top:1px solid #e2e8f0;display:flex;justify-content:space-between;align-items:center;">
+              <div>
+                <div style="color:#64748b;font-size:10px;">
+                  Avg CSAT
+                  {% if customer.stats.csat_n %}<span style="font-size:9px;color:#94a3b8;">· {{ customer.stats.csat_n }} rating{{ '' if customer.stats.csat_n == 1 else 's' }}</span>{% endif %}
+                </div>
+                <div style="font-weight:600;font-size:14px;
+                  color:{% if customer.stats.csat_band == 'good' %}#047857
+                        {% elif customer.stats.csat_band == 'ok' %}#92400e
+                        {% elif customer.stats.csat_band == 'poor' %}#be123c
+                        {% else %}#94a3b8{% endif %};">{{ customer.stats.csat_human }}</div>
+              </div>
+              {% if customer.stats.csat_band %}
+              <span style="font-size:9px;padding:2px 6px;border-radius:6px;
+                background:{% if customer.stats.csat_band == 'good' %}#dcfce7;color:#047857
+                          {% elif customer.stats.csat_band == 'ok' %}#fef3c7;color:#92400e
+                          {% else %}#fee2e2;color:#be123c{% endif %};">
+                {% if customer.stats.csat_band == 'good' %}● happy
+                {% elif customer.stats.csat_band == 'ok' %}◐ passive
+                {% else %}◯ at risk{% endif %}
+              </span>
+              {% endif %}
             </div>
           </div>
 

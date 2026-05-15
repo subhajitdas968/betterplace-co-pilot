@@ -1,0 +1,115 @@
+{% extends "_base.html" %}
+{% block title %}{{ zd_user.name or zd_user.email }} · End-user{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row">
+    <a href="javascript:history.back()" class="back-link">← Back</a>
+    {% if can_manage %}
+    <a href="/admin/end-users/{{ zd_user.id }}" class="admin-card-btn" style="margin-left:auto;">⚙ Manage portal access</a>
+    {% endif %}
+  </div>
+
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">User</div>
+    <h1 class="admin-detail-title">
+      {{ zd_user.name or '(no name)' }}
+      {% if customer and customer.profile and customer.profile.is_vip %}<span style="font-size:13px;color:#92400e;background:#fef3c7;padding:2px 8px;border-radius:8px;font-weight:500;vertical-align:middle;">★ VIP</span>{% endif %}
+      {% if portal_enabled %}<span style="font-size:11px;color:#065f46;background:#dcfce7;padding:2px 6px;border-radius:6px;font-weight:500;vertical-align:middle;">portal access</span>{% endif %}
+    </h1>
+    <div class="admin-detail-summary">
+      <a href="mailto:{{ zd_user.email }}" style="color:#475569;"><code>{{ zd_user.email }}</code></a>
+      {% if customer and customer.identity.phone %} · 📞 {{ customer.identity.phone }}{% endif %}
+      {% if customer and customer.identity.time_zone %} · {{ customer.identity.time_zone }}{% endif %}
+    </div>
+  </div>
+
+  {% if customer %}
+  <!-- Organizations -->
+  {% if customer.orgs %}
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">🏢 Organizations <span style="font-size:11px;color:var(--muted);font-weight:400;">{{ customer.orgs|length }}</span></div>
+    <div style="display:flex;flex-wrap:wrap;gap:8px;margin-top:8px;">
+      {% for o in customer.orgs %}
+      <span style="font-size:12px;background:{% if o.is_primary %}#dbeafe{% else %}#f1f5f9{% endif %};color:{% if o.is_primary %}#1e40af{% else %}#475569{% endif %};padding:4px 10px;border-radius:12px;">
+        {{ o.name }}{% if o.is_primary %} <span style="font-size:9px;">★ primary</span>{% endif %}
+      </span>
+      {% endfor %}
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Activity stats — same 4 chips as the ticket-detail panel, plus CSAT -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Activity</div>
+    <div style="display:grid;grid-template-columns:repeat(5,1fr);gap:14px;margin-top:10px;font-size:13px;">
+      <div><div style="color:var(--muted);font-size:11px;">Tickets total</div><div style="font-weight:600;font-size:18px;">{{ customer.stats.total }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Open right now</div><div style="font-weight:600;font-size:18px;color:{% if customer.stats.open %}#92400e{% else %}#0f172a{% endif %};">{{ customer.stats.open }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Last contact</div><div style="font-weight:500;">{{ customer.stats.last_contact_human }}{% if customer.stats.last_contact_age_sec %} ago{% endif %}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Avg resolution</div><div style="font-weight:500;">{{ customer.stats.avg_resolution_human }}</div></div>
+      <div>
+        <div style="color:var(--muted);font-size:11px;">Avg CSAT
+          {% if customer.stats.csat_n %}<span style="font-size:10px;color:#94a3b8;">({{ customer.stats.csat_n }})</span>{% endif %}
+        </div>
+        <div style="font-weight:600;font-size:18px;
+          color:{% if customer.stats.csat_band == 'good' %}#047857
+                {% elif customer.stats.csat_band == 'ok' %}#92400e
+                {% elif customer.stats.csat_band == 'poor' %}#be123c
+                {% else %}#94a3b8{% endif %};">
+          {{ customer.stats.csat_human }}
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- AI pattern hint -->
+  {% if customer.pattern %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;background:#fef3c7;border-color:#fde68a;">
+    <div class="admin-card-title" style="color:#92400e;">🧠 AI pattern</div>
+    <div style="font-size:13px;color:#92400e;margin-top:4px;">{{ customer.pattern.hint }}</div>
+  </div>
+  {% endif %}
+
+  <!-- All tickets — full list (capped at 500), excludes nothing -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;padding:0;overflow:hidden;">
+    <div class="admin-card-title" style="padding:12px 14px 0 14px;">All tickets <span style="font-size:11px;color:var(--muted);font-weight:400;">({{ all_tickets|length }}{% if all_tickets|length == 500 %} most recent{% endif %})</span></div>
+    {% if all_tickets %}
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;margin-top:8px;">
+      <thead><tr style="background:#f8fafc;text-align:left;">
+        <th style="padding:6px 10px;border-bottom:1px solid var(--border);">ID</th>
+        <th style="padding:6px 10px;border-bottom:1px solid var(--border);">Subject</th>
+        <th style="padding:6px 10px;border-bottom:1px solid var(--border);">Status</th>
+        <th style="padding:6px 10px;border-bottom:1px solid var(--border);">Priority</th>
+        <th style="padding:6px 10px;border-bottom:1px solid var(--border);">Updated</th>
+      </tr></thead>
+      <tbody>
+      {% for r in all_tickets %}
+      <tr class="row-status-{{ r.status }}" style="cursor:pointer;"
+          onclick="location.href='/tickets/{{ r.id }}'">
+        <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;font-family:'JetBrains Mono',monospace;font-size:11px;">{{ r.local_id or ('#' ~ r.id) }}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;">{{ r.subject or '(no subject)' }}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;">
+          <span style="font-size:10px;padding:2px 6px;border-radius:4px;font-weight:500;
+            background:{% if r.status == 'open' %}#fef3c7;color:#92400e
+                      {% elif r.status == 'pending' %}#dbeafe;color:#1e40af
+                      {% elif r.status == 'hold' %}#fce7f3;color:#9d174d
+                      {% elif r.status == 'solved' %}#dcfce7;color:#166534
+                      {% elif r.status == 'closed' %}#e5e7eb;color:#475569
+                      {% else %}#f1f5f9;color:#64748b{% endif %};">{{ r.status }}</span>
+        </td>
+        <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;color:var(--muted);">{{ r.priority or '—' }}</td>
+        <td style="padding:6px 10px;border-bottom:1px solid #f1f5f9;color:var(--muted);font-size:11px;">{{ r.updated_at|truncate(16,True,'') }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="padding:18px;color:var(--muted);text-align:center;font-size:13px;">No tickets from this user yet.</div>
+    {% endif %}
+  </div>
+  {% else %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div style="font-size:13px;color:var(--muted);">User exists but has no tickets yet.</div>
+  </div>
+  {% endif %}
+</main>
+{% endblock %}

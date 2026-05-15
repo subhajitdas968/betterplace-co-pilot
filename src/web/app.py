@@ -498,6 +498,55 @@ async def admin_end_users(
     })
 
 
+# Agent-facing read-only end-user view — accessible to anyone who can view
+# tickets. Same data as the admin edit page minus the portal-access controls
+# (those stay admin-only). Linked from the Customer 360 panel name.
+@app.get("/end-users/{uid}", response_class=HTMLResponse)
+async def end_user_view(
+    uid: int, request: Request,
+    user: dict = Depends(auth_mod.require("tickets.view")),
+):
+    from .. import customer_360 as _c360
+    with db.conn() as c:
+        sb = _sidebar_ctx(c, user)
+        zd_user = c.execute(
+            "SELECT id, name, email, role FROM users WHERE id=?", (uid,)
+        ).fetchone()
+        if not zd_user:
+            raise HTTPException(404, "User not found")
+        c360 = _c360.for_requester(c, uid)
+        # All tickets for this requester (not capped to 10 like the
+        # ticket-detail panel — agents on this page want the full picture).
+        all_tickets = [dict(r) for r in c.execute("""
+            SELECT id, local_id, subject, status, priority,
+                   created_at, updated_at
+              FROM tickets WHERE requester_id = ?
+             ORDER BY COALESCE(updated_at, created_at) DESC
+             LIMIT 500
+        """, (uid,)).fetchall()]
+        # Has the user got any admin override hidden? We don't expose the
+        # full profile (no password hash etc) — just whether portal is on.
+        portal_enabled = False
+        try:
+            p = c.execute("SELECT portal_access_enabled FROM end_user_profiles WHERE user_id=?",
+                            (uid,)).fetchone()
+            portal_enabled = bool(p and p["portal_access_enabled"])
+        except Exception:
+            pass
+    # Does the current viewer have admin.end_users? If so, surface a small
+    # link over to the admin edit page. Otherwise the page stays read-only.
+    can_manage = "admin.end_users" in (user.get("permissions") or set()) or \
+                 "admin.users" in (user.get("permissions") or set())
+    return TEMPLATES.TemplateResponse("end_user_view.html", {
+        "request": request, "user": user,
+        "zd_user": dict(zd_user), "customer": c360,
+        "all_tickets": all_tickets,
+        "portal_enabled": portal_enabled, "can_manage": can_manage,
+        "current_view": "_user", "in_detail": False, "search": "",
+        **sb,
+    })
+
+
 @app.get("/admin/end-users/{uid}", response_class=HTMLResponse)
 async def admin_end_user_edit(
     uid: int, request: Request,
@@ -513,24 +562,74 @@ async def admin_end_user_edit(
             raise HTTPException(404, "End-user not found")
         # Ensure a profile row exists so the edit form has something to show
         profile = db.upsert_end_user_profile(c, uid)
-        # Reuse the 360 helper for stats + orgs + recent tickets (the agent
-        # ticket-detail card already proves this works end-to-end).
+        # Backfill org links from existing ticket history. Cheap (scoped to
+        # this one user, uses idx_tickets_requester) and idempotent — links
+        # already present just get their last_seen_at bumped. This makes the
+        # "Organizations" card show real data immediately even if the
+        # background auto-link in upsert_ticket hasn't run yet for old data.
+        try:
+            db.auto_link_orgs_from_tickets(c, user_id=uid)
+        except Exception as e:
+            print(f"[end_user_edit] auto-link fail: {e}")
+        # Now fetch the full link rows (manual + auto) for the multi-select UI
+        linked_rows = c.execute("""
+            SELECT l.organization_id AS id, o.name, l.is_primary,
+                   l.source, l.first_seen_at, l.last_seen_at
+              FROM end_user_organizations l
+              JOIN organizations o ON o.id = l.organization_id
+             WHERE l.user_id = ?
+             ORDER BY l.is_primary DESC, o.name
+        """, (uid,)).fetchall()
+        linked_orgs = [dict(r) for r in linked_rows]
+        linked_ids = {r["id"] for r in linked_orgs}
+        # Available orgs to add — top 200 by ticket volume that aren't already linked
+        avail_rows = c.execute(f"""
+            SELECT o.id, o.name,
+                   (SELECT COUNT(*) FROM tickets t WHERE t.organization_id = o.id) AS n
+              FROM organizations o
+             {'WHERE o.id NOT IN (' + ','.join('?' * len(linked_ids)) + ')' if linked_ids else ''}
+             ORDER BY n DESC LIMIT 200
+        """, list(linked_ids) if linked_ids else []).fetchall()
+        available_orgs = [dict(r) for r in avail_rows]
+        # Re-fetch the 360 so the panel's "Organizations" reflects the freshly
+        # backfilled links too.
         c360 = _c360.for_requester(c, uid)
     invite_url = None
-    invite_meta = profile.get("portal_invite_sent_at")
     if profile.get("portal_invite_token") and profile.get("portal_invite_expires_at"):
-        # If the token hasn't expired, surface the URL on the page so the
-        # admin can re-copy it (in case they lost the first modal).
         if profile["portal_invite_expires_at"] > db.now_iso():
             invite_url = _build_invite_url(request, profile["portal_invite_token"])
     return TEMPLATES.TemplateResponse("admin/end_user_edit.html", {
         "request": request, "user": user,
         "zd_user": dict(zd_user), "profile": profile, "customer": c360,
+        "linked_orgs": linked_orgs, "available_orgs": available_orgs,
         "invite_url": invite_url,
         "default_permissions": PORTAL_DEFAULT_SETTINGS["default_permissions"],
         "current_view": "_admin", "in_detail": False, "search": "",
         **sb,
     })
+
+
+@app.get("/api/admin/orgs/search")
+async def admin_orgs_search(
+    q: str = "", limit: int = 30,
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    """Typeahead endpoint for the 'add organization' picker on the end-user
+    edit page. Matches by case-insensitive name substring."""
+    s = (q or "").strip().lower()
+    with db.conn() as c:
+        if s:
+            rows = c.execute("""
+                SELECT id, name FROM organizations
+                 WHERE LOWER(name) LIKE ?
+                 ORDER BY LENGTH(name), name LIMIT ?
+            """, (f"%{s}%", int(max(5, min(limit, 100))))).fetchall()
+        else:
+            rows = c.execute(
+                "SELECT id, name FROM organizations ORDER BY name LIMIT ?",
+                (int(max(5, min(limit, 100))),)
+            ).fetchall()
+    return JSONResponse({"orgs": [dict(r) for r in rows]})
 
 
 @app.post("/api/admin/end-users/{uid}/save")

@@ -76,7 +76,7 @@
       </thead>
       <tbody>
         {% for t in tickets %}
-        <tr class="ticket-table-row" onclick="location.href='/tickets/{{ t.local_id or t.id }}?view={{ current_view }}'">
+        <tr class="ticket-table-row row-status-{{ t.status }}" onclick="location.href='/tickets/{{ t.local_id or t.id }}?view={{ current_view }}'">
           {% for col in view_columns %}
             {% if col.kind == 'id' %}
               <td class="{{ col.td }}">

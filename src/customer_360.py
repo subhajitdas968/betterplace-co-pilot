@@ -31,6 +31,18 @@ PATTERN_LOOKBACK_DAYS = 90
 # to be useful.
 PATTERN_MIN_COUNT = 3
 
+# Zendesk custom field that holds the Simplesat CSAT rating. Empirically a
+# 0-10 NPS-style scale (verified against live data — distribution skews to
+# 9 and 10, with a long tail down to 0). Discovered via
+# `SELECT id, title FROM ticket_fields WHERE title LIKE '%Simplesat%'`.
+# If you ever switch CSAT providers, change these constants — they're the
+# only touchpoints outside the helper that reads them.
+SIMPLESAT_FIELD_ID = "18607065981329"
+SIMPLESAT_SCALE_MAX = 10
+# Bands (loosely aligned to NPS: promoter ≥9, passive 7-8, detractor ≤6).
+SIMPLESAT_GOOD_THRESHOLD = 8.0
+SIMPLESAT_OK_THRESHOLD = 6.0
+
 
 def _row_to_dict(r) -> dict | None:
     return dict(r) if r is not None else None
@@ -187,6 +199,27 @@ def for_requester(c: sqlite3.Connection, requester_id: int | None,
     except sqlite3.OperationalError:
         pass
 
+    # CSAT — average Simplesat rating across this requester's tickets that
+    # have a score. Empirical NPS-style 0-10 scale (one stray value of
+    # 431641 in live data showed why filtering by sane range matters).
+    csat_avg = None
+    csat_n = None
+    try:
+        csat_row = c.execute(f"""
+            SELECT AVG(CAST(json_extract(custom_fields, '$."{SIMPLESAT_FIELD_ID}"') AS REAL)) AS avg_rating,
+                   COUNT(json_extract(custom_fields, '$."{SIMPLESAT_FIELD_ID}"')) AS n
+              FROM tickets
+             WHERE requester_id = ?
+               AND json_extract(custom_fields, '$."{SIMPLESAT_FIELD_ID}"') IS NOT NULL
+               AND json_extract(custom_fields, '$."{SIMPLESAT_FIELD_ID}"') != ''
+               AND CAST(json_extract(custom_fields, '$."{SIMPLESAT_FIELD_ID}"') AS REAL) BETWEEN 0 AND {SIMPLESAT_SCALE_MAX}
+        """, (requester_id,)).fetchone()
+        if csat_row and csat_row["n"]:
+            csat_avg = round(float(csat_row["avg_rating"]), 2)
+            csat_n = csat_row["n"]
+    except (sqlite3.OperationalError, ValueError, TypeError):
+        pass
+
     stats = {
         "total": total,
         "open": open_n,
@@ -198,6 +231,21 @@ def for_requester(c: sqlite3.Connection, requester_id: int | None,
         "avg_resolution_human": (
             f"{avg_resolution_min // 60}h" if avg_resolution_min and avg_resolution_min >= 60
             else (f"{avg_resolution_min}m" if avg_resolution_min else "—")
+        ),
+        "csat_avg": csat_avg,           # e.g. 8.43 or None — on 0..10 scale
+        "csat_n": csat_n,                # number of ratings averaged
+        "csat_scale_max": SIMPLESAT_SCALE_MAX,
+        "csat_human": (
+            f"{csat_avg:.2f} / {SIMPLESAT_SCALE_MAX}" if csat_avg is not None
+            else "no ratings yet"
+        ),
+        # Visual cue band — useful for color-coding the chip in the UI.
+        # NPS-style thresholds: ≥8 promoter, 6-7 passive, ≤5 detractor.
+        "csat_band": (
+            "good" if csat_avg is not None and csat_avg >= SIMPLESAT_GOOD_THRESHOLD
+            else "ok" if csat_avg is not None and csat_avg >= SIMPLESAT_OK_THRESHOLD
+            else "poor" if csat_avg is not None
+            else None
         ),
     }
 

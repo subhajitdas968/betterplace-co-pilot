@@ -42,6 +42,56 @@
   </div>
   {% endif %}
 
+  <!-- Organizations / Customers (multi-tag) -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title" style="display:flex;align-items:center;gap:10px;">
+      🏢 Organizations / Customers
+      <span style="font-size:11px;color:var(--muted);font-weight:400;">{{ linked_orgs|length }} linked · click ★ to set primary, × to unlink</span>
+    </div>
+
+    <!-- Current links as chips -->
+    <div id="org-chips" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:10px;min-height:34px;padding:6px;border:1px dashed var(--border);border-radius:8px;">
+      {% if linked_orgs %}
+        {% for o in linked_orgs %}
+        <span class="org-chip" data-org-id="{{ o.id }}" data-org-name="{{ o.name }}"
+              style="display:inline-flex;align-items:center;gap:6px;padding:4px 10px;
+                     background:{% if o.is_primary %}#dbeafe{% else %}#f1f5f9{% endif %};
+                     color:{% if o.is_primary %}#1e40af{% else %}#475569{% endif %};
+                     border-radius:14px;font-size:12px;">
+          <button type="button" onclick="setPrimary({{ o.id }})" title="{% if o.is_primary %}Primary{% else %}Set as primary{% endif %}"
+                  style="background:none;border:none;cursor:pointer;font-size:12px;padding:0;color:inherit;">
+            {% if o.is_primary %}★{% else %}☆{% endif %}
+          </button>
+          <span>{{ o.name }}</span>
+          <span style="font-size:9px;color:#94a3b8;">{{ o.source }}</span>
+          <button type="button" onclick="unlinkOrgFromChip(this)" title="Unlink"
+                  style="background:none;border:none;cursor:pointer;font-size:13px;color:#be123c;padding:0;">×</button>
+        </span>
+        {% endfor %}
+      {% else %}
+        <span style="font-size:12px;color:var(--muted);padding:6px;">No organizations linked. Pick from the dropdown below or type to search.</span>
+      {% endif %}
+    </div>
+
+    <!-- Add new org -->
+    <div style="margin-top:12px;display:grid;grid-template-columns:1fr 1fr auto;gap:8px;align-items:end;">
+      <label style="font-size:12px;position:relative;">
+        <span style="color:var(--muted);">Search organizations</span>
+        <input id="org-search" type="text" placeholder="Type customer/org name…" autocomplete="off"
+               oninput="searchOrgs(this.value)" onfocus="searchOrgs(this.value)"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        <div id="org-search-results" style="display:none;position:absolute;top:100%;left:0;right:0;z-index:10;background:#fff;border:1px solid var(--border);border-radius:8px;margin-top:4px;max-height:260px;overflow-y:auto;box-shadow:0 6px 18px rgba(15,23,42,0.08);"></div>
+      </label>
+      <label style="font-size:12px;display:flex;align-items:center;gap:6px;padding-bottom:8px;">
+        <input type="checkbox" id="add-as-primary">
+        <span>Set as primary on link</span>
+      </label>
+      <div></div>
+    </div>
+
+    <div id="org-status" style="margin-top:6px;font-size:11px;color:var(--muted);"></div>
+  </div>
+
   <!-- Portal access + permissions -->
   <div class="admin-card admin-card-done" style="margin-top:14px;">
     <div class="admin-card-title">Customer portal access</div>
@@ -229,6 +279,94 @@ function copyVal(val, btn) {
 }
 function copyFromInput(id, btn) {
   copyVal(document.getElementById(id).value, btn);
+}
+
+// ---- Org multi-select ----------------------------------------------------
+let _orgSearchTimer = null;
+async function searchOrgs(q) {
+  clearTimeout(_orgSearchTimer);
+  _orgSearchTimer = setTimeout(async () => {
+    const box = document.getElementById('org-search-results');
+    const r = await fetch('/api/admin/orgs/search?q=' + encodeURIComponent(q || ''));
+    if (!r.ok) { box.style.display = 'none'; return; }
+    const j = await r.json();
+    if (!j.orgs || !j.orgs.length) {
+      box.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#94a3b8;">No matches.</div>';
+      box.style.display = 'block';
+      return;
+    }
+    // Filter out already-linked orgs client-side too
+    const linkedIds = new Set(Array.from(document.querySelectorAll('.org-chip')).map(c => Number(c.dataset.orgId)));
+    box.innerHTML = j.orgs
+      .filter(o => !linkedIds.has(o.id))
+      .map(o => `<div onclick="linkOrg(${o.id}, ${JSON.stringify(o.name).replace(/"/g, '&quot;')})"
+                       style="padding:7px 12px;cursor:pointer;font-size:12.5px;border-bottom:1px solid #f1f5f9;"
+                       onmouseover="this.style.background='#f8fafc'" onmouseout="this.style.background=''">${escapeHtml(o.name)}</div>`)
+      .join('');
+    if (!box.innerHTML) {
+      box.innerHTML = '<div style="padding:8px 12px;font-size:12px;color:#94a3b8;">All matches are already linked.</div>';
+    }
+    box.style.display = 'block';
+  }, 150);
+}
+
+document.addEventListener('click', (e) => {
+  const box = document.getElementById('org-search-results');
+  if (!box) return;
+  const inSearch = e.target.id === 'org-search' || box.contains(e.target);
+  if (!inSearch) box.style.display = 'none';
+});
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+async function linkOrg(orgId, orgName) {
+  const status = document.getElementById('org-status');
+  const isPrimary = document.getElementById('add-as-primary').checked;
+  status.textContent = 'Linking ' + orgName + '…'; status.style.color = '';
+  const fd = new FormData();
+  fd.append('org_id', orgId);
+  fd.append('is_primary', isPrimary ? '1' : '0');
+  try {
+    const r = await fetch('/api/admin/end-users/' + UID + '/link-org', { method: 'POST', body: fd });
+    if (r.ok) { status.textContent = '✓ Linked'; status.style.color = '#047857'; setTimeout(() => location.reload(), 400); }
+    else { status.textContent = '✗ failed'; status.style.color = '#be123c'; }
+  } catch (e) { status.textContent = '✗ ' + e.message; status.style.color = '#be123c'; }
+}
+
+// Used from the × button on each chip — reads org id+name from data-* attrs
+// so we don't have to worry about quoting org names with apostrophes in them.
+async function unlinkOrgFromChip(btn) {
+  const chip = btn.closest('.org-chip');
+  if (!chip) return;
+  return unlinkOrg(Number(chip.dataset.orgId), chip.dataset.orgName);
+}
+
+async function unlinkOrg(orgId, orgName) {
+  if (!confirm('Unlink ' + orgName + ' from this user? Their ticket history with this org stays — only the explicit tag is removed.')) return;
+  const status = document.getElementById('org-status');
+  status.textContent = 'Unlinking…';
+  const fd = new FormData();
+  fd.append('org_id', orgId);
+  try {
+    const r = await fetch('/api/admin/end-users/' + UID + '/unlink-org', { method: 'POST', body: fd });
+    if (r.ok) { setTimeout(() => location.reload(), 200); }
+    else { status.textContent = '✗ failed'; status.style.color = '#be123c'; }
+  } catch (e) { status.textContent = '✗ ' + e.message; status.style.color = '#be123c'; }
+}
+
+async function setPrimary(orgId) {
+  const status = document.getElementById('org-status');
+  status.textContent = 'Setting primary…';
+  const fd = new FormData();
+  fd.append('org_id', orgId);
+  fd.append('is_primary', '1');
+  try {
+    const r = await fetch('/api/admin/end-users/' + UID + '/link-org', { method: 'POST', body: fd });
+    if (r.ok) setTimeout(() => location.reload(), 200);
+    else { status.textContent = '✗ failed'; status.style.color = '#be123c'; }
+  } catch (e) { status.textContent = '✗ ' + e.message; status.style.color = '#be123c'; }
 }
 </script>
 {% endblock %}
