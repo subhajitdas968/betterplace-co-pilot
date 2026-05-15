@@ -3,28 +3,66 @@
    Each column has its own independent scroll. */
 
 :root {
-  --ink: #0f172a; --muted: #64748b; --border: #e2e8f0; --card: #ffffff;
+  /* Brand colors — same across themes */
   --indigo: #4f46e5; --indigo-soft: #eef2ff;
   --violet: #7c3aed; --fuchsia: #d946ef;
   --emerald: #10b981; --emerald-soft: #ecfdf5;
   --amber: #f59e0b; --amber-soft: #fffbeb;
   --rose: #f43f5e; --rose-soft: #fff1f2;
   --sky: #0ea5e9;
+
+  /* Theme-aware tokens (light defaults) */
+  --ink: #0f172a;            /* primary text */
+  --muted: #64748b;          /* secondary text */
+  --border: #e2e8f0;         /* default border */
+  --card: #ffffff;           /* surface bg */
+  --surface-hover: #f8fafc;  /* hover wash */
+  --surface-sunken: #f1f5f9; /* sunken bg (toolbar, chips) */
+  --bg-page: #f6f7fb;        /* page bg (body) */
+  --bg-page-gradient:
+    radial-gradient(circle at 0 0, rgba(124,58,237,.08) 0, transparent 40%),
+    radial-gradient(circle at 100% 0, rgba(14,165,233,.08) 0, transparent 40%),
+    linear-gradient(180deg, #f6f7fb 0%, #eef0fa 100%);
+
   --shadow-sm: 0 1px 2px rgba(15,23,42,.04), 0 1px 3px rgba(15,23,42,.06);
   --shadow-md: 0 2px 4px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.08);
   --shadow-lg: 0 8px 24px rgba(15,23,42,.08), 0 24px 48px rgba(76,29,149,.12);
   --topbar-h: 64px;
 }
 
+/* Dark theme overrides — applied via [data-theme="dark"] on <html>.
+   We deliberately keep brand colors (indigo/emerald/etc.) but flip surfaces
+   and text. Status tints (used in row backgrounds) get a separate, darker
+   palette further down. */
+html[data-theme="dark"] {
+  --ink: #e2e8f0;
+  --muted: #94a3b8;
+  --border: #1e293b;
+  --card: #0f172a;
+  --surface-hover: #1e293b;
+  --surface-sunken: #0b1220;
+  --bg-page: #060912;
+  --bg-page-gradient:
+    radial-gradient(circle at 0 0, rgba(124,58,237,.12) 0, transparent 40%),
+    radial-gradient(circle at 100% 0, rgba(14,165,233,.10) 0, transparent 40%),
+    linear-gradient(180deg, #060912 0%, #0b1224 100%);
+
+  --indigo-soft: #1e1b4b;      /* keep the soft-indigo readable on dark */
+  --emerald-soft: #052e1f;
+  --amber-soft: #2d2010;
+  --rose-soft: #2b121a;
+
+  --shadow-sm: 0 1px 2px rgba(0,0,0,.4), 0 1px 3px rgba(0,0,0,.5);
+  --shadow-md: 0 2px 4px rgba(0,0,0,.3), 0 8px 24px rgba(0,0,0,.5);
+  --shadow-lg: 0 8px 24px rgba(0,0,0,.5), 0 24px 48px rgba(0,0,0,.6);
+}
+
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { height: 100%; overflow: hidden; }
 body {
   font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-  background: #f6f7fb;
-  background-image:
-    radial-gradient(circle at 0 0, rgba(124,58,237,.08) 0, transparent 40%),
-    radial-gradient(circle at 100% 0, rgba(14,165,233,.08) 0, transparent 40%),
-    linear-gradient(180deg, #f6f7fb 0%, #eef0fa 100%);
+  background: var(--bg-page);
+  background-image: var(--bg-page-gradient);
   color: var(--ink);
   /* +1px base size — easier to scan dense ticket lists for hours at a stretch.
      Originally 13.5px; bumped to 14.5px. The rest of the type scale inherits
@@ -43,10 +81,17 @@ body {
   backdrop-filter: blur(18px);
   background: rgba(255,255,255,.85);
   border-bottom: 1px solid var(--border);
-  padding: 0 24px;
-  display: flex; align-items: center; justify-content: space-between;
-  gap: 24px; z-index: 50;
+  padding: 0 20px;
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 16px; z-index: 50;
 }
+/* Push right-side widgets (search, bell, profile) together as one cluster
+   that lives on the right edge. The search-wrap is the only flexible item,
+   so it consumes the leftover space between the brand on the left and the
+   bell+profile on the right — no dead zone like before. */
+.search-wrap { margin-left: auto; }
+.topbar > #notif-wrap, .topbar > .user-pill { margin-left: 0; }
+.topbar > #notif-wrap { margin-right: 4px; }
 .brand { display: flex; align-items: center; gap: 12px; min-width: 0; }
 .brand-mark {
   width: 32px; height: 32px; border-radius: 9px;
@@ -78,7 +123,9 @@ body {
   70% { box-shadow: 0 0 0 8px rgba(16,185,129,0); }
   100% { box-shadow: 0 0 0 0 rgba(16,185,129,0); }
 }
-.search-wrap { flex: 1; max-width: 480px; position: relative; }
+/* Flexible search bar — fills the gap between brand and right widgets but
+   caps to 600px on very wide screens so it doesn't dwarf everything else. */
+.search-wrap { flex: 0 1 600px; min-width: 240px; max-width: 600px; position: relative; }
 .search-wrap input {
   width: 100%; padding: 9px 14px 9px 38px;
   border-radius: 10px; border: 1px solid var(--border);
@@ -724,48 +771,57 @@ body {
 
 /* === LIST PAGE === */
 .list-header {
-  padding: 14px 24px; background: rgba(255,255,255,.7);
+  padding: 12px 18px; background: var(--card);
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0; z-index: 5;
 }
-.list-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
-.list-title { font-size: 18px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
-.list-sub { font-size: 12px; color: var(--muted); margin-top: 2px; }
+/* Use flex-wrap rather than space-between so the title and controls cluster
+   together on the left instead of stretching to fill the whole row width
+   (which was leaving a huge dead zone on wide screens). */
+.list-header-row {
+  display: flex; align-items: center; justify-content: flex-start;
+  gap: 12px; flex-wrap: wrap;
+}
+.list-title { font-size: 17px; font-weight: 700; letter-spacing: -0.01em; color: var(--ink); }
+.list-sub { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 8px; }
 
 .list-controls {
-  display: flex; gap: 10px; flex-wrap: wrap; align-items: stretch;
-  background: #fff;
+  display: flex; gap: 6px; flex-wrap: wrap; align-items: center;
+  background: var(--surface-sunken);
   border: 1px solid var(--border);
-  border-radius: 12px;
-  padding: 8px 10px;
-  box-shadow: var(--shadow-sm);
+  border-radius: 10px;
+  padding: 4px 6px;
+  margin-left: auto;            /* push to right edge, but doesn't force gap when title also wraps */
 }
+/* Inline pills instead of stacked-with-label so the toolbar reads as one
+   tight strip. The little label still appears but on the same line as the
+   select, separated by a small dot. */
 .list-controls .ctrl {
-  display: flex; flex-direction: column;
-  gap: 3px;
+  display: inline-flex; align-items: center; gap: 6px;
+  padding: 0 2px;
   min-width: 0;
 }
 .list-controls .ctrl > span {
-  font-size: 9.5px; text-transform: uppercase; letter-spacing: .08em;
+  font-size: 10px; text-transform: uppercase; letter-spacing: .06em;
   color: var(--muted); font-weight: 700;
-  padding-left: 2px;
 }
 .list-controls .ctrl select {
-  font-family: inherit; font-size: 12.5px;
-  padding: 6px 28px 6px 10px;
+  font-family: inherit; font-size: 12px;
+  padding: 5px 26px 5px 9px;
   border: 1px solid var(--border);
-  border-radius: 8px;
-  background: #fafbff;
+  border-radius: 7px;
+  background: var(--card);
   color: var(--ink); font-weight: 500;
   cursor: pointer;
   appearance: none;
   -webkit-appearance: none;
   background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
   background-repeat: no-repeat;
-  background-position: right 10px center;
+  background-position: right 9px center;
   transition: border-color .14s, background-color .14s;
+  max-width: 180px;
 }
-.list-controls .ctrl select:hover { border-color: #cbd5e1; background-color: #fff; }
+.list-controls .ctrl select:hover { border-color: var(--indigo); }
 .list-controls .ctrl select:focus {
   outline: none; border-color: var(--indigo);
   box-shadow: 0 0 0 3px rgba(79,70,229,.12); background-color: #fff;
@@ -798,22 +854,41 @@ body {
 .ticket-table tbody td {
   padding: 11px 12px; border-bottom: 1px solid var(--border);
   font-size: 13.5px; vertical-align: top;
+  color: var(--ink);
 }
+/* Cells inherit theme by default; some specific tds (td-priority, td-date)
+   override to muted. Without this, the body's color cascade was being shadowed
+   by the table's default. Critical in dark mode. */
+.ticket-table tbody td a { color: var(--ink); }
 .ticket-table-row { cursor: pointer; transition: background .14s; }
 .ticket-table-row:hover { background: #fafbff; }
 .ticket-table-row:last-child td { border-bottom: none; }
 
-/* Status-tinted row backgrounds — kept very subtle so they don't fight the
-   selected/hover states. Open/new = warm yellow (needs attention), pending
-   = blue (waiting on customer), hold = soft red (blocked), solved/closed
-   = near-neutral grey (cooled). Hover override keeps the click affordance
-   obvious regardless of status. */
-.ticket-table-row.row-status-open    { background: #fefce8; }   /* warm yellow tint */
-.ticket-table-row.row-status-new     { background: #fefce8; }
-.ticket-table-row.row-status-pending { background: #eff6ff; }   /* soft blue */
-.ticket-table-row.row-status-hold    { background: #fef2f2; }   /* gentle red */
-.ticket-table-row.row-status-solved  { background: #f8fafc; }   /* near-neutral */
-.ticket-table-row.row-status-closed  { background: #f1f5f9; }   /* slightly darker */
+/* Status-tinted row backgrounds — subtle wash + a 3px colored left-edge
+   accent. The accent makes status scannable in peripheral vision, the
+   wash makes mixed-status lists distinguishable at a glance (Linear-style).
+   Hover override below keeps the click affordance obvious. */
+.ticket-table-row.row-status-open,
+.ticket-table-row.row-status-new {
+  background: #fefce8;
+  box-shadow: inset 3px 0 0 #f59e0b;  /* amber accent */
+}
+.ticket-table-row.row-status-pending {
+  background: #eff6ff;
+  box-shadow: inset 3px 0 0 #3b82f6;  /* blue accent */
+}
+.ticket-table-row.row-status-hold {
+  background: #fef2f2;
+  box-shadow: inset 3px 0 0 #ec4899;  /* pink accent */
+}
+.ticket-table-row.row-status-solved {
+  background: #f8fafc;
+  box-shadow: inset 3px 0 0 #10b981;  /* green accent */
+}
+.ticket-table-row.row-status-closed {
+  background: #f1f5f9;
+  box-shadow: inset 3px 0 0 #94a3b8;  /* grey accent */
+}
 .ticket-table-row.row-status-open:hover,
 .ticket-table-row.row-status-new:hover,
 .ticket-table-row.row-status-pending:hover,
@@ -836,7 +911,9 @@ tr.row-status-solved:hover,
 tr.row-status-closed:hover { background: #eef2ff; }
 .td-id { font-family: 'JetBrains Mono', monospace; font-weight: 700; color: var(--indigo); white-space: nowrap; }
 .td-customer { font-weight: 600; color: var(--ink); white-space: nowrap; max-width: 160px; overflow: hidden; text-overflow: ellipsis; }
-.td-subject { color: #1e293b; max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Subject was hard-coded #1e293b — invisible in dark mode. Use --ink so it
+   inherits the theme. */
+.td-subject { color: var(--ink); max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .td-priority { color: var(--muted); font-weight: 500; }
 .td-date { color: var(--muted); white-space: nowrap; font-variant-numeric: tabular-nums; font-size: 11.5px; }
 .td-ai { text-align: center; }
@@ -1940,14 +2017,18 @@ body.sidebar-collapsed .sidebar-reopen-btn { display: inline-flex; }
 /* ===========================================================================
    Kanban board
    =========================================================================== */
+/* The board fills the remaining vertical space of .main-pane and gives
+   each column a bounded height so its body can scroll internally. */
 .kanban-board {
   display: flex;
   gap: 12px;
   padding: 0 18px 18px 18px;
   overflow-x: auto;
+  overflow-y: hidden;
   flex: 1;
   min-height: 0;
-  align-items: flex-start;
+  height: 100%;
+  align-items: stretch;        /* columns fill the board's height */
   scroll-snap-type: x mandatory;
 }
 .kanban-board::-webkit-scrollbar { height: 8px; }
@@ -1964,7 +2045,9 @@ body.sidebar-collapsed .sidebar-reopen-btn { display: inline-flex; }
   border-radius: 10px;
   overflow: hidden;
   scroll-snap-align: start;
-  max-height: 100%;
+  /* Bound height to parent so column body can scroll independently */
+  height: 100%;
+  min-height: 0;
 }
 
 .kanban-col-head {
@@ -2099,6 +2182,609 @@ body.sidebar-collapsed .sidebar-reopen-btn { display: inline-flex; }
 @media (max-width: 900px) {
   .kanban-col { flex-basis: 260px; min-width: 240px; }
 }
+
+/* ===========================================================================
+   Modern filter strip — chips + search + active-filter pills.
+   Used on kanban (and ready to drop into list view). Looks Linear-ish.
+   =========================================================================== */
+.kanban-toolbar { padding: 14px 18px 6px 18px; }
+.kanban-toolbar-top {
+  display: flex; align-items: center; gap: 14px;
+  flex-wrap: wrap; margin-bottom: 10px;
+}
+.kanban-title-block { display: flex; align-items: center; gap: 10px; }
+.kanban-count-pill {
+  font-size: 11px;
+  font-weight: 700;
+  padding: 2px 9px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+  border-radius: 12px;
+}
+
+.filter-strip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  font-size: 12.5px;
+  color: var(--ink);
+  transition: border-color .14s ease, box-shadow .14s ease;
+}
+.filter-chip:focus-within {
+  border-color: var(--indigo);
+  box-shadow: 0 0 0 3px rgba(79,70,229,0.10);
+}
+.filter-chip-icon { font-size: 12px; color: var(--muted); }
+.filter-chip-label {
+  font-size: 11px;
+  color: var(--muted);
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  margin-right: 2px;
+}
+.filter-chip input, .filter-chip select {
+  border: none; outline: none; background: transparent;
+  font-size: 12.5px; color: var(--ink);
+  padding: 0; min-width: 60px;
+}
+.filter-chip-search { min-width: 240px; max-width: 320px; }
+.filter-chip-search input { flex: 1; min-width: 0; }
+.filter-chip-search input:focus { outline: none; }
+.filter-chip select { cursor: pointer; padding-right: 18px; }
+
+.filter-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 8px 4px 10px;
+  background: var(--indigo-soft);
+  color: var(--indigo);
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 500;
+}
+.filter-pill a {
+  color: inherit;
+  opacity: 0.7;
+  text-decoration: none;
+  padding: 0 2px;
+  border-radius: 4px;
+  font-weight: 700;
+}
+.filter-pill a:hover { opacity: 1; background: rgba(79,70,229,0.15); }
+.filter-clear {
+  font-size: 11.5px;
+  color: var(--muted);
+  text-decoration: none;
+  padding: 6px 10px;
+  border-radius: 8px;
+}
+.filter-clear:hover { color: var(--rose); background: var(--rose-soft); }
+
+/* Kanban column search input (per-column live filter) */
+.kanban-col-search {
+  padding: 6px 10px 4px 10px;
+  border-bottom: 1px solid var(--border);
+  background: var(--card);
+}
+.kanban-col-search-input {
+  width: 100%;
+  padding: 5px 8px;
+  background: var(--surface-sunken);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  font-size: 11.5px;
+  color: var(--ink);
+  outline: none;
+  transition: border-color .14s ease, background .14s ease;
+}
+.kanban-col-search-input::placeholder { color: var(--muted); opacity: 0.7; }
+.kanban-col-search-input:focus {
+  border-color: var(--indigo);
+  background: var(--card);
+}
+
+/* Dark mode patches for the filter strip */
+html[data-theme="dark"] .filter-chip,
+html[data-theme="dark"] .kanban-col-search { background: var(--card); border-color: var(--border); }
+html[data-theme="dark"] .kanban-col-search-input { background: var(--surface-sunken); color: var(--ink); }
+
+/* ===========================================================================
+   Density toggle — body.compact tightens row padding for "more rows on screen"
+   =========================================================================== */
+.density-toggle {
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--surface-sunken);
+  border: 1px solid transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease;
+}
+.density-toggle:hover { background: var(--card); color: var(--ink); border-color: var(--border); }
+.density-toggle .density-compact { display: none; }
+body.compact .density-toggle .density-comfortable { display: none; }
+body.compact .density-toggle .density-compact { display: inline; }
+
+/* Compact mode — tighter table rows, smaller paddings */
+body.compact .ticket-table tbody td { padding: 6px 10px; font-size: 12.5px; }
+body.compact .ticket-table thead th { padding: 6px 10px; }
+body.compact .kanban-card { padding: 8px 10px; }
+body.compact .kanban-card-subject { font-size: 12.5px; -webkit-line-clamp: 1; }
+body.compact .kanban-card-meta { margin-top: 4px; }
+body.compact .kanban-card-foot { margin-top: 5px; padding-top: 4px; }
+
+/* ===========================================================================
+   Inline row quick actions — appear on row hover, sticky to the right edge
+   =========================================================================== */
+.row-quick-actions-th { width: 1px; padding: 0 !important; background: transparent !important; }
+.row-quick-actions-cell {
+  position: sticky;
+  right: 0;
+  width: 1px;
+  padding: 0 8px !important;
+  text-align: right;
+  background: transparent !important;
+  border-bottom: 1px solid transparent !important;
+}
+.row-quick-actions {
+  display: inline-flex;
+  gap: 6px;
+  opacity: 0;
+  transform: translateX(6px);
+  transition: opacity .14s ease, transform .14s ease;
+  pointer-events: none;
+}
+.ticket-table-row:hover .row-quick-actions {
+  opacity: 1; transform: translateX(0);
+  pointer-events: auto;
+}
+/* Glassy wash behind the buttons so they're readable over any row tint */
+.ticket-table-row:hover .row-quick-actions-cell {
+  background: linear-gradient(to right, transparent 0%, var(--card) 24px) !important;
+}
+.quick-pick {
+  font-size: 11px;
+  padding: 4px 22px 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--card);
+  color: var(--ink);
+  font-weight: 500;
+  cursor: pointer;
+  appearance: none;
+  -webkit-appearance: none;
+  background-image: url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='10' height='6' viewBox='0 0 10 6'><path fill='none' stroke='%2364748b' stroke-width='1.5' stroke-linecap='round' stroke-linejoin='round' d='M1 1l4 4 4-4'/></svg>");
+  background-repeat: no-repeat;
+  background-position: right 6px center;
+  max-width: 110px;
+  transition: border-color .14s ease, background-color .14s ease;
+}
+.quick-pick:hover { border-color: var(--indigo); }
+
+/* ===========================================================================
+   Kanban drag-drop visual states
+   =========================================================================== */
+.kanban-card[draggable="true"] { cursor: grab; }
+.kanban-card.dragging { opacity: 0.4; cursor: grabbing; }
+.kanban-col.drop-target {
+  outline: 2px dashed var(--indigo);
+  outline-offset: -4px;
+  background: var(--indigo-soft);
+}
+.kanban-col.drop-target .kanban-col-body { background: rgba(79,70,229,0.05); }
+
+/* ===========================================================================
+   Profile dropdown menu links (also home to the theme switcher)
+   =========================================================================== */
+.profile-menu-link {
+  display: block;
+  padding: 7px 10px;
+  font-size: 12.5px;
+  color: var(--ink);
+  text-decoration: none;
+  border-radius: 6px;
+  transition: background .14s ease;
+}
+.profile-menu-link:hover { background: var(--surface-hover); }
+
+/* Theme label inside the dropdown — flip based on current theme so the label
+   always offers the OPPOSITE of the current state. */
+.theme-menu-label--dark { display: none; }
+html[data-theme="dark"] .theme-menu-label--light { display: none; }
+html[data-theme="dark"] .theme-menu-label--dark { display: inline; }
+
+/* ===========================================================================
+   Dark-mode patches for hard-coded #fff / #f1f5f9 / etc. surfaces.
+   These selectors mirror the most-used pages so the high-traffic agent
+   workflow looks intentional in dark mode. Admin pages and inline-styled
+   widgets may still show light backgrounds in v1 — fine for first ship.
+   =========================================================================== */
+html[data-theme="dark"] body { color: var(--ink); }
+
+/* Topbar + sidebar */
+html[data-theme="dark"] .topbar { background: var(--card); }
+html[data-theme="dark"] .nav { background: var(--card); }
+
+/* Inputs */
+html[data-theme="dark"] input[type="text"],
+html[data-theme="dark"] input[type="email"],
+html[data-theme="dark"] input[type="search"],
+html[data-theme="dark"] input[type="number"],
+html[data-theme="dark"] input[type="time"],
+html[data-theme="dark"] input[type="password"],
+html[data-theme="dark"] select,
+html[data-theme="dark"] textarea {
+  background: var(--card);
+  color: var(--ink);
+  border-color: var(--border);
+}
+html[data-theme="dark"] input:focus,
+html[data-theme="dark"] select:focus,
+html[data-theme="dark"] textarea:focus { border-color: var(--indigo); }
+
+/* Ticket table */
+html[data-theme="dark"] .ticket-table { background: var(--card); }
+html[data-theme="dark"] .ticket-table thead th { background: var(--surface-sunken); }
+html[data-theme="dark"] .ticket-table tbody td { border-color: var(--border); }
+html[data-theme="dark"] .ticket-table-row:hover { background: var(--surface-hover); }
+/* Status-tinted rows — darker variants */
+html[data-theme="dark"] .ticket-table-row.row-status-open,
+html[data-theme="dark"] .ticket-table-row.row-status-new     { background: rgba(245, 158, 11, 0.08); }
+html[data-theme="dark"] .ticket-table-row.row-status-pending { background: rgba(59, 130, 246, 0.08); }
+html[data-theme="dark"] .ticket-table-row.row-status-hold    { background: rgba(236, 72, 153, 0.08); }
+html[data-theme="dark"] .ticket-table-row.row-status-solved  { background: rgba(16, 185, 129, 0.06); }
+html[data-theme="dark"] .ticket-table-row.row-status-closed  { background: var(--surface-sunken); }
+html[data-theme="dark"] .ticket-table-row.row-status-open:hover,
+html[data-theme="dark"] .ticket-table-row.row-status-new:hover,
+html[data-theme="dark"] .ticket-table-row.row-status-pending:hover,
+html[data-theme="dark"] .ticket-table-row.row-status-hold:hover,
+html[data-theme="dark"] .ticket-table-row.row-status-solved:hover,
+html[data-theme="dark"] .ticket-table-row.row-status-closed:hover { background: var(--surface-hover); }
+
+/* Ticket detail panes */
+html[data-theme="dark"] .fields-side,
+html[data-theme="dark"] .conv-col,
+html[data-theme="dark"] .right-col {
+  background: var(--card);
+  border-color: var(--border);
+}
+html[data-theme="dark"] .fields-panel {
+  background: var(--card);
+  border-color: var(--border);
+}
+html[data-theme="dark"] .fields-panel-summary { background: var(--surface-sunken); color: var(--ink); }
+
+/* Admin cards (used everywhere) */
+html[data-theme="dark"] .admin-card { background: var(--card); border-color: var(--border); }
+html[data-theme="dark"] .admin-card-btn { background: var(--surface-sunken); color: var(--ink); border-color: var(--border); }
+html[data-theme="dark"] .admin-card-btn:hover { background: var(--indigo-soft); }
+html[data-theme="dark"] .admin-pane .back-link,
+html[data-theme="dark"] .back-link { color: var(--ink); }
+
+/* Tab bar */
+html[data-theme="dark"] .bp-tab-bar { background: linear-gradient(to bottom, var(--surface-sunken) 0%, var(--card) 100%); border-color: var(--border); }
+html[data-theme="dark"] .bp-tab { color: var(--muted); }
+html[data-theme="dark"] .bp-tab:hover { background: var(--surface-hover); color: var(--ink); }
+html[data-theme="dark"] .bp-tab--active { background: var(--card); color: var(--ink); border-color: var(--border); }
+
+/* Cmd+K palette */
+html[data-theme="dark"] #cmdk-modal > div { background: var(--card); color: var(--ink); }
+html[data-theme="dark"] #cmdk-input { background: transparent; color: var(--ink); }
+html[data-theme="dark"] #cmdk-results > div[data-idx] { color: var(--ink); }
+
+/* Sidebar reopen + right-col reopen buttons */
+html[data-theme="dark"] .sidebar-reopen-btn,
+html[data-theme="dark"] .rightcol-reopen-btn { background: var(--card); border-color: var(--border); }
+
+/* Kanban */
+html[data-theme="dark"] .kanban-col { background: var(--surface-sunken); border-color: var(--border); }
+html[data-theme="dark"] .kanban-card { background: var(--card); border-color: var(--border); color: var(--ink); }
+html[data-theme="dark"] .kanban-card-subject { color: var(--ink); }
+html[data-theme="dark"] .kanban-card:hover { border-color: var(--indigo); }
+html[data-theme="dark"] .kanban-empty { border-color: var(--border); color: var(--muted); }
+
+/* Display toggle */
+html[data-theme="dark"] .display-toggle { background: var(--surface-sunken); }
+html[data-theme="dark"] .display-toggle-btn--active { background: var(--card); color: var(--ink); }
+
+/* Modal backdrops + popovers */
+html[data-theme="dark"] .empty-state { color: var(--muted); }
+html[data-theme="dark"] code { background: var(--surface-sunken); color: var(--ink); }
+html[data-theme="dark"] pre { background: #020617 !important; color: #e2e8f0 !important; }
+
+/* Scrollbar in dark mode */
+html[data-theme="dark"] ::-webkit-scrollbar-thumb { background: #334155; }
+html[data-theme="dark"] ::-webkit-scrollbar-track { background: var(--bg-page); }
+
+/* ===========================================================================
+   TICKET DETAIL POLISH PASS
+   Tighter header, modernized message bubbles, motion on hover, dark-mode
+   patches. This is where agents spend most of their time so it deserves a
+   higher polish bar.
+   =========================================================================== */
+
+/* Tighter header — less vertical padding, cleaner pill row */
+.ticket-header { padding: 14px 18px 8px 18px !important; }
+.ticket-id-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ticket-id-row .id-num {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 14px; font-weight: 700;
+  color: var(--indigo);
+}
+.ticket-subject { font-size: 19px !important; font-weight: 700; line-height: 1.25; letter-spacing: -0.01em; margin: 6px 0 8px !important; }
+
+/* Status / form / customer / assignee / priority pills under the title */
+.ticket-meta-row {
+  display: flex; align-items: center; gap: 8px; flex-wrap: wrap;
+}
+
+/* Conversation section — pull it closer to the header, remove redundant heading */
+.conv-col { padding: 0 18px 16px 18px !important; }
+.conv-section-heading {
+  font-size: 10.5px !important;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  font-weight: 700;
+  padding: 12px 0 8px !important;
+}
+
+/* Tighter bubble stream */
+.bubble-stream { gap: 10px !important; padding: 4px 0 16px !important; }
+.bubble-row { align-items: flex-start; gap: 10px; }
+
+/* Modern bubble card */
+.bubble {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  overflow: hidden;
+  max-width: 78%;
+  box-shadow: 0 1px 2px rgba(15, 23, 42, 0.04);
+  transition: box-shadow 0.18s cubic-bezier(.2,.6,.2,1), border-color 0.18s ease, transform 0.18s ease;
+}
+.bubble:hover {
+  border-color: #c7d2fe;
+  box-shadow: 0 4px 14px rgba(79, 70, 229, 0.10);
+  transform: translateY(-1px);
+}
+.bubble-agent { background: linear-gradient(180deg, var(--card) 0%, #f7f5ff 100%); }
+.bubble-cust { background: var(--card); }
+.bubble-internal {
+  background: linear-gradient(180deg, var(--card) 0%, var(--amber-soft) 100%);
+  border-color: #fde68a;
+}
+
+/* Summary row — cleaner alignment */
+.bubble-summary {
+  padding: 8px 14px !important;
+  gap: 8px;
+  font-size: 12.5px;
+  cursor: pointer;
+  display: flex; align-items: center;
+  list-style: none;
+}
+.bubble-name { font-weight: 600; color: var(--ink); }
+.bubble-email { color: var(--muted); font-size: 11.5px; font-family: 'JetBrains Mono', monospace; }
+.bubble-tag {
+  font-size: 9.5px; font-weight: 600;
+  padding: 2px 7px; border-radius: 999px;
+  background: var(--surface-sunken); color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.04em;
+}
+.bubble-tag-agent { background: var(--indigo-soft); color: var(--indigo); }
+.bubble-tag-cust { background: var(--emerald-soft); color: #047857; }
+.bubble-time-summary { margin-left: auto; font-size: 11px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.bubble-chev { font-size: 10px; color: var(--muted); transition: transform .14s ease; }
+.bubble[open] .bubble-chev { transform: rotate(90deg); }
+
+/* Tighter body — also fixes the "tons of whitespace" issue from email forwards */
+.bubble-body {
+  padding: 8px 14px 12px !important;
+  font-size: 13.5px !important;
+  line-height: 1.55 !important;
+  color: var(--ink) !important;
+  /* pre-line collapses runs of whitespace but keeps \n. Combined with the
+     clean_body server-side collapse of 3+ newlines, this stops email
+     forwards rendering as huge vertical voids. */
+  white-space: pre-line !important;
+  word-break: break-word;
+  border-top: 1px solid var(--border) !important;
+  max-height: 600px;
+  overflow-y: auto;
+}
+
+/* Avatar circles next to bubbles — slightly nicer */
+.bubble-avatar {
+  width: 30px; height: 30px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 12px;
+  flex-shrink: 0;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.06);
+  margin-top: 4px;
+}
+.a-cust { background: linear-gradient(135deg, #34d399, #10b981); color: #fff; }
+.a-agent { background: linear-gradient(135deg, #818cf8, #4f46e5); color: #fff; }
+.a-internal { background: linear-gradient(135deg, #fbbf24, #f59e0b); color: #fff; }
+
+/* Dark-mode patches for the conversation bubbles */
+html[data-theme="dark"] .bubble { background: var(--card); border-color: var(--border); }
+html[data-theme="dark"] .bubble-agent { background: linear-gradient(180deg, var(--card) 0%, rgba(124,58,237,0.08) 100%); }
+html[data-theme="dark"] .bubble-internal { background: linear-gradient(180deg, var(--card) 0%, rgba(245,158,11,0.10) 100%); border-color: rgba(245,158,11,0.25); }
+html[data-theme="dark"] .bubble:hover { border-color: var(--indigo); box-shadow: 0 4px 16px rgba(79,70,229,0.20); }
+html[data-theme="dark"] .bubble-body { color: var(--ink) !important; border-top-color: var(--border) !important; }
+html[data-theme="dark"] .bubble-tag-agent { background: rgba(79,70,229,0.15); }
+html[data-theme="dark"] .bubble-tag-cust { background: rgba(16,185,129,0.15); color: #6ee7b7; }
+
+/* ===========================================================================
+   GLOBAL MOTION PASS
+   Subtle GPU-only transitions on cards, panels, links — no perf hit. We
+   stick to opacity + transform + color/background and avoid layout-affecting
+   props (width, height, margin) in transitions.
+   =========================================================================== */
+.admin-card, .fields-panel {
+  transition: box-shadow 0.18s cubic-bezier(.2,.6,.2,1), border-color 0.14s ease, transform 0.18s ease;
+}
+.fields-panel:hover { box-shadow: 0 4px 12px rgba(15,23,42,0.06); }
+.admin-card-btn, .bp-tab, .quick-pick, .filter-chip { transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, box-shadow 0.14s ease, transform 0.14s ease; }
+.admin-card-btn:active { transform: scale(0.98); }
+button { transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease, transform 0.10s ease; }
+button:active:not([disabled]) { transform: scale(0.97); }
+a { transition: color 0.14s ease, opacity 0.14s ease; }
+
+/* Respect users who prefer reduced motion — disable transitions for them */
+@media (prefers-reduced-motion: reduce) {
+  * { transition-duration: 0.01ms !important; animation-duration: 0.01ms !important; }
+}
+
+/* ===========================================================================
+   SIDEBAR POLISH — tighter, subtler, more modern
+   =========================================================================== */
+.view-row {
+  font-size: 12.5px !important;
+  padding: 7px 10px !important;
+  transition: background 0.14s ease, color 0.14s ease, transform 0.14s ease !important;
+}
+.view-row:hover {
+  background: rgba(255, 255, 255, 0.06) !important;
+  transform: translateX(2px);
+}
+.view-row.active {
+  background: linear-gradient(135deg, rgba(79, 70, 229, 0.18), rgba(124, 58, 237, 0.12)) !important;
+  box-shadow: inset 2px 0 0 var(--indigo);
+}
+.view-count {
+  font-size: 10.5px !important;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600 !important;
+  padding: 1px 7px !important;
+  background: rgba(255, 255, 255, 0.10) !important;
+  color: rgba(255, 255, 255, 0.85) !important;
+}
+.view-row.active .view-count {
+  background: rgba(255, 255, 255, 0.85) !important;
+  color: var(--indigo) !important;
+}
+.nav-section-heading {
+  font-size: 9.5px;
+  text-transform: uppercase;
+  letter-spacing: 0.10em;
+  color: rgba(255, 255, 255, 0.50);
+  font-weight: 700;
+  padding: 12px 12px 6px;
+}
+
+/* ===========================================================================
+   PINNED TABS
+   =========================================================================== */
+.bp-tab.bp-tab--pinned {
+  /* Pinned tabs sit at the front, slightly narrower, with a small pin dot */
+  min-width: 70px;
+  max-width: 160px;
+  order: -1;  /* flexbox: shift to front */
+  background: linear-gradient(180deg, var(--surface-sunken), var(--card));
+}
+.bp-tab.bp-tab--pinned::before {
+  content: "📌";
+  font-size: 9px;
+  margin-right: 2px;
+  opacity: 0.7;
+}
+.bp-tab-pin {
+  background: transparent;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 11px;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity 0.14s, color 0.14s, transform 0.14s;
+  padding: 0 2px;
+  margin-right: -2px;
+}
+.bp-tab:hover .bp-tab-pin,
+.bp-tab--pinned .bp-tab-pin { opacity: 1; transform: scale(1); }
+.bp-tab--pinned .bp-tab-pin { color: var(--indigo); }
+.bp-tab-pin:hover { color: var(--indigo); }
+
+/* ===========================================================================
+   SAVED FILTER CHIPS — quick combos above the table
+   =========================================================================== */
+.saved-filters {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  padding: 8px 18px 4px 18px;
+  font-size: 11.5px;
+}
+.saved-filters-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  font-weight: 700;
+}
+.saved-filter-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  font-size: 11.5px;
+  color: var(--ink);
+  text-decoration: none;
+  cursor: pointer;
+  transition: background 0.14s, border-color 0.14s, transform 0.14s;
+}
+.saved-filter-chip:hover {
+  background: var(--indigo-soft);
+  border-color: var(--indigo);
+  transform: translateY(-1px);
+}
+.saved-filter-chip-x {
+  background: none;
+  border: none;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 13px;
+  padding: 0 2px;
+  line-height: 1;
+  opacity: 0;
+  transition: opacity 0.14s, color 0.14s;
+}
+.saved-filter-chip:hover .saved-filter-chip-x { opacity: 1; }
+.saved-filter-chip-x:hover { color: var(--rose); }
+.saved-filter-save {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: transparent;
+  border: 1px dashed var(--border);
+  color: var(--muted);
+  font-size: 11px;
+  cursor: pointer;
+  transition: border-color 0.14s, color 0.14s;
+}
+.saved-filter-save:hover { border-color: var(--indigo); color: var(--indigo); }
 
 /* ===========================================================================
    Sidebar drag-resize handle — invisible-ish hot zone on the right edge of

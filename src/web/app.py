@@ -32,15 +32,41 @@ TEMPLATES = Jinja2Templates(directory=str(HERE / "templates"))
 
 
 def _clean_html(text: str | None) -> str:
-    """Render-time fallback: decodes HTML entities and strips stray tags so existing
-    dirty data (rows synced before db.clean_body landed) still displays correctly."""
+    """Render-time cleanup for ticket comment bodies. Used by Jinja's
+    {{ body|clean }} filter. Does THREE jobs:
+
+    1. HTML entity decode (double-unescape catches `&amp;nbsp;` cases).
+    2. Strip stray tags. Crucially, convert <br>, <p>, </p>, <tr>, </tr>,
+       </td>, </div> to newlines BEFORE stripping all other tags — so block
+       structure becomes vertical whitespace, not "wordfullofjoinedtext".
+    3. Collapse runs of blank lines down to a single blank line. Email
+       forwards / quoted replies otherwise render with massive vertical
+       voids that push the conversation past the agent's screen height.
+    """
     if not text:
         return ""
     import html as _html
     import re as _re
     s = _html.unescape(_html.unescape(text))
+    # Normalize line endings first so the blank-line collapser below sees
+    # consistent "\n\n\n" runs (not "\r\n\r\n\r\n").
+    s = s.replace("\r\n", "\n").replace("\r", "\n")
+    # Block-level tags → newlines (otherwise stripping them joins adjacent
+    # blocks into a single un-paragraphed wall of text).
+    s = _re.sub(r"<\s*br\s*/?\s*>", "\n", s, flags=_re.IGNORECASE)
+    s = _re.sub(r"</\s*(p|div|tr|td|li|h[1-6])\s*>", "\n", s, flags=_re.IGNORECASE)
+    s = _re.sub(r"<\s*(p|div|li|h[1-6])(\s[^>]*)?>", "\n", s, flags=_re.IGNORECASE)
+    # Strip everything else.
     s = _re.sub(r"<[^>]+>", "", s)
-    return s.replace("\xa0", " ")
+    # NBSP → regular space.
+    s = s.replace("\xa0", " ")
+    # Strip trailing whitespace per line so the blank-line collapser sees
+    # "\n\n" rather than "\n   \n".
+    s = "\n".join(line.rstrip() for line in s.split("\n"))
+    # Collapse 3+ consecutive newlines → 2 (one visible blank line).
+    while "\n\n\n" in s:
+        s = s.replace("\n\n\n", "\n\n")
+    return s.strip()
 
 
 def _to_ist(ts: str | None, fmt: str = "%d %b %Y, %H:%M IST") -> str:
@@ -2789,6 +2815,12 @@ async def view_list(view_name: str, request: Request, q: str = "",
     # by status on the client side (cheap, no extra query). Display state is
     # in the URL so it's bookmarkable per view.
     if display == "kanban":
+        # group_by determines the column dimension in the kanban template.
+        # Default "status" preserves prior behaviour. We pass the chosen value
+        # through so the template can render the active state of the picker.
+        group_by = (request.query_params.get("group_by") or "status").strip()
+        if group_by not in ("status", "priority", "assignee_name", "customer"):
+            group_by = "status"
         return TEMPLATES.TemplateResponse("view_kanban.html", {
             "request": request, "user": user, "tickets": tickets,
             "current_view": view_name, "current_view_label": label,
@@ -2798,6 +2830,7 @@ async def view_list(view_name: str, request: Request, q: str = "",
             "filter_rc1": rc1, "filter_group": group,
             "groups": [dict(g) for g in groups],
             "in_detail": False, "display": "kanban",
+            "group_by": group_by,
             **sb,
         })
     return TEMPLATES.TemplateResponse("view_list.html", {

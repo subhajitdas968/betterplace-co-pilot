@@ -2,53 +2,159 @@
 {% block title %}{{ current_view_label }} · Kanban · BetterPlace Co-Pilot{% endblock %}
 {% block main %}
 
-<main class="main-pane">
+{# Build a query-string preserver so all toolbar links keep the current
+   filters/search when switching display or group_by. #}
+{% macro qs(extra={}) -%}
+  ?display=kanban
+  {%- for k, v in extra.items() -%}{% if v %}&{{ k }}={{ v|urlencode }}{% endif %}{%- endfor -%}
+  {% if search %}&q={{ search|urlencode }}{% endif %}
+  {% if sort and sort != 'updated_desc' %}&sort={{ sort }}{% endif %}
+  {% if filter_customer %}&customer={{ filter_customer|urlencode }}{% endif %}
+  {% if filter_jira %}&jira={{ filter_jira }}{% endif %}
+  {% if filter_rc1 %}&rc1={{ filter_rc1|urlencode }}{% endif %}
+  {% if filter_group %}&group={{ filter_group }}{% endif %}
+{%- endmacro %}
 
-  <!-- View toolbar — title + List/Kanban toggle + filters -->
-  <div class="view-toolbar">
-    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
-      <h1 class="view-title" style="margin:0;">{{ current_view_label }}</h1>
-      <span style="font-size:12.5px;color:var(--muted);">{{ tickets|length }} ticket{{ '' if tickets|length == 1 else 's' }}</span>
-      <!-- List ⇄ Kanban toggle -->
+<main class="main-pane" style="display:flex;flex-direction:column;min-height:0;overflow:hidden;">
+
+  <!-- Toolbar -->
+  <div class="view-toolbar kanban-toolbar">
+    <div class="kanban-toolbar-top">
+      <div class="kanban-title-block">
+        <h1 class="view-title">{{ current_view_label }}</h1>
+        <span class="kanban-count-pill">{{ tickets|length }}</span>
+      </div>
+
+      <!-- List / Kanban toggle -->
       <div class="display-toggle" role="tablist" aria-label="Display mode">
-        <a href="/views/{{ current_view }}?display=list{% if search %}&q={{ search }}{% endif %}"
-           class="display-toggle-btn" role="tab" aria-selected="false" title="List view">
-          ☰ List
-        </a>
-        <a href="/views/{{ current_view }}?display=kanban{% if search %}&q={{ search }}{% endif %}"
-           class="display-toggle-btn display-toggle-btn--active" role="tab" aria-selected="true" title="Kanban view">
-          ▦ Kanban
-        </a>
+        <a href="/views/{{ current_view }}?display=list{% if search %}&q={{ search|urlencode }}{% endif %}"
+           class="display-toggle-btn" title="List view">☰ List</a>
+        <a href="/views/{{ current_view }}{{ qs() }}"
+           class="display-toggle-btn display-toggle-btn--active" title="Kanban view">▦ Kanban</a>
       </div>
     </div>
+
+    <!-- Modern filter strip — search input + group-by chip + active filter pills -->
+    <form method="get" action="/views/{{ current_view }}" class="filter-strip">
+      <input type="hidden" name="display" value="kanban">
+      <input type="hidden" name="group_by" value="{{ group_by }}">
+
+      <!-- Search -->
+      <label class="filter-chip filter-chip-search">
+        <span class="filter-chip-icon">🔍</span>
+        <input name="q" placeholder="Search tickets…" value="{{ search }}" autocomplete="off">
+      </label>
+
+      <!-- Group-by chip with a dropdown trigger -->
+      <div class="filter-chip filter-chip-group">
+        <span class="filter-chip-label">Group by</span>
+        <select name="group_by" onchange="this.form.submit()">
+          {% for v, lbl in [('status','Status'),('priority','Priority'),('assignee_name','Assignee'),('customer','Customer')] %}
+          <option value="{{ v }}" {% if group_by == v %}selected{% endif %}>{{ lbl }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      <!-- Sort -->
+      <div class="filter-chip filter-chip-sort">
+        <span class="filter-chip-label">Sort</span>
+        <select name="sort" onchange="this.form.submit()">
+          <option value="updated_desc" {% if sort == 'updated_desc' %}selected{% endif %}>Updated ↓</option>
+          <option value="updated_asc"  {% if sort == 'updated_asc'  %}selected{% endif %}>Updated ↑</option>
+          <option value="created_desc" {% if sort == 'created_desc' %}selected{% endif %}>Created ↓</option>
+          <option value="created_asc"  {% if sort == 'created_asc'  %}selected{% endif %}>Created ↑</option>
+          <option value="customer"     {% if sort == 'customer'     %}selected{% endif %}>Customer A→Z</option>
+        </select>
+      </div>
+
+      <!-- Group filter (the ZD "group" not the kanban grouping) -->
+      <div class="filter-chip filter-chip-group">
+        <span class="filter-chip-label">Team</span>
+        <select name="group" onchange="this.form.submit()">
+          <option value="">Any</option>
+          {% for g in groups %}
+          <option value="{{ g.id }}" {% if filter_group|string == g.id|string %}selected{% endif %}>{{ g.name }}</option>
+          {% endfor %}
+        </select>
+      </div>
+
+      {% if filter_customer or filter_jira or filter_rc1 or filter_group or search %}
+      <a href="/views/{{ current_view }}?display=kanban&group_by={{ group_by }}" class="filter-clear">Clear all</a>
+      {% endif %}
+
+      <!-- Active filter pills (visual cue of what's applied) -->
+      {% if filter_customer %}<span class="filter-pill">Customer: {{ filter_customer }} <a href="{{ qs({'customer':''}) }}">×</a></span>{% endif %}
+      {% if filter_jira %}<span class="filter-pill">Jira: {{ filter_jira }} <a href="{{ qs({'jira':''}) }}">×</a></span>{% endif %}
+      {% if filter_rc1 %}<span class="filter-pill">RC1: {{ filter_rc1 }} <a href="{{ qs({'rc1':''}) }}">×</a></span>{% endif %}
+
+      <button type="submit" style="display:none;">Apply</button>
+    </form>
   </div>
 
   {% if tickets %}
-  {# Group tickets by status in Jinja so the template renders cleanly. We
-     define the column order + labels here so unknown statuses can fall into
-     an 'Other' column. #}
-  {% set statuses = [
+  {# Build the list of (group_key, label, header_bg, header_fg) tuples for the
+     chosen group_by. The chosen statuses/priorities are fixed for those; for
+     dynamic groupings (assignee, customer) we derive the distinct values
+     from the ticket list itself. #}
+  {% if group_by == 'status' %}
+    {% set group_defs = [
       ('open',    'Open',     '#fef3c7', '#92400e'),
       ('new',     'New',      '#fef3c7', '#92400e'),
       ('pending', 'Pending',  '#dbeafe', '#1e40af'),
       ('hold',    'On hold',  '#fce7f3', '#9d174d'),
       ('solved',  'Solved',   '#dcfce7', '#166534'),
       ('closed',  'Closed',   '#e5e7eb', '#475569'),
-  ] %}
+    ] %}
+  {% elif group_by == 'priority' %}
+    {% set group_defs = [
+      ('urgent', 'Urgent', '#fee2e2', '#991b1b'),
+      ('high',   'High',   '#fef3c7', '#92400e'),
+      ('normal', 'Normal', '#e0e7ff', '#3730a3'),
+      ('low',    'Low',    '#f1f5f9', '#475569'),
+      ('—',      'Unset',  '#f1f5f9', '#94a3b8'),
+    ] %}
+  {% else %}
+    {# Dynamic: derive groups from the data, sort by ticket count desc.
+       Use a placeholder palette of soft slate so colours don't fight. #}
+    {% set _vals = {} %}
+    {% for t in tickets %}
+      {% set k = t[group_by] or 'Unassigned' %}
+      {% set _ = _vals.update({k: (_vals.get(k, 0) + 1)}) %}
+    {% endfor %}
+    {% set group_defs = [] %}
+    {% for k, _n in (_vals|dictsort(by='value', reverse=true))[:12] %}
+      {% set _ = group_defs.append((k, k, '#f1f5f9', '#475569')) %}
+    {% endfor %}
+  {% endif %}
 
-  <div class="kanban-board">
-    {% for key, label, bg, fg in statuses %}
-      {% set col_tickets = tickets|selectattr('status','equalto',key)|list %}
-      {% if col_tickets or key in ['open','pending','hold','solved'] %}
-      <section class="kanban-col">
+  <div class="kanban-board" id="kanban-board">
+    {% for key, label, bg, fg in group_defs %}
+      {% set col_tickets = [] %}
+      {% for t in tickets %}
+        {% if group_by == 'status' and t.status == key %}{% set _ = col_tickets.append(t) %}
+        {% elif group_by == 'priority' and (t.priority or '—') == key %}{% set _ = col_tickets.append(t) %}
+        {% elif group_by == 'assignee_name' and (t.assignee_name or 'Unassigned') == key %}{% set _ = col_tickets.append(t) %}
+        {% elif group_by == 'customer' and (t.customer or 'Unassigned') == key %}{% set _ = col_tickets.append(t) %}
+        {% endif %}
+      {% endfor %}
+      {% if col_tickets or (group_by == 'status' and key in ['open','pending','hold','solved']) %}
+      <section class="kanban-col" data-col-key="{{ key }}">
         <header class="kanban-col-head" style="background:{{ bg }};color:{{ fg }};">
           <span class="kanban-col-title">{{ label }}</span>
-          <span class="kanban-col-count">{{ col_tickets|length }}</span>
+          <span class="kanban-col-count" data-count-base="{{ col_tickets|length }}">{{ col_tickets|length }}</span>
         </header>
+        <div class="kanban-col-search">
+          <input type="text" class="kanban-col-search-input" placeholder="Filter in column…" oninput="window._kanbanColFilter(this)">
+        </div>
         <div class="kanban-col-body">
           {% for t in col_tickets %}
+          {# data-search-text is the lowercased haystack the per-column search
+             matches against. ID, local_id, subject, customer, requester. #}
           <a class="kanban-card row-status-{{ t.status }}"
-             href="/tickets/{{ t.local_id or t.id }}?view={{ current_view }}">
+             href="/tickets/{{ t.local_id or t.id }}?view={{ current_view }}"
+             data-ticket-id="{{ t.id }}"
+             {% if group_by == 'status' %}draggable="true"{% endif %}
+             data-search-text="{{ (t.id|string ~ ' ' ~ (t.local_id or '') ~ ' ' ~ (t.subject or '') ~ ' ' ~ (t.customer or '') ~ ' ' ~ (t.requester_name or '') ~ ' ' ~ (t.assignee_name or ''))|lower }}">
             <div class="kanban-card-head">
               <span class="kanban-card-id">{{ t.local_id or ('#' ~ t.id) }}</span>
               {% if t.priority and t.priority != '—' %}
@@ -59,7 +165,7 @@
             <div class="kanban-card-subject">{{ t.subject or '(no subject)' }}</div>
             <div class="kanban-card-meta">
               {% if t.customer and t.customer != '—' %}<span class="kanban-meta-customer">🏢 {{ t.customer }}</span>{% endif %}
-              {% if t.assignee_name %}<span class="kanban-meta-assignee" title="{{ t.assignee_name }}">{{ t.assignee_name|truncate(18,true,'…') }}</span>{% else %}<span class="kanban-meta-assignee" style="color:#94a3b8;">unassigned</span>{% endif %}
+              {% if t.assignee_name %}<span class="kanban-meta-assignee" title="{{ t.assignee_name }}">{{ t.assignee_name|truncate(22,true,'…') }}</span>{% else %}<span class="kanban-meta-assignee" style="color:#94a3b8;">unassigned</span>{% endif %}
             </div>
             <div class="kanban-card-foot">
               {% if t.has_ai %}<span class="ai-chip" style="font-size:10px;">✦ {{ t.ai_count }}</span>{% endif %}
@@ -79,9 +185,100 @@
   </div>
   {% else %}
   <div class="empty-state">
-    <div style="font-size:14px;color:#64748b;">No tickets in this view.</div>
-    <div style="font-size:12px;color:#94a3b8;margin-top:8px;">Try the <a href="/views/{{ current_view }}?display=list" style="color:var(--indigo);">list view</a> or clear filters.</div>
+    <div style="font-size:14px;color:var(--muted);">No tickets in this view.</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:8px;">Try the <a href="/views/{{ current_view }}?display=list" style="color:var(--indigo);">list view</a> or clear filters.</div>
   </div>
   {% endif %}
 </main>
+
+<script>
+// Per-column live search. Pure DOM filter — no fetch.
+window._kanbanColFilter = function(input) {
+  const col = input.closest('.kanban-col');
+  if (!col) return;
+  const q = (input.value || '').toLowerCase().trim();
+  let visible = 0;
+  col.querySelectorAll('.kanban-card').forEach(card => {
+    const hay = card.dataset.searchText || '';
+    const show = !q || hay.indexOf(q) !== -1;
+    card.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  const counter = col.querySelector('.kanban-col-count');
+  const base = counter && counter.dataset.countBase;
+  if (counter) counter.textContent = q ? (visible + ' / ' + base) : base;
+};
+
+// ---- Drag-and-drop (only enabled when group_by=status) ----
+{% if group_by == 'status' %}
+(function() {
+  const board = document.getElementById('kanban-board');
+  if (!board) return;
+  let draggedCard = null;
+  let draggedTid = null;
+
+  board.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.kanban-card');
+    if (!card) return;
+    draggedCard = card;
+    draggedTid = card.dataset.ticketId;
+    card.classList.add('dragging');
+    // dataTransfer is required for Firefox to fire drag events
+    try { e.dataTransfer.setData('text/plain', draggedTid); } catch (err) {}
+    e.dataTransfer.effectAllowed = 'move';
+  });
+
+  board.addEventListener('dragend', (e) => {
+    if (draggedCard) draggedCard.classList.remove('dragging');
+    document.querySelectorAll('.kanban-col.drop-target').forEach(c => c.classList.remove('drop-target'));
+    draggedCard = null; draggedTid = null;
+  });
+
+  board.addEventListener('dragover', (e) => {
+    const col = e.target.closest('.kanban-col');
+    if (!col || !draggedCard) return;
+    e.preventDefault();          // allow drop
+    e.dataTransfer.dropEffect = 'move';
+    // Highlight only the current target
+    document.querySelectorAll('.kanban-col.drop-target').forEach(c => c.classList.remove('drop-target'));
+    col.classList.add('drop-target');
+  });
+
+  board.addEventListener('dragleave', (e) => {
+    // dragleave fires for inner children too — only act when leaving the col itself
+    const col = e.target.closest('.kanban-col');
+    if (col && !col.contains(e.relatedTarget)) col.classList.remove('drop-target');
+  });
+
+  board.addEventListener('drop', async (e) => {
+    const col = e.target.closest('.kanban-col');
+    if (!col || !draggedTid) return;
+    e.preventDefault();
+    const newStatus = col.dataset.colKey;
+    if (!newStatus) return;
+    // No-op if dropped on the same column
+    const fromCol = draggedCard.closest('.kanban-col');
+    if (fromCol === col) return;
+    // Optimistic move — bounce back on failure
+    const body = col.querySelector('.kanban-col-body');
+    if (body) body.prepend(draggedCard);
+    // Fire the bulk-update API with one ticket id
+    const fd = new FormData();
+    fd.append('action', 'set_status');
+    fd.append('value', newStatus);
+    fd.append('ticket_ids', draggedTid);
+    try {
+      const r = await fetch('/api/tickets/bulk-update', { method: 'POST', body: fd });
+      const j = await r.json();
+      if (!j.ok || !j.updated) throw new Error(j.error || j.detail || 'failed');
+      // Reload to recompute group counts + per-column tints
+      setTimeout(() => location.reload(), 300);
+    } catch (err) {
+      if (fromCol) fromCol.querySelector('.kanban-col-body').appendChild(draggedCard);
+      alert('Move failed: ' + err.message);
+    }
+  });
+})();
+{% endif %}
+</script>
 {% endblock %}

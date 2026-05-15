@@ -19,6 +19,11 @@
               ▦ Kanban
             </a>
           </span>
+          <!-- Density toggle — flips body.compact on / off. Persisted in localStorage. -->
+          <button type="button" class="density-toggle" onclick="window._toggleDensity()" title="Toggle row density" aria-label="Toggle density" style="margin-left:6px;">
+            <span class="density-comfortable">⊞ Comfortable</span>
+            <span class="density-compact">▤ Compact</span>
+          </button>
         </div>
       </div>
 
@@ -76,6 +81,15 @@
     </div>
   </div>
 
+  <!-- Saved filter chips — quick combos of (q + sort + customer + jira + …)
+       saved per-view in localStorage. Star icon at the right saves the
+       current filter state under a name; click a chip to apply that combo. -->
+  <div class="saved-filters" id="saved-filters" data-view="{{ current_view }}">
+    <span class="saved-filters-label">Saved:</span>
+    <span id="saved-filter-list" style="display:contents;"></span>
+    <button type="button" class="saved-filter-save" onclick="window._saveCurrentFilter()" title="Save current filters as a quick chip">★ Save current</button>
+  </div>
+
   {% if tickets %}
 
   <!-- Bulk-action toolbar (hidden until ≥1 row selected) -->
@@ -124,6 +138,7 @@
           {% for col in view_columns %}
           <th class="{{ col.th }}">{{ col.label }}</th>
           {% endfor %}
+          <th class="row-quick-actions-th" aria-label="Quick actions"></th>
         </tr>
       </thead>
       <tbody>
@@ -161,6 +176,29 @@
               <td class="{{ col.td }}" title="{{ v or '' }}">{{ v if v not in (None, '', '—') else '—' }}</td>
             {% endif %}
           {% endfor %}
+          {# Inline quick-action picker — hidden until row hover. Sticky on
+             the right edge so it stays visible during horizontal scroll. #}
+          <td class="row-quick-actions-cell" onclick="event.stopPropagation();">
+            <div class="row-quick-actions">
+              <select class="quick-pick" data-tid="{{ t.id }}"
+                      onchange="window._rowQuick(this, 'set_status')" title="Change status">
+                <option value="">Status…</option>
+                <option value="open">Open</option>
+                <option value="pending">Pending</option>
+                <option value="hold">On hold</option>
+                <option value="solved">Solved</option>
+                <option value="closed">Closed</option>
+              </select>
+              <select class="quick-pick" data-tid="{{ t.id }}"
+                      onchange="window._rowQuick(this, 'set_priority')" title="Change priority">
+                <option value="">Priority…</option>
+                <option value="urgent">Urgent</option>
+                <option value="high">High</option>
+                <option value="normal">Normal</option>
+                <option value="low">Low</option>
+              </select>
+            </div>
+          </td>
         </tr>
         {% endfor %}
       </tbody>
@@ -239,6 +277,97 @@ async function bulkAssign() {
   if (email === null) return;
   bulkApply('set_assignee', (email || '').trim());
 }
+
+// ---------- Saved filter chips ----------
+// Stores named filter combos per-view in localStorage. Each entry is
+// { name, query }. Click a chip → location.search becomes its query.
+(function() {
+  const wrap = document.getElementById('saved-filters');
+  if (!wrap) return;
+  const viewKey = wrap.dataset.view || '_unknown';
+  const STORAGE_KEY = 'bp_saved_filters_v1::' + viewKey;
+
+  function load() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function save(arr) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(arr.slice(0, 20))); } catch (e) {}
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function render() {
+    const list = document.getElementById('saved-filter-list');
+    if (!list) return;
+    const arr = load();
+    if (!arr.length) {
+      list.innerHTML = '<span style="font-size:11px;color:var(--muted);font-style:italic;">no saved combos yet</span>';
+      return;
+    }
+    list.innerHTML = arr.map((f, i) => `
+      <a class="saved-filter-chip" href="${escapeHtml(f.query || '?')}" title="${escapeHtml(f.query || '')}">
+        <span>${escapeHtml(f.name)}</span>
+        <button type="button" class="saved-filter-chip-x" data-idx="${i}"
+                onclick="event.preventDefault();event.stopPropagation();window._removeSavedFilter(${i});"
+                aria-label="Remove">×</button>
+      </a>
+    `).join('');
+  }
+
+  window._saveCurrentFilter = function() {
+    const name = prompt('Name this filter combo (e.g. "Open · Reliance · this week"):');
+    if (!name) return;
+    const arr = load();
+    arr.unshift({ name: name.trim(), query: window.location.search || '?' });
+    save(arr);
+    render();
+  };
+  window._removeSavedFilter = function(i) {
+    const arr = load();
+    arr.splice(i, 1);
+    save(arr);
+    render();
+  };
+
+  render();
+})();
+
+// ---------- Inline row quick action ----------
+// Single-ticket variant of the bulk-update endpoint. Fires when an agent
+// picks status/priority from the per-row dropdown that appears on hover.
+window._rowQuick = async function(selectEl, action) {
+  const value = selectEl.value;
+  const tid = selectEl.dataset.tid;
+  if (!value || !tid) { selectEl.value = ''; return; }
+  selectEl.disabled = true;
+  const fd = new FormData();
+  fd.append('action', action);
+  fd.append('value', value);
+  fd.append('ticket_ids', tid);
+  try {
+    const r = await fetch('/api/tickets/bulk-update', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok && j.updated) {
+      // Visual confirmation — flash the row green, then reload to reflect
+      const row = selectEl.closest('tr');
+      if (row) row.style.boxShadow = 'inset 3px 0 0 #10b981, 0 0 0 1px rgba(16,185,129,0.4)';
+      setTimeout(() => location.reload(), 350);
+    } else {
+      alert('Update failed: ' + (j.detail || j.error || 'unknown'));
+      selectEl.value = ''; selectEl.disabled = false;
+    }
+  } catch (e) {
+    alert('Update failed: ' + e.message);
+    selectEl.value = ''; selectEl.disabled = false;
+  }
+};
 </script>
 
 {% endblock %}

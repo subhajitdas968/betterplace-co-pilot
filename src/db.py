@@ -24,7 +24,16 @@ def clean_body(text: str | None) -> str:
     s = _TAG_RE.sub("", s)
     # Replace non-breaking spaces and stray double-encoded entities
     s = s.replace(" ", " ").replace("&nbsp;", " ")
-    return s
+    # Strip trailing whitespace per line so the blank-line collapser sees
+    # "\n\n" not "\n   \n".
+    s = "\n".join(line.rstrip() for line in s.split("\n"))
+    # Collapse 3+ consecutive newlines to exactly 2. Email forwards and
+    # quoted-reply chains have literal "\n \n \n" runs which render as
+    # massive vertical gaps in the conversation bubble (pre-wrap preserves
+    # them all). One blank line stays — enough to separate paragraphs.
+    while "\n\n\n" in s:
+        s = s.replace("\n\n\n", "\n\n")
+    return s.strip()
 
 
 SCHEMA = """

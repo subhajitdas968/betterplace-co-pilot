@@ -4,6 +4,19 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>{% block title %}BetterPlace · Co-Pilot{% endblock %}</title>
+<script>
+  // Set theme synchronously BEFORE any CSS loads — prevents flash of light
+  // theme when the user's pref is dark. Reads localStorage first, falls back
+  // to prefers-color-scheme. Stored as 'light' / 'dark'.
+  (function() {
+    try {
+      var saved = localStorage.getItem('bp_theme');
+      var prefersDark = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches;
+      var theme = saved || (prefersDark ? 'dark' : 'light');
+      if (theme === 'dark') document.documentElement.setAttribute('data-theme', 'dark');
+    } catch (e) {}
+  })();
+</script>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
@@ -57,7 +70,7 @@
   </div>
 
   {# F5 · Profile chip — replaces the old cost pill. Click → dropdown
-     menu with quick status changer + link to full /profile page. #}
+     menu with quick status changer, theme toggle, and link to full /profile page. #}
   {% set _avail = (user.availability if user.availability in ['online','away','busy','offline'] else 'offline') %}
   <div class="user-pill" id="user-pill" onclick="toggleProfileMenu(event)" style="cursor:pointer;position:relative;">
     <div class="avatar" style="position:relative;">
@@ -87,7 +100,7 @@
   </div>
 
   <!-- Profile dropdown menu -->
-  <div id="profile-menu" style="display:none;position:absolute;top:64px;right:18px;width:320px;background:#fff;border:1px solid #e2e8f0;border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.15);z-index:9000;overflow:hidden;">
+  <div id="profile-menu" class="profile-menu-popup" style="display:none;position:absolute;top:64px;right:18px;width:320px;background:var(--card);border:1px solid var(--border);border-radius:12px;box-shadow:0 12px 32px rgba(15,23,42,.15);z-index:9000;overflow:hidden;color:var(--ink);">
     <div style="padding:14px 16px;background:linear-gradient(135deg,#f8fafc,#eef2ff);border-bottom:1px solid #e2e8f0;">
       <div style="font-weight:700;font-size:13px;">{{ user.name }}</div>
       <div style="font-size:11px;color:#64748b;">{{ user.email }}</div>
@@ -138,11 +151,18 @@
         </div>
       </div>
     </div>
-    <div style="border-top:1px solid #e2e8f0;padding:6px 8px;">
-      <a href="/profile" style="display:block;padding:7px 10px;font-size:12px;color:#1e293b;text-decoration:none;border-radius:6px;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">⚙ Edit profile</a>
+    <div class="profile-menu-section" style="border-top:1px solid var(--border);padding:6px 8px;">
+      <a href="/profile" class="profile-menu-link">⚙ Edit profile</a>
       {% if user.is_admin %}
-      <a href="/admin" style="display:block;padding:7px 10px;font-size:12px;color:#1e293b;text-decoration:none;border-radius:6px;" onmouseover="this.style.background='#f1f5f9'" onmouseout="this.style.background='transparent'">🛠 Admin panel</a>
+      <a href="/admin" class="profile-menu-link">🛠 Admin panel</a>
       {% endif %}
+      {# Theme toggle — fires _toggleTheme; the inner spans flip based on
+         [data-theme="dark"] on <html> so the label always reads correctly. #}
+      <button type="button" onclick="window._toggleTheme(); event.stopPropagation();"
+              class="profile-menu-link" style="width:100%;text-align:left;background:transparent;border:none;cursor:pointer;font:inherit;">
+        <span class="theme-menu-label theme-menu-label--light">🌙 Switch to dark theme</span>
+        <span class="theme-menu-label theme-menu-label--dark">☀ Switch to light theme</span>
+      </button>
       <form method="post" action="/auth/logout" style="margin:0;">
         <button type="submit" style="display:block;width:100%;text-align:left;padding:7px 10px;font-size:12px;color:#be123c;background:transparent;border:none;cursor:pointer;border-radius:6px;" onmouseover="this.style.background='#fff1f2'" onmouseout="this.style.background='transparent'">⏻ Sign out</button>
       </form>
@@ -325,12 +345,17 @@ setInterval(refreshNotifs, 30000);
     bar.innerHTML = tabs.map(t => {
       const isActive = here === t.url.split('?')[0];
       const statusAttr = t.status ? ` data-status="${escapeHtml(t.status)}"` : '';
-      return `<div class="bp-tab${isActive ? ' bp-tab--active' : ''}"
+      const pinned = !!t.pinned;
+      return `<div class="bp-tab${isActive ? ' bp-tab--active' : ''}${pinned ? ' bp-tab--pinned' : ''}"
                    data-url="${escapeHtml(t.url)}"${statusAttr}
-                   title="${escapeHtml(t.label)}">
+                   title="${escapeHtml(t.label)}${pinned ? '' : ' (right-click to pin)'}">
         <span class="bp-tab-dot" aria-hidden="true"></span>
         <span class="bp-tab-icon" aria-hidden="true">${escapeHtml(t.icon || '·')}</span>
         <span class="bp-tab-label">${escapeHtml(t.label)}</span>
+        <button type="button" class="bp-tab-pin" data-url="${escapeHtml(t.url)}"
+                aria-label="${pinned ? 'Unpin' : 'Pin'} tab" title="${pinned ? 'Unpin' : 'Pin'} tab">
+          ${pinned ? '★' : '☆'}
+        </button>
         <button type="button" class="bp-tab-x" data-url="${escapeHtml(t.url)}"
                 aria-label="Close tab" title="Close (⌘W)">×</button>
       </div>`;
@@ -352,8 +377,22 @@ setInterval(refreshNotifs, 30000);
     saveTabs(tabs);
   }
 
-  // Delegated click — handles tab open + close
+  function togglePin(url) {
+    let tabs = loadTabs();
+    const i = tabs.findIndex(t => t.url === url);
+    if (i < 0) return;
+    tabs[i].pinned = !tabs[i].pinned;
+    saveTabs(tabs); render();
+  }
+
+  // Delegated click — handles tab open / close / pin
   document.addEventListener('click', (e) => {
+    const pinBtn = e.target.closest('.bp-tab-pin');
+    if (pinBtn) {
+      e.preventDefault(); e.stopPropagation();
+      togglePin(pinBtn.dataset.url);
+      return;
+    }
     const closeBtn = e.target.closest('.bp-tab-x');
     if (closeBtn) {
       e.preventDefault(); e.stopPropagation();
@@ -370,6 +409,30 @@ setInterval(refreshNotifs, 30000);
     if (tab) {
       const url = tab.dataset.url;
       if (url) window.location.href = url;
+    }
+  });
+
+  // Right-click a tab → toggle pin (faster than aiming at the small star)
+  document.addEventListener('contextmenu', (e) => {
+    const tab = e.target.closest('.bp-tab');
+    if (!tab) return;
+    e.preventDefault();
+    togglePin(tab.dataset.url);
+  });
+
+  // Cmd+1..9 (Ctrl+1..9) jumps to nth tab. Pinned tabs come first (because
+  // they have CSS order:-1) so the numbering matches what you see L→R.
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmd = isMac ? e.metaKey : e.ctrlKey;
+    if (!cmd) return;
+    if (e.key >= '1' && e.key <= '9') {
+      const n = parseInt(e.key, 10) - 1;
+      const tabs = loadTabs();
+      // Sort the same way the DOM does: pinned first, then unpinned by
+      // their position in the list.
+      const ordered = [...tabs.filter(t => t.pinned), ...tabs.filter(t => !t.pinned)];
+      if (ordered[n]) { e.preventDefault(); window.location.href = ordered[n].url; }
     }
   });
 
@@ -496,15 +559,36 @@ setInterval(refreshNotifs, 30000);
   };
   try { if (localStorage.getItem(RC_COLLAPSE_KEY) === '1') applyRightCol(true); } catch (e) {}
 
+  // ---------------------- Density toggle ----------------------
+  window._toggleDensity = function() {
+    const isCompact = document.body.classList.toggle('compact');
+    try { localStorage.setItem('bp_density', isCompact ? 'compact' : 'comfortable'); } catch (e) {}
+  };
+  try {
+    if (localStorage.getItem('bp_density') === 'compact') document.body.classList.add('compact');
+  } catch (e) {}
+
+  // ---------------------- Theme toggle ----------------------
+  window._toggleTheme = function() {
+    const html = document.documentElement;
+    const isDark = html.getAttribute('data-theme') === 'dark';
+    const next = isDark ? 'light' : 'dark';
+    if (next === 'dark') html.setAttribute('data-theme', 'dark');
+    else html.removeAttribute('data-theme');
+    try { localStorage.setItem('bp_theme', next); } catch (e) {}
+  };
+
   // ---------------------- Keyboard shortcuts ----------------------
   // Cmd+\ → toggle sidebar (VS Code convention)
   // Cmd+] → toggle right panel
+  // Cmd+J → toggle theme
   document.addEventListener('keydown', (e) => {
     const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
     const cmd = isMac ? e.metaKey : e.ctrlKey;
     if (!cmd) return;
     if (e.key === '\\') { e.preventDefault(); window._toggleSidebar(); }
     else if (e.key === ']') { e.preventDefault(); window._toggleRightCol(); }
+    else if (e.key === 'j' || e.key === 'J') { e.preventDefault(); window._toggleTheme(); }
   });
 })();
 </script>
