@@ -145,8 +145,9 @@ async function saveRole(e) {
   status.style.color = '';
   const form = e.target;
   const fd = new FormData();
-  fd.append('name', form.name.value.trim());
-  fd.append('description', form.description.value.trim());
+  // form.name / form.title etc. resolve to form attrs, not fields — use form.elements[]
+  fd.append('name', (form.elements['name'].value || '').trim());
+  fd.append('description', (form.elements['description'].value || '').trim());
   const keys = Array.from(document.querySelectorAll('.perm-cb:checked')).map(cb => cb.value);
   fd.append('permission_keys', keys.join(','));
   const url = IS_NEW ? '/api/admin/roles' : '/api/admin/roles/' + ROLE_ID;

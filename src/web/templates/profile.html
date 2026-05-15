@@ -287,28 +287,46 @@ async function saveProfile(e) {
   const status = document.getElementById('save-status');
   status.textContent = 'Saving…'; status.style.color = '';
   const form = e.target;
+  // form.name and form.title resolve to the FORM's built-in name/title
+  // attributes (empty), NOT the input fields. We MUST use form.elements[x]
+  // for those two reserved names — otherwise this JS throws silently and
+  // the fetch never fires. Using form.elements throughout for consistency.
+  const get = (n) => {
+    const el = form.elements[n];
+    if (!el) return '';
+    if (el.type === 'checkbox') return el.checked ? '1' : '0';
+    return (el.value || '').toString().trim();
+  };
   const fd = new FormData();
-  fd.append('name', form.name.value.trim());
-  fd.append('title', form.title.value.trim());
-  fd.append('timezone', form.timezone.value);
-  fd.append('work_start_time', form.work_start_time.value);
-  fd.append('work_end_time', form.work_end_time.value);
+  fd.append('name', get('name'));
+  fd.append('title', get('title'));
+  fd.append('timezone', get('timezone'));
+  fd.append('work_start_time', get('work_start_time'));
+  fd.append('work_end_time', get('work_end_time'));
   const days = Array.from(form.querySelectorAll('.wd-cb:checked')).map(cb => cb.value);
   fd.append('work_days', days.join(','));
-  fd.append('phone', form.phone.value.trim());
-  fd.append('slack_handle', form.slack_handle.value.trim());
-  fd.append('bio', form.bio.value.trim());
-  fd.append('notify_email', form.notify_email.checked ? 1 : 0);
-  fd.append('notify_browser', form.notify_browser.checked ? 1 : 0);
-  fd.append('notify_sound', form.notify_sound.checked ? 1 : 0);
-  const r = await fetch('/api/profile', { method: 'POST', body: fd });
-  if (r.ok) {
-    status.textContent = '✓ Saved';
-    status.style.color = '#047857';
-  } else {
-    const body = await r.json().catch(() => ({}));
-    status.textContent = '✗ ' + (body.detail || 'failed');
+  fd.append('phone', get('phone'));
+  fd.append('slack_handle', get('slack_handle'));
+  fd.append('bio', get('bio'));
+  fd.append('notify_email', get('notify_email'));
+  fd.append('notify_browser', get('notify_browser'));
+  fd.append('notify_sound', get('notify_sound'));
+  try {
+    const r = await fetch('/api/profile', { method: 'POST', body: fd });
+    if (r.ok) {
+      status.textContent = '✓ Saved · refresh to verify';
+      status.style.color = '#047857';
+    } else {
+      const body = await r.json().catch(() => ({}));
+      status.textContent = '✗ ' + (body.detail || 'failed');
+      status.style.color = '#be123c';
+    }
+  } catch (err) {
+    // Don't let exceptions die silently — surface them so we never repeat
+    // the original "save looks fine but doesn't save" failure mode.
+    status.textContent = '✗ ' + err.message;
     status.style.color = '#be123c';
+    console.error('saveProfile failed:', err);
   }
   return false;
 }

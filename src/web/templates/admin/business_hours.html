@@ -120,10 +120,11 @@ async function saveSched(ev, bhId) {
   const form = ev.target;
   const fd = new FormData();
   fd.append('bh_id', bhId);
-  fd.append('name', form.name.value);
-  fd.append('description', form.description.value);
-  fd.append('timezone', form.timezone.value);
-  fd.append('is_default', form.is_default.checked ? 1 : 0);
+  // form.name / form.method etc. resolve to form attrs, not fields — use form.elements[]
+  fd.append('name', form.elements['name'].value || '');
+  fd.append('description', form.elements['description'].value || '');
+  fd.append('timezone', form.elements['timezone'].value || '');
+  fd.append('is_default', form.elements['is_default'].checked ? 1 : 0);
   const grid = form.querySelector('.weekly-grid');
   fd.append('weekly_intervals_json', JSON.stringify(collectIntervals(grid)));
   const holidays = form.holidays.value.split('\n').map(s => s.trim()).filter(Boolean);

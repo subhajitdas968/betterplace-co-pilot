@@ -6504,10 +6504,24 @@ def _render_view_editor(request: Request, user: dict, view: dict | None):
         """).fetchall()]
         # App users for "share with users" picker
         app_users = db.list_app_users(c, include_disabled=False)
-    # Default filter object for new views
-    default_filter = view["filter_json"] if view else json.dumps({"match": "all", "rules": []})
-    default_cols = view["column_ids_json"] if view else json.dumps(["id", "subject", "status", "priority", "group_name", "assignee_name", "updated_at"])
-    default_sort = view["sort_json"] if view else json.dumps({"field": "updated_at", "dir": "desc"})
+    # Defaults — parse the JSON strings from DB into actual Python objects
+    # so the template's {{ x | tojson }} emits a real JS literal (object/array)
+    # instead of a JSON-encoded-string-that-must-be-parsed-twice. Earlier
+    # this triple-encoding caused initialColumns to be a *string* in JS,
+    # which made the column chip-list init silently crash → user thought
+    # column changes weren't saving.
+    def _safe_json(s, fallback):
+        try: return json.loads(s) if s else fallback
+        except (json.JSONDecodeError, TypeError): return fallback
+    default_filter = _safe_json(
+        view["filter_json"] if view else None,
+        {"match": "all", "rules": []})
+    default_cols = _safe_json(
+        view["column_ids_json"] if view else None,
+        ["id", "subject", "status", "priority", "group_name", "assignee_name", "updated_at"])
+    default_sort = _safe_json(
+        view["sort_json"] if view else None,
+        {"field": "updated_at", "dir": "desc"})
     return TEMPLATES.TemplateResponse("views/edit.html", {
         "request": request, "user": user,
         "view": view, "is_new": view is None,
@@ -6520,9 +6534,10 @@ def _render_view_editor(request: Request, user: dict, view: dict | None):
         "column_choices": column_choices,
         "shared_user_emails": shared_user_emails,
         "shared_group_ids": shared_group_ids,
-        "default_filter_json": default_filter,
-        "default_columns_json": default_cols,
-        "default_sort_json": default_sort,
+        # These now hold real objects — template uses `| tojson` to emit JS literal
+        "default_filter": default_filter,
+        "default_columns": default_cols,
+        "default_sort": default_sort,
         "current_view": "_views_edit",
         "in_detail": False, "search": "",
         **sb,

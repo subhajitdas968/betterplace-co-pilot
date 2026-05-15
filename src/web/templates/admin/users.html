@@ -224,8 +224,9 @@ async function inviteUser(e) {
   status.textContent = 'Inviting…';
   status.style.color = '';
   const fd = new FormData();
+  // form.name reads the FORM's name attr, not the field. Use form.elements[].
   fd.append('email', form.email.value.trim().toLowerCase());
-  fd.append('name', form.name.value.trim());
+  fd.append('name', (form.elements['name'].value || '').trim());
   const roleIds = Array.from(form.querySelectorAll('.inv-role:checked')).map(i => i.value);
   fd.append('role_ids', roleIds.join(','));
   const r = await fetch('/api/admin/users', { method: 'POST', body: fd });

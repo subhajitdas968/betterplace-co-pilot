@@ -240,10 +240,13 @@ const ZD_AGENTS = {{ zd_agents | tojson }};
 const IS_NEW = {{ 'true' if is_new else 'false' }};
 const VIEW_ID = {{ view.id if view else 'null' }};
 
-let initialFilter, initialColumns, initialSort;
-try { initialFilter  = JSON.parse({{ default_filter_json | tojson }}); } catch (e) { initialFilter = {match:'all',rules:[]}; }
-try { initialColumns = JSON.parse({{ default_columns_json | tojson }}); } catch (e) { initialColumns = []; }
-try { initialSort    = JSON.parse({{ default_sort_json | tojson }}); } catch (e) { initialSort = {field:'updated_at',dir:'desc'}; }
+// tojson on a Python dict/list emits a real JS literal — no JSON.parse needed.
+// (The old code passed JSON-encoded strings here, which were then re-encoded
+// by tojson and re-parsed, ending up as strings instead of arrays — that's
+// what made the column chip-list silently fail to initialize.)
+const initialFilter  = {{ default_filter  | tojson }};
+const initialColumns = {{ default_columns | tojson }};
+const initialSort    = {{ default_sort    | tojson }};
 
 function toggleScope() {
   const scope = document.querySelector('input[name=scope]:checked').value;
@@ -496,10 +499,12 @@ async function saveView(e) {
   const status = document.getElementById('save-status');
   status.textContent = 'Saving…'; status.style.color = '';
   const form = e.target;
+  // form.name / form.title / form.method etc. resolve to the form's built-in
+  // attributes, NOT named fields. Use form.elements[x] for safety.
   const fd = new FormData();
-  fd.append('name', form.name.value.trim());
-  fd.append('description', form.description.value.trim());
-  fd.append('icon', form.icon.value.trim());
+  fd.append('name', (form.elements['name'].value || '').trim());
+  fd.append('description', (form.elements['description'].value || '').trim());
+  fd.append('icon', (form.elements['icon'].value || '').trim());
   fd.append('color', document.querySelector('input[name=color]:checked').value);
   fd.append('scope', document.querySelector('input[name=scope]:checked').value);
   const filterObj = { match: document.getElementById('match-mode').value, rules: readRules() };
