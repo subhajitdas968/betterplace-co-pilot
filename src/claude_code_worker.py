@@ -532,7 +532,10 @@ def run_loop_or_quit_on_quota(*, status: str = "open", limit: int = 20, interval
                 return
         except Exception as e:
             _write_heartbeat("error", {"error": str(e)[:300]})
-            print(f"loop error: {e}", file=sys.stderr, flush=True)
+            # "database is locked" is the most common transient — note it but
+            # don't escalate. The retry happens on the NEXT loop tick.
+            kind = "transient" if ("locked" in str(e).lower() or "busy" in str(e).lower()) else "error"
+            print(f"loop {kind}: {e}", file=sys.stderr, flush=True)
         print(f"sleeping {interval_seconds}s …", flush=True)
         time.sleep(interval_seconds)
 
@@ -543,7 +546,8 @@ def run_loop(*, status: str = "open", limit: int = 20, interval_seconds: int = 3
         try:
             run_once(status=status, limit=limit)
         except Exception as e:
-            print(f"loop error: {e}", file=sys.stderr, flush=True)
+            kind = "transient" if ("locked" in str(e).lower() or "busy" in str(e).lower()) else "error"
+            print(f"loop {kind}: {e}", file=sys.stderr, flush=True)
         print(f"sleeping {interval_seconds}s …")
         time.sleep(interval_seconds)
 

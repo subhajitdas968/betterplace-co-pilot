@@ -1127,10 +1127,28 @@ def init() -> None:
 @contextmanager
 def conn() -> Iterator[sqlite3.Connection]:
     """Context manager yielding a sqlite3.Connection with row factory.
-    Self-heals on the 'malformed database schema (idx_X) — no such table' error
-    by running _heal_orphaned_indexes and retrying once."""
-    c = sqlite3.connect(DB_PATH, timeout=30, isolation_level=None)
+
+    PRAGMA setup for concurrent-writer resilience:
+      - journal_mode=WAL     — multiple readers can run while one writer commits
+      - busy_timeout=60000   — wait up to 60s for the writer lock before raising
+                                "database is locked". Important now that we have
+                                uvicorn + user_scheduler thread + AI worker +
+                                sync_worker all writing to the same DB.
+      - synchronous=NORMAL   — fsync at WAL checkpoints, not every write (3-5x
+                                faster, safe with WAL)
+      - foreign_keys=ON      — enforce FK constraints
+
+    Self-heals on "malformed database schema" by running _heal_orphaned_indexes
+    once and retrying.
+    """
+    c = sqlite3.connect(DB_PATH, timeout=60, isolation_level=None)
     c.row_factory = sqlite3.Row
+    # busy_timeout is in milliseconds — applied at SQLite level so even queries
+    # outside our timeout window (e.g. nested transactions) wait properly.
+    try:
+        c.execute("PRAGMA busy_timeout=60000")
+    except sqlite3.DatabaseError:
+        pass
     try:
         c.execute("PRAGMA journal_mode=WAL")
     except sqlite3.DatabaseError as e:
@@ -1154,6 +1172,28 @@ def conn() -> Iterator[sqlite3.Connection]:
         yield c
     finally:
         c.close()
+
+
+def retry_on_lock(fn, *, attempts: int = 3, base_delay: float = 0.5):
+    """Run fn(), retrying on 'database is locked' / 'database is busy' up to
+    `attempts` times with exponential backoff (0.5s, 1s, 2s by default).
+    Use for non-critical writes that can wait — e.g. activity logging, idle
+    notifications. Don't use for user-facing reads (the caller wants a fast
+    fail to surface a meaningful error)."""
+    import time
+    last_err = None
+    for i in range(int(attempts)):
+        try:
+            return fn()
+        except sqlite3.OperationalError as e:
+            msg = str(e).lower()
+            if "locked" in msg or "busy" in msg:
+                last_err = e
+                time.sleep(base_delay * (2 ** i))
+                continue
+            raise
+    if last_err:
+        raise last_err
 
 
 def now_iso() -> str:
