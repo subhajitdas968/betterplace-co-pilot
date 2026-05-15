@@ -26,7 +26,10 @@ body {
     radial-gradient(circle at 100% 0, rgba(14,165,233,.08) 0, transparent 40%),
     linear-gradient(180deg, #f6f7fb 0%, #eef0fa 100%);
   color: var(--ink);
-  font-size: 13.5px;
+  /* +1px base size — easier to scan dense ticket lists for hours at a stretch.
+     Originally 13.5px; bumped to 14.5px. The rest of the type scale inherits
+     proportionally because most class-level sizes are smaller children. */
+  font-size: 14.5px;
   line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   display: flex;
@@ -785,15 +788,16 @@ body {
   box-shadow: var(--shadow-sm);
 }
 .ticket-table thead th {
-  font-size: 10.5px; text-transform: uppercase; letter-spacing: .07em;
+  /* +1px on table headers and cells — easier scanning in dense lists */
+  font-size: 11.5px; text-transform: uppercase; letter-spacing: .07em;
   color: var(--muted); font-weight: 700; text-align: left;
   padding: 10px 12px; background: #fafbff;
   border-bottom: 1px solid var(--border);
   position: sticky; top: 0;
 }
 .ticket-table tbody td {
-  padding: 10px 12px; border-bottom: 1px solid var(--border);
-  font-size: 12.5px; vertical-align: top;
+  padding: 11px 12px; border-bottom: 1px solid var(--border);
+  font-size: 13.5px; vertical-align: top;
 }
 .ticket-table-row { cursor: pointer; transition: background .14s; }
 .ticket-table-row:hover { background: #fafbff; }
@@ -1898,6 +1902,202 @@ body.sidebar-collapsed .sidebar-reopen-btn { display: inline-flex; }
 /* Tighter at the 1100px breakpoint to match the rest of the layout media query. */
 @media (max-width: 1100px) {
   body.sidebar-collapsed .layout { grid-template-columns: 0 1fr; }
+}
+
+/* ===========================================================================
+   List ⇄ Kanban display toggle
+   =========================================================================== */
+.display-toggle {
+  display: inline-flex;
+  vertical-align: middle;
+  background: #f1f5f9;
+  border-radius: 8px;
+  padding: 2px;
+  gap: 1px;
+}
+.display-toggle-btn {
+  font-size: 11.5px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  text-decoration: none;
+  color: #64748b;
+  font-weight: 500;
+  transition: background .14s ease, color .14s ease;
+}
+.display-toggle-btn:hover { color: #0f172a; background: #e2e8f0; }
+.display-toggle-btn--active {
+  background: #fff;
+  color: var(--indigo, #4f46e5);
+  box-shadow: 0 1px 2px rgba(15,23,42,0.08);
+}
+
+/* View-toolbar for kanban (mirrors list-header but lighter) */
+.view-toolbar {
+  padding: 14px 18px 8px 18px;
+}
+.view-title { font-size: 18px; font-weight: 700; color: #0f172a; }
+
+/* ===========================================================================
+   Kanban board
+   =========================================================================== */
+.kanban-board {
+  display: flex;
+  gap: 12px;
+  padding: 0 18px 18px 18px;
+  overflow-x: auto;
+  flex: 1;
+  min-height: 0;
+  align-items: flex-start;
+  scroll-snap-type: x mandatory;
+}
+.kanban-board::-webkit-scrollbar { height: 8px; }
+.kanban-board::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+.kanban-col {
+  flex: 0 0 320px;
+  min-width: 280px;
+  max-width: 360px;
+  display: flex;
+  flex-direction: column;
+  background: #f8fafc;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 10px;
+  overflow: hidden;
+  scroll-snap-align: start;
+  max-height: 100%;
+}
+
+.kanban-col-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 14px;
+  border-bottom: 1px solid var(--border, #e2e8f0);
+}
+.kanban-col-title {
+  font-size: 12.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+.kanban-col-count {
+  font-size: 11px;
+  font-weight: 600;
+  background: rgba(255,255,255,0.6);
+  padding: 1px 8px;
+  border-radius: 10px;
+}
+
+.kanban-col-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 80px;
+}
+
+.kanban-card {
+  display: block;
+  background: #ffffff;
+  border: 1px solid var(--border, #e2e8f0);
+  border-radius: 8px;
+  padding: 10px 12px;
+  text-decoration: none;
+  color: inherit;
+  box-shadow: 0 1px 2px rgba(15,23,42,0.04);
+  transition: box-shadow .14s ease, transform .14s ease, border-color .14s ease;
+  cursor: pointer;
+}
+.kanban-card:hover {
+  border-color: #c7d2fe;
+  box-shadow: 0 4px 12px rgba(79,70,229,0.12);
+  transform: translateY(-1px);
+}
+
+.kanban-card-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 4px;
+}
+.kanban-card-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  color: var(--indigo, #4f46e5);
+  font-weight: 700;
+}
+
+.kanban-pri {
+  font-size: 9.5px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+.kanban-pri-urgent { background: #fee2e2; color: #991b1b; }
+.kanban-pri-high   { background: #fef3c7; color: #92400e; }
+.kanban-pri-normal { background: #e0e7ff; color: #3730a3; }
+.kanban-pri-low    { background: #f1f5f9; color: #475569; }
+
+.kanban-card-subject {
+  font-size: 13px;
+  font-weight: 600;
+  color: #0f172a;
+  line-height: 1.35;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.kanban-card-meta {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  margin-top: 6px;
+  font-size: 11px;
+  color: #64748b;
+}
+.kanban-meta-customer {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.kanban-meta-assignee::before {
+  content: "👤 ";
+  opacity: 0.7;
+}
+
+.kanban-card-foot {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+  padding-top: 6px;
+  border-top: 1px dashed #f1f5f9;
+  flex-wrap: wrap;
+}
+.kanban-card-time {
+  font-size: 10px;
+  color: #94a3b8;
+  margin-left: auto;
+  font-family: 'JetBrains Mono', monospace;
+}
+
+.kanban-empty {
+  font-size: 11px;
+  color: #94a3b8;
+  text-align: center;
+  padding: 16px 8px;
+  border: 2px dashed #e2e8f0;
+  border-radius: 6px;
+}
+
+/* On narrower viewports keep columns scrollable horizontally */
+@media (max-width: 900px) {
+  .kanban-col { flex-basis: 260px; min-width: 240px; }
 }
 
 /* ===========================================================================

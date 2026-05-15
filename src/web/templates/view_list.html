@@ -7,7 +7,19 @@
     <div class="list-header-row">
       <div>
         <div class="list-title">{{ current_view_label }}</div>
-        <div class="list-sub">{{ tickets|length }} ticket(s)</div>
+        <div class="list-sub">
+          {{ tickets|length }} ticket(s)
+          <span class="display-toggle" role="tablist" aria-label="Display mode" style="margin-left:10px;">
+            <a href="/views/{{ current_view }}?display=list{% if search %}&q={{ search }}{% endif %}"
+               class="display-toggle-btn display-toggle-btn--active" role="tab" aria-selected="true" title="List view">
+              ☰ List
+            </a>
+            <a href="/views/{{ current_view }}?display=kanban{% if search %}&q={{ search }}{% endif %}"
+               class="display-toggle-btn" role="tab" aria-selected="false" title="Kanban view">
+              ▦ Kanban
+            </a>
+          </span>
+        </div>
       </div>
 
       <form class="list-controls" method="get" action="/views/{{ current_view }}">

@@ -2752,6 +2752,7 @@ async def search_page(
 @app.get("/views/{view_name:path}", response_class=HTMLResponse)
 async def view_list(view_name: str, request: Request, q: str = "",
                     sort: str = "updated_desc",
+                    display: str = "list",
                     customer: str = "", jira: str = "", rc1: str = "", group: str = "",
                     user: dict = Depends(require_user)):
     with db.conn() as c:
@@ -2784,6 +2785,21 @@ async def view_list(view_name: str, request: Request, q: str = "",
         groups = c.execute("SELECT id, name FROM groups ORDER BY name").fetchall()
         # F0+ T4: dynamic columns based on the view's column_ids_json
         view_columns = _resolve_view_columns(c, view_name)
+    # Kanban toggle — same data set, different rendering. Tickets get grouped
+    # by status on the client side (cheap, no extra query). Display state is
+    # in the URL so it's bookmarkable per view.
+    if display == "kanban":
+        return TEMPLATES.TemplateResponse("view_kanban.html", {
+            "request": request, "user": user, "tickets": tickets,
+            "current_view": view_name, "current_view_label": label,
+            "view_columns": view_columns,
+            "search": q, "sort": sort,
+            "filter_customer": customer, "filter_jira": jira,
+            "filter_rc1": rc1, "filter_group": group,
+            "groups": [dict(g) for g in groups],
+            "in_detail": False, "display": "kanban",
+            **sb,
+        })
     return TEMPLATES.TemplateResponse("view_list.html", {
         "request": request, "user": user, "tickets": tickets,
         "current_view": view_name, "current_view_label": label,
@@ -2792,7 +2808,7 @@ async def view_list(view_name: str, request: Request, q: str = "",
         "filter_customer": customer, "filter_jira": jira,
         "filter_rc1": rc1, "filter_group": group,
         "groups": [dict(g) for g in groups],
-        "in_detail": False,
+        "in_detail": False, "display": "list",
         **sb,
     })
 
@@ -7753,6 +7769,9 @@ def _build_column_catalog(c) -> list:
         {"key": "solved_at",      "label": "Solved at",     "group": "Standard"},
         {"key": "sla_status",     "label": "SLA status",    "group": "Standard"},
         {"key": "tags",           "label": "Tags",          "group": "Standard"},
+        # Were missing — both render via STANDARD_COLUMN_DEFS kinds 'ai'/'jira'
+        {"key": "ai",             "label": "AI observations", "group": "Standard"},
+        {"key": "jira_id",        "label": "Jira ID",       "group": "Standard"},
     ]
     rows = c.execute("""
         SELECT id, title FROM ticket_fields

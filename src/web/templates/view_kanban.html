@@ -1,0 +1,87 @@
+{% extends "_base.html" %}
+{% block title %}{{ current_view_label }} · Kanban · BetterPlace Co-Pilot{% endblock %}
+{% block main %}
+
+<main class="main-pane">
+
+  <!-- View toolbar — title + List/Kanban toggle + filters -->
+  <div class="view-toolbar">
+    <div style="display:flex;align-items:center;gap:14px;flex-wrap:wrap;">
+      <h1 class="view-title" style="margin:0;">{{ current_view_label }}</h1>
+      <span style="font-size:12.5px;color:var(--muted);">{{ tickets|length }} ticket{{ '' if tickets|length == 1 else 's' }}</span>
+      <!-- List ⇄ Kanban toggle -->
+      <div class="display-toggle" role="tablist" aria-label="Display mode">
+        <a href="/views/{{ current_view }}?display=list{% if search %}&q={{ search }}{% endif %}"
+           class="display-toggle-btn" role="tab" aria-selected="false" title="List view">
+          ☰ List
+        </a>
+        <a href="/views/{{ current_view }}?display=kanban{% if search %}&q={{ search }}{% endif %}"
+           class="display-toggle-btn display-toggle-btn--active" role="tab" aria-selected="true" title="Kanban view">
+          ▦ Kanban
+        </a>
+      </div>
+    </div>
+  </div>
+
+  {% if tickets %}
+  {# Group tickets by status in Jinja so the template renders cleanly. We
+     define the column order + labels here so unknown statuses can fall into
+     an 'Other' column. #}
+  {% set statuses = [
+      ('open',    'Open',     '#fef3c7', '#92400e'),
+      ('new',     'New',      '#fef3c7', '#92400e'),
+      ('pending', 'Pending',  '#dbeafe', '#1e40af'),
+      ('hold',    'On hold',  '#fce7f3', '#9d174d'),
+      ('solved',  'Solved',   '#dcfce7', '#166534'),
+      ('closed',  'Closed',   '#e5e7eb', '#475569'),
+  ] %}
+
+  <div class="kanban-board">
+    {% for key, label, bg, fg in statuses %}
+      {% set col_tickets = tickets|selectattr('status','equalto',key)|list %}
+      {% if col_tickets or key in ['open','pending','hold','solved'] %}
+      <section class="kanban-col">
+        <header class="kanban-col-head" style="background:{{ bg }};color:{{ fg }};">
+          <span class="kanban-col-title">{{ label }}</span>
+          <span class="kanban-col-count">{{ col_tickets|length }}</span>
+        </header>
+        <div class="kanban-col-body">
+          {% for t in col_tickets %}
+          <a class="kanban-card row-status-{{ t.status }}"
+             href="/tickets/{{ t.local_id or t.id }}?view={{ current_view }}">
+            <div class="kanban-card-head">
+              <span class="kanban-card-id">{{ t.local_id or ('#' ~ t.id) }}</span>
+              {% if t.priority and t.priority != '—' %}
+              <span class="kanban-pri kanban-pri-{{ t.priority }}">{{ t.priority }}</span>
+              {% endif %}
+              {% if t.pickup %}<span class="pickup-tag" style="font-size:9px;">PICKUP</span>{% endif %}
+            </div>
+            <div class="kanban-card-subject">{{ t.subject or '(no subject)' }}</div>
+            <div class="kanban-card-meta">
+              {% if t.customer and t.customer != '—' %}<span class="kanban-meta-customer">🏢 {{ t.customer }}</span>{% endif %}
+              {% if t.assignee_name %}<span class="kanban-meta-assignee" title="{{ t.assignee_name }}">{{ t.assignee_name|truncate(18,true,'…') }}</span>{% else %}<span class="kanban-meta-assignee" style="color:#94a3b8;">unassigned</span>{% endif %}
+            </div>
+            <div class="kanban-card-foot">
+              {% if t.has_ai %}<span class="ai-chip" style="font-size:10px;">✦ {{ t.ai_count }}</span>{% endif %}
+              {% if t.sla_level and t.sla_level != 'ok' %}
+              <span class="sla-pill sla-{{ t.sla_level }}" style="font-size:9px;padding:1px 6px;"><span class="sla-pill-dot"></span>{{ t.sla_label }}</span>
+              {% endif %}
+              <span class="kanban-card-time">{{ t.updated_at|truncate(16,true,'') }}</span>
+            </div>
+          </a>
+          {% else %}
+          <div class="kanban-empty">No tickets</div>
+          {% endfor %}
+        </div>
+      </section>
+      {% endif %}
+    {% endfor %}
+  </div>
+  {% else %}
+  <div class="empty-state">
+    <div style="font-size:14px;color:#64748b;">No tickets in this view.</div>
+    <div style="font-size:12px;color:#94a3b8;margin-top:8px;">Try the <a href="/views/{{ current_view }}?display=list" style="color:var(--indigo);">list view</a> or clear filters.</div>
+  </div>
+  {% endif %}
+</main>
+{% endblock %}
