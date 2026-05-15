@@ -3201,6 +3201,35 @@ def _stat_releases(c):
         return "—"
 
 
+def _stat_sync_worker(c):
+    """Chip for the admin landing — uses pid liveness + last_sync_run_at."""
+    try:
+        pid_str = db.get_meta(c, "sync_worker_pid")
+        last_at = db.get_meta(c, "last_sync_run_at")
+        pid = int(pid_str) if pid_str else None
+    except (TypeError, ValueError):
+        pid = None
+    alive = False
+    if pid:
+        try: os.kill(pid, 0); alive = True
+        except (ProcessLookupError, PermissionError, OSError): alive = False
+    if alive:
+        return "● loop running"
+    if not last_at:
+        return "○ not started"
+    from datetime import datetime as _dt
+    try:
+        t0 = _dt.fromisoformat(last_at.replace("Z", "+00:00"))
+        age = (_dt.now(t0.tzinfo) - t0).total_seconds()
+    except (ValueError, TypeError):
+        return "—"
+    if age < 3600:
+        return f"○ last sync {int(age // 60)}m ago"
+    if age < 86400:
+        return f"⚠ last sync {int(age // 3600)}h ago"
+    return f"⚠ last sync {int(age // 86400)}d ago"
+
+
 def _stat_status(c):
     """Cheap roll-up for the admin landing — green if everything's healthy,
     yellow if something's worth checking. We deliberately don't go deep here;
@@ -3451,6 +3480,11 @@ FEATURE_CATALOG = [
      "title": "System status",
      "summary": "One-screen health dashboard — tunnels, schedulers, DB size, recent errors, version. Auto-refreshes every 30s. The page you open when something feels off.",
      "setup_url": "/admin/status", "stat_fn": _stat_status},
+
+    {"key": "sync",           "category": "integration", "status": "done",   "block": "Phase 1",
+     "title": "Zendesk sync",
+     "summary": "Pulls tickets, fields, forms, and groups from Zendesk into the local DB. Start/stop the loop or trigger a one-off pass from the UI — no terminal needed.",
+     "setup_url": "/admin/sync", "stat_fn": _stat_sync_worker},
 ]
 
 
@@ -4066,6 +4100,183 @@ def _ai_worker_is_running(pid: int | None) -> bool:
         return True
     except (ProcessLookupError, PermissionError, OSError):
         return False
+
+
+# ---------------------------------------------------------------------------
+# F12++ · ZD sync worker management (was terminal-only via `make sync-loop`)
+# ---------------------------------------------------------------------------
+# Same pattern as the AI worker: detached subprocess, pid stored in meta,
+# log file in data/sync_worker.log, heartbeat in data/sync_worker.heartbeat.
+
+_SYNC_LOG = config.DATA_DIR / "sync_worker.log"
+_SYNC_HEARTBEAT = config.DATA_DIR / "sync_worker.heartbeat"
+
+
+def _sync_worker_pid() -> int | None:
+    with db.conn() as c:
+        v = db.get_meta(c, "sync_worker_pid")
+    try:
+        return int(v) if v else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _sync_worker_alive() -> bool:
+    pid = _sync_worker_pid()
+    if not pid:
+        return False
+    try:
+        os.kill(pid, 0)
+        return True
+    except (ProcessLookupError, PermissionError, OSError):
+        return False
+
+
+@app.get("/admin/sync", response_class=HTMLResponse)
+async def admin_sync(
+    request: Request,
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    """Start/stop the ZD sync loop without ssh-ing in. Shows last heartbeat,
+    last successful run, and a log tail."""
+    pid = _sync_worker_pid()
+    alive = _sync_worker_alive()
+    hb_raw = None
+    if _SYNC_HEARTBEAT.exists():
+        try: hb_raw = json.loads(_SYNC_HEARTBEAT.read_text())
+        except (json.JSONDecodeError, OSError): hb_raw = None
+    with db.conn() as c:
+        sb = _sidebar_ctx(c, user)
+        last_sync_at = db.get_meta(c, "last_sync_run_at")
+        last_sync_epoch = db.get_meta(c, "last_sync_epoch")
+    state = {
+        "pid": pid if alive else None,
+        "alive": alive,
+        "interval_sec": getattr(config, "SYNC_INTERVAL_SECONDS", 300),
+        "heartbeat": hb_raw,
+        "last_sync_at": last_sync_at,
+        "last_sync_epoch": last_sync_epoch,
+    }
+    return TEMPLATES.TemplateResponse("admin/sync.html", {
+        "request": request, "user": user, "state": state,
+        "current_view": "_admin", "in_detail": False, "search": "",
+        **sb,
+    })
+
+
+def _spawn_sync_worker(mode: str, actor_email: str) -> dict:
+    """mode is 'once' (run a single pass and exit) or 'loop' (continuous).
+    Returns {ok, pid, log} or {ok:False, error}. Idempotent: if a loop is
+    already running, we refuse a second one."""
+    import subprocess, sys as _sys
+    if mode == "loop" and _sync_worker_alive():
+        return {"ok": True, "already_running": True, "pid": _sync_worker_pid()}
+    try:
+        log_f = open(_SYNC_LOG, "a")
+    except OSError as e:
+        return {"ok": False, "error": f"cannot open log: {e}"}
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    env = os.environ.copy()
+    env["PYTHONUNBUFFERED"] = "1"
+    arg = "--loop" if mode == "loop" else "--once"
+    cmd = [_sys.executable, "-u", "-m", "src.sync_worker", arg]
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=log_f, stderr=log_f, cwd=str(repo_root), env=env,
+            start_new_session=True,
+        )
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
+    if mode == "loop":
+        with db.conn() as c:
+            db.set_meta(c, "sync_worker_pid", str(proc.pid))
+            db.log_access(c, actor_email=actor_email,
+                          event_type="sync.start",
+                          target_kind="system", target_id="",
+                          detail={"pid": proc.pid, "mode": mode})
+    else:
+        with db.conn() as c:
+            db.log_access(c, actor_email=actor_email,
+                          event_type="sync.run_once",
+                          target_kind="system", target_id="",
+                          detail={"pid": proc.pid})
+    return {"ok": True, "pid": proc.pid, "mode": mode}
+
+
+@app.post("/api/admin/sync/start")
+async def admin_sync_start(
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    out = _spawn_sync_worker("loop", actor_email=user["email"])
+    return JSONResponse(out)
+
+
+@app.post("/api/admin/sync/run-once")
+async def admin_sync_run_once(
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    """Fire one single sync pass and exit. Useful for 'pull the latest right
+    now' without leaving the loop running afterwards."""
+    out = _spawn_sync_worker("once", actor_email=user["email"])
+    return JSONResponse(out)
+
+
+@app.post("/api/admin/sync/stop")
+async def admin_sync_stop(
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    pid = _sync_worker_pid()
+    if not pid or not _sync_worker_alive():
+        with db.conn() as c:
+            db.set_meta(c, "sync_worker_pid", "")
+        return JSONResponse({"ok": True, "was_running": False})
+    import signal as _signal, time as _time
+    try:
+        os.kill(pid, _signal.SIGTERM)
+    except (ProcessLookupError, PermissionError) as e:
+        return JSONResponse({"ok": False, "error": str(e)}, status_code=500)
+    for _ in range(30):
+        try:
+            os.kill(pid, 0)
+            _time.sleep(0.1)
+        except ProcessLookupError:
+            break
+    else:
+        try: os.kill(pid, _signal.SIGKILL)
+        except ProcessLookupError: pass
+    with db.conn() as c:
+        db.set_meta(c, "sync_worker_pid", "")
+        db.log_access(c, actor_email=user["email"],
+                      event_type="sync.stop",
+                      target_kind="system", target_id="",
+                      detail={"pid": pid})
+    return JSONResponse({"ok": True, "was_running": True, "pid": pid})
+
+
+@app.get("/api/admin/sync/status")
+async def admin_sync_status(
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    return JSONResponse({
+        "pid": _sync_worker_pid() if _sync_worker_alive() else None,
+        "alive": _sync_worker_alive(),
+        "heartbeat": (json.loads(_SYNC_HEARTBEAT.read_text()) if _SYNC_HEARTBEAT.exists() else None),
+    })
+
+
+@app.get("/api/admin/sync/log")
+async def admin_sync_log(
+    lines: int = 200,
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    if not _SYNC_LOG.exists():
+        return JSONResponse({"present": False, "lines": []})
+    try:
+        text = _SYNC_LOG.read_text(errors="ignore")
+        tail = text.splitlines()[-int(max(10, min(lines, 2000))):]
+        return JSONResponse({"present": True, "lines": tail})
+    except OSError as e:
+        return JSONResponse({"present": False, "error": str(e)})
 
 
 @app.get("/admin/ai-worker", response_class=HTMLResponse)
@@ -5634,6 +5845,7 @@ async def admin_status(
     import time as _t
     # --- Lazy imports for the per-thread status() calls ---
     from .. import tunnel_watchdog as _twd_local
+    from .. import process_health as _ph  # F12+ worker roll-up
 
     # Tunnels
     quick = _detect_tunnel_state()
@@ -5643,6 +5855,9 @@ async def admin_status(
     # Schedulers
     user_sched_status = _user_sched.status()
     backup_status = _backup_sched.status()
+
+    # All managed worker processes (web, sync, AI, re-analyze, attachments, tunnel)
+    workers = _ph.all_workers(process_started_at=PROCESS_STARTED_AT)
 
     # DB sizes + row counts
     db_size = 0
@@ -5709,6 +5924,7 @@ async def admin_status(
         "watchdog": wd,
         "user_sched": user_sched_status,
         "backup": backup_status,
+        "workers": workers,
         "db_size_bytes": db_size,
         "wal_size_bytes": wal_size,
         "n_tickets": n_tickets,

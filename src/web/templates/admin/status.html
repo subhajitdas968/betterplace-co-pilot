@@ -37,6 +37,41 @@
     </div>
   </div>
 
+  <!-- All managed processes -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">All worker processes</div>
+    <table style="width:100%;margin-top:10px;border-collapse:collapse;font-size:12.5px;">
+      <thead><tr style="background:#f8fafc;text-align:left;">
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Worker</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">State</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Summary</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">PID</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);"></th>
+      </tr></thead>
+      <tbody>
+      {% for w in workers %}
+      <tr>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;font-weight:500;">{{ w.title }}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;">
+          {% if w.state == 'ok' %}{{ pill('ok', '● running') }}
+          {% elif w.state == 'warn' %}{{ pill('warn', '⚠ warn') }}
+          {% elif w.state == 'err' %}{{ pill('err', '✗ error') }}
+          {% else %}{{ pill('idle', '○ idle') }}{% endif %}
+        </td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;color:#475569;">{{ w.summary }}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:right;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);">{{ w.pid or '—' }}</td>
+        <td style="padding:7px 8px;border-bottom:1px solid #f1f5f9;text-align:right;">
+          {% if w.manage_url %}<a href="{{ w.manage_url }}" style="font-size:11px;color:var(--indigo);">manage →</a>{% endif %}
+        </td>
+      </tr>
+      {% if w.detail and w.detail.hint %}
+      <tr><td colspan="5" style="padding:0 8px 6px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#92400e;">↳ {{ w.detail.hint }}</td></tr>
+      {% endif %}
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
   <!-- Tunnels -->
   <div class="admin-card admin-card-done" style="margin-top:14px;">
     <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;">

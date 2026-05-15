@@ -165,14 +165,57 @@ def run_once() -> dict:
     return {"ticket_count": n}
 
 
+def _heartbeat_file():
+    """data/sync_worker.heartbeat — same convention as ai_worker.heartbeat
+    and attachment_backfill.heartbeat. Read by process_health for the
+    /admin/status worker table and by the /admin/sync admin page."""
+    from pathlib import Path
+    return Path(__file__).resolve().parent.parent / "data" / "sync_worker.heartbeat"
+
+
+def _write_sync_heartbeat(state: str, **extra) -> None:
+    """state ∈ {'booting','syncing','sleeping','error','stopped'}. Persisted
+    so admin UIs don't have to ssh into the host to see what's happening."""
+    import os, json as _json
+    try:
+        hb = _heartbeat_file()
+        hb.parent.mkdir(exist_ok=True)
+        payload = {
+            "ts": datetime.now(timezone.utc).isoformat(),
+            "pid": os.getpid(),
+            "state": state,
+            "interval_sec": getattr(config, "SYNC_INTERVAL_SECONDS", 300),
+            **extra,
+        }
+        with open(hb, "w") as fh:
+            fh.write(_json.dumps(payload))
+    except Exception as e:
+        print(f"sync heartbeat write failed: {e}", file=sys.stderr, flush=True)
+
+
 def run_loop() -> None:
-    while True:
-        try:
-            run_once()
-        except Exception as e:
-            print(f"sync error: {e}", file=sys.stderr)
-        print(f"sleeping {config.SYNC_INTERVAL_SECONDS}s …")
-        time.sleep(config.SYNC_INTERVAL_SECONDS)
+    _write_sync_heartbeat("booting")
+    try:
+        while True:
+            try:
+                _write_sync_heartbeat("syncing")
+                result = run_once()
+                _write_sync_heartbeat("sleeping",
+                                       last_processed=(result or {}).get("ticket_count"),
+                                       last_finished_at=db.now_iso())
+            except KeyboardInterrupt:
+                _write_sync_heartbeat("stopped")
+                raise
+            except Exception as e:
+                print(f"sync error: {e}", file=sys.stderr)
+                _write_sync_heartbeat("error", error=str(e)[:300])
+            print(f"sleeping {config.SYNC_INTERVAL_SECONDS}s …", flush=True)
+            time.sleep(config.SYNC_INTERVAL_SECONDS)
+    except KeyboardInterrupt:
+        # SIGTERM/SIGINT from the admin Stop button — exit cleanly so the
+        # heartbeat reads "stopped" not "running".
+        _write_sync_heartbeat("stopped")
+        sys.exit(0)
 
 
 def _heartbeat_path():

@@ -1,0 +1,172 @@
+{% extends "_base.html" %}
+{% block title %}Zendesk sync · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">Phase 1</div>
+    <h1 class="admin-detail-title">Zendesk sync</h1>
+    <div class="admin-detail-summary">
+      Pulls tickets, fields, forms, statuses, and groups from Zendesk into
+      the local SQLite database every {{ state.interval_sec }}s. Until now this
+      ran only in a terminal (<code>make sync-loop</code>). This page lets you
+      start/stop it from the UI like the AI worker, so an admin doesn't need
+      shell access to keep tickets fresh.
+    </div>
+  </div>
+
+  <!-- State card -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      Current state
+      <span style="font-size:11px;padding:2px 8px;border-radius:10px;
+                   background:{% if state.alive %}#dcfce7;color:#166534{% else %}#e5e7eb;color:#475569{% endif %};">
+        {% if state.alive %}▶ loop running · pid {{ state.pid }}{% else %}○ stopped{% endif %}
+      </span>
+      {% if state.heartbeat and state.heartbeat.state %}
+      <span style="font-size:11px;color:var(--muted);">heartbeat: <code>{{ state.heartbeat.state }}</code></span>
+      {% endif %}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:12px;font-size:12.5px;">
+      <div>
+        <div style="color:var(--muted);font-size:11px;">Last successful sync</div>
+        <div>{{ state.last_sync_at or 'never' }}</div>
+      </div>
+      <div>
+        <div style="color:var(--muted);font-size:11px;">Last heartbeat ts</div>
+        <div><code>{{ state.heartbeat.ts if state.heartbeat else '—' }}</code></div>
+      </div>
+      {% if state.heartbeat and state.heartbeat.last_processed is not none %}
+      <div>
+        <div style="color:var(--muted);font-size:11px;">Last batch ticket count</div>
+        <div>{{ state.heartbeat.last_processed }}</div>
+      </div>
+      {% endif %}
+      {% if state.heartbeat and state.heartbeat.error %}
+      <div style="grid-column:1/3;">
+        <div style="color:var(--muted);font-size:11px;">Last error</div>
+        <div style="color:#be123c;font-size:12px;">{{ state.heartbeat.error }}</div>
+      </div>
+      {% endif %}
+    </div>
+
+    <div style="margin-top:16px;display:flex;gap:8px;align-items:center;flex-wrap:wrap;">
+      {% if not state.alive %}
+      <button type="button" onclick="startSync(this)" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:8px 18px;">
+        ▶ Start loop
+      </button>
+      {% else %}
+      <button type="button" onclick="stopSync(this)" class="admin-card-btn"
+              style="background:#fff1f2;color:#be123c;border:1px solid #fecdd3;padding:8px 18px;">
+        ■ Stop loop
+      </button>
+      {% endif %}
+      <button type="button" onclick="runOnce(this)" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">
+        ⤓ Run one sync now
+      </button>
+      <span id="sync-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted);">
+      <strong>Start loop</strong> — keeps running in the background every {{ state.interval_sec }}s.
+      Survives uvicorn reloads. <br>
+      <strong>Run one sync now</strong> — single pass, exits when done. Doesn't
+      affect the loop. Useful when you want a refresh without leaving anything
+      running.
+    </div>
+  </div>
+
+  <!-- Setup note -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;background:#fefce8;border-color:#fde68a;">
+    <div class="admin-card-title">Where does the data go?</div>
+    <div style="font-size:12.5px;line-height:1.7;margin-top:6px;">
+      Tickets and customers land in <code>data/copilot.db</code>. The sync is
+      incremental — only tickets <code>updated_at</code> since the last
+      successful run are pulled. Run-once is safe to repeat; it won't duplicate
+      anything. Field and form definitions are also refreshed each pass so new
+      ticket fields in Zendesk show up here within {{ state.interval_sec }}s.
+    </div>
+  </div>
+
+  <!-- Log tail -->
+  <details class="admin-card admin-card-done" style="margin-top:14px;">
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;">▸</span>
+      <strong>sync log tail</strong>
+      <span style="font-size:11px;color:var(--muted);">(useful when sync seems stuck)</span>
+    </summary>
+    <pre id="log-tail" style="background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;font-size:11px;max-height:300px;overflow-y:auto;margin-top:8px;white-space:pre-wrap;">Click ↻ Refresh log to load.</pre>
+    <button type="button" onclick="loadLog()" class="admin-card-btn" style="font-size:11px;">↻ Refresh log</button>
+  </details>
+</main>
+
+<script>
+async function startSync(btn) {
+  btn.disabled = true;
+  const st = document.getElementById('sync-status');
+  st.textContent = 'Starting…'; st.style.color = '';
+  try {
+    const r = await fetch('/api/admin/sync/start', { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      st.textContent = '✓ Loop started · pid ' + j.pid;
+      st.style.color = '#047857';
+      setTimeout(() => location.reload(), 700);
+    } else {
+      st.textContent = '✗ ' + (j.error || 'start failed');
+      st.style.color = '#be123c';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; btn.disabled = false;
+  }
+}
+
+async function stopSync(btn) {
+  if (!confirm('Stop the sync loop? New tickets from Zendesk will not appear until you start it again.')) return;
+  btn.disabled = true;
+  const st = document.getElementById('sync-status');
+  st.textContent = 'Stopping…';
+  try {
+    const r = await fetch('/api/admin/sync/stop', { method: 'POST' });
+    if (r.ok) location.reload();
+    else { btn.disabled = false; alert('Stop failed'); }
+  } catch (e) {
+    btn.disabled = false; alert('Stop failed: ' + e.message);
+  }
+}
+
+async function runOnce(btn) {
+  btn.disabled = true;
+  const st = document.getElementById('sync-status');
+  st.textContent = 'Running one sync pass…'; st.style.color = '';
+  try {
+    const r = await fetch('/api/admin/sync/run-once', { method: 'POST' });
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      st.textContent = '✓ Sync running in background · pid ' + j.pid + ' (refresh in 30s to see new tickets)';
+      st.style.color = '#047857';
+      btn.disabled = false;
+    } else {
+      st.textContent = '✗ ' + (j.error || 'run-once failed');
+      st.style.color = '#be123c';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; btn.disabled = false;
+  }
+}
+
+async function loadLog() {
+  const el = document.getElementById('log-tail');
+  el.textContent = 'Loading…';
+  const r = await fetch('/api/admin/sync/log', { cache: 'no-store' });
+  if (r.ok) {
+    const j = await r.json();
+    el.textContent = j.present ? j.lines.join('\n') : '(no log yet)';
+  } else el.textContent = 'Failed to load log';
+}
+</script>
+{% endblock %}
