@@ -1,0 +1,203 @@
+{% extends "_base.html" %}
+{% block title %}DB Backups · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">F13</div>
+    <h1 class="admin-detail-title">Database backups</h1>
+    <div class="admin-detail-summary">
+      Nightly automatic SQLite backups so a corruption or accidental delete is
+      always recoverable. Backups land in
+      <code>{{ backup.backups_dir }}</code> and are rotated automatically
+      (oldest are deleted once we hit the keep-count below). Uses SQLite's
+      online Backup API — no downtime, runs while the app is serving.
+    </div>
+  </div>
+
+  <!-- Status card -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      Schedule
+      <span style="font-size:11px;padding:2px 8px;border-radius:10px;
+                   background:{% if backup.settings.enabled and backup.running %}#dcfce7;color:#166534
+                              {% elif backup.settings.enabled %}#fef3c7;color:#92400e
+                              {% else %}#e5e7eb;color:#475569{% endif %};">
+        {% if backup.settings.enabled and backup.running %}● scheduler running
+        {% elif backup.settings.enabled %}◐ enabled · thread not started
+        {% else %}○ disabled{% endif %}
+      </span>
+    </div>
+    <form onsubmit="return saveSettings(event)" style="margin-top:12px;display:grid;grid-template-columns:auto 1fr 1fr 1fr auto;gap:12px;align-items:end;">
+      <label style="font-size:12px;display:flex;align-items:center;gap:6px;padding-bottom:8px;">
+        <input type="checkbox" name="enabled" {% if backup.settings.enabled %}checked{% endif %}>
+        <span>Enabled</span>
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Run daily at</span>
+        <select name="hour" style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+          {% for h in range(24) %}
+          <option value="{{ h }}" {% if h == backup.settings.hour %}selected{% endif %}>
+            {{ '%02d:00'|format(h) }} ({% if h == 0 %}midnight{% elif h < 12 %}{{ h }} AM{% elif h == 12 %}noon{% else %}{{ h - 12 }} PM{% endif %})
+          </option>
+          {% endfor %}
+        </select>
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Keep last N backups</span>
+        <input type="number" name="keep_last_n" min="1" max="365"
+               value="{{ backup.settings.keep_last_n }}"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+      </label>
+      <div></div>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">
+        Save settings
+      </button>
+    </form>
+    <div id="settings-status" style="margin-top:6px;font-size:12px;color:var(--muted);"></div>
+  </div>
+
+  <!-- Last run -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Last backup</div>
+    {% if backup.last_run.at %}
+    <div style="margin-top:10px;display:grid;grid-template-columns:120px 1fr;gap:6px 12px;font-size:13px;">
+      <div style="color:var(--muted);">When</div>
+      <div><code>{{ backup.last_run.at }}</code>
+        {% if backup.last_run.age_seconds is not none %}
+        <span style="color:var(--muted);font-size:11px;">
+          ({% if backup.last_run.age_seconds < 60 %}{{ backup.last_run.age_seconds }}s ago
+          {% elif backup.last_run.age_seconds < 3600 %}{{ (backup.last_run.age_seconds / 60)|int }}m ago
+          {% elif backup.last_run.age_seconds < 86400 %}{{ (backup.last_run.age_seconds / 3600)|int }}h ago
+          {% else %}{{ (backup.last_run.age_seconds / 86400)|int }}d ago{% endif %})
+        </span>
+        {% endif %}
+      </div>
+      <div style="color:var(--muted);">Path</div>
+      <div style="font-family:'JetBrains Mono',monospace;font-size:12px;word-break:break-all;">{{ backup.last_run.path or '—' }}</div>
+      <div style="color:var(--muted);">Size</div>
+      <div>{% if backup.last_run.size_bytes %}{{ '%.1f'|format(backup.last_run.size_bytes / 1024 / 1024) }} MB{% else %}—{% endif %}</div>
+      {% if backup.last_run.error %}
+      <div style="color:var(--muted);">Error</div>
+      <div style="color:#be123c;font-size:12px;">{{ backup.last_run.error }}</div>
+      {% endif %}
+    </div>
+    {% else %}
+    <div style="margin-top:8px;font-size:13px;color:var(--muted);">
+      No backup has run yet. Click "Backup now" to make the first one.
+    </div>
+    {% endif %}
+    <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+      <button type="button" onclick="runBackup(this)" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:8px 18px;">
+        ⤓ Backup now
+      </button>
+      <span id="backup-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </div>
+
+  <!-- Files list -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">{{ files|length }} backup{{ '' if files|length == 1 else 's' }} on disk</div>
+    {% if files %}
+    <table style="width:100%;margin-top:10px;border-collapse:collapse;font-size:12.5px;">
+      <thead><tr style="background:#f8fafc;text-align:left;">
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">File</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Created</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);text-align:right;">Size</th>
+      </tr></thead>
+      <tbody>
+      {% for f in files %}
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-family:'JetBrains Mono',monospace;font-size:11.5px;">
+          {{ f.name }}
+          {% if loop.first %}<span style="font-size:9px;color:#166534;background:#dcfce7;padding:1px 5px;border-radius:4px;margin-left:4px;">newest</span>{% endif %}
+        </td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;color:var(--muted);">{{ f.mtime }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;text-align:right;">{{ '%.1f'|format(f.size_bytes / 1024 / 1024) }} MB</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    {% else %}
+    <div style="margin-top:6px;font-size:12px;color:var(--muted);">No backup files yet.</div>
+    {% endif %}
+  </div>
+
+  <!-- Restore note -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;background:#fefce8;border-color:#fde68a;">
+    <div class="admin-card-title">How to restore from a backup</div>
+    <div style="font-size:12.5px;line-height:1.7;margin-top:6px;">
+      Each backup file is a complete standalone SQLite database. To restore:
+      <ol style="margin:6px 0 0 22px;padding:0;font-size:12.5px;">
+        <li>Stop the app (Ctrl+C in the <code>make web</code> terminal).</li>
+        <li>Copy the live DB out of the way (just in case): <br>
+            <code style="background:#0f172a;color:#e2e8f0;padding:2px 6px;border-radius:4px;display:inline-block;margin-top:2px;">cp data/copilot.db data/copilot.db.before-restore</code></li>
+        <li>Copy the backup into place: <br>
+            <code style="background:#0f172a;color:#e2e8f0;padding:2px 6px;border-radius:4px;display:inline-block;margin-top:2px;">cp data/backups/copilot-YYYYMMDD-HHMM.db data/copilot.db</code></li>
+        <li>Remove any stale WAL/SHM files so SQLite reads the fresh main file: <br>
+            <code style="background:#0f172a;color:#e2e8f0;padding:2px 6px;border-radius:4px;display:inline-block;margin-top:2px;">rm -f data/copilot.db-wal data/copilot.db-shm</code></li>
+        <li>Start the app again: <code>make web</code></li>
+      </ol>
+    </div>
+  </div>
+</main>
+
+<script>
+async function saveSettings(ev) {
+  ev.preventDefault();
+  const form = ev.target;
+  const st = document.getElementById('settings-status');
+  st.textContent = 'Saving…'; st.style.color = '';
+  const fd = new FormData();
+  fd.append('enabled', form.elements['enabled'].checked ? '1' : '0');
+  fd.append('hour', form.elements['hour'].value);
+  fd.append('keep_last_n', form.elements['keep_last_n'].value);
+  try {
+    const r = await fetch('/api/admin/backups/settings', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok) {
+      st.textContent = '✓ Saved';
+      st.style.color = '#047857';
+      setTimeout(() => location.reload(), 600);
+    } else {
+      st.textContent = '✗ Save failed';
+      st.style.color = '#be123c';
+    }
+  } catch (e) {
+    st.textContent = '✗ ' + e.message;
+    st.style.color = '#be123c';
+  }
+  return false;
+}
+
+async function runBackup(btn) {
+  if (!confirm('Run a backup now? Takes a few seconds for small DBs, a minute or two for a 2 GB one. No downtime.')) return;
+  btn.disabled = true;
+  const st = document.getElementById('backup-status');
+  st.textContent = 'Running…'; st.style.color = '';
+  try {
+    const r = await fetch('/api/admin/db/backup', { method: 'POST' });
+    // Read body regardless of status — the endpoint now returns 200 with
+    // ok/error so we can show the real cause when something fails.
+    const j = await r.json().catch(() => ({}));
+    if (j.ok) {
+      st.textContent = '✓ Done · ' + (j.path || '');
+      st.style.color = '#047857';
+      setTimeout(() => location.reload(), 800);
+    } else {
+      const msg = j.error || j.detail || 'Backup failed (no error returned — check the make-web terminal)';
+      st.innerHTML = '<span style="color:#be123c;">✗ ' + msg.replace(/</g, '&lt;') + '</span>';
+      btn.disabled = false;
+      // Reload after 4s so the page also reflects the persisted error in meta
+      setTimeout(() => location.reload(), 4000);
+    }
+  } catch (e) {
+    st.textContent = '✗ ' + e.message;
+    st.style.color = '#be123c';
+    btn.disabled = false;
+  }
+}
+</script>
+{% endblock %}

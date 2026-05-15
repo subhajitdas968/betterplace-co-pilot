@@ -1,0 +1,184 @@
+{% extends "_base.html" %}
+{% block title %}System status · Admin{% endblock %}
+{% block main %}
+{# Helpers in pure Jinja — no need for a custom filter for one page #}
+{% macro pill(state, label) %}
+  <span style="font-size:11px;padding:2px 8px;border-radius:10px;
+               background:{% if state == 'ok' %}#dcfce7;color:#166534
+                          {% elif state == 'warn' %}#fef3c7;color:#92400e
+                          {% elif state == 'err' %}#fee2e2;color:#991b1b
+                          {% else %}#e5e7eb;color:#475569{% endif %};">{{ label }}</span>
+{% endmacro %}
+{% macro humansize(b) %}{% if b is none or b == 0 %}—{% elif b < 1024 %}{{ b }} B{% elif b < 1048576 %}{{ '%.1f'|format(b/1024) }} KB{% elif b < 1073741824 %}{{ '%.1f'|format(b/1048576) }} MB{% else %}{{ '%.1f'|format(b/1073741824) }} GB{% endif %}{% endmacro %}
+{% macro humansec(s) %}{% if s is none %}—{% elif s < 60 %}{{ s }}s{% elif s < 3600 %}{{ (s/60)|int }}m{% elif s < 86400 %}{{ (s/3600)|int }}h {{ ((s % 3600)/60)|int }}m{% else %}{{ (s/86400)|int }}d {{ ((s % 86400)/3600)|int }}h{% endif %}{% endmacro %}
+
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin" class="back-link">← Back to Admin &amp; Setup</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">F12</div>
+    <h1 class="admin-detail-title" style="display:flex;align-items:center;gap:12px;">
+      System status
+      <span style="font-size:12px;color:var(--muted);font-weight:400;">refreshes every 30s</span>
+    </h1>
+    <div class="admin-detail-summary">
+      One screen to glance at when something feels off. If everything below is
+      green, the app is healthy. Anything red points at the page you'd go fix it.
+    </div>
+  </div>
+
+  <!-- Runtime / process -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Runtime</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:10px;font-size:12.5px;">
+      <div><div style="color:var(--muted);font-size:11px;">Version</div><div style="font-family:'JetBrains Mono',monospace;font-weight:600;">v{{ runtime.version }} · {{ runtime.git_sha }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Branch</div><div style="font-family:'JetBrains Mono',monospace;">{{ runtime.git_branch }} {% if not runtime.git_clean %}<span style="font-size:10px;color:#92400e;">(dirty)</span>{% endif %}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Uptime (this process)</div><div>{{ humansec(uptime_sec) }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Active users</div><div>{{ n_users }}</div></div>
+    </div>
+  </div>
+
+  <!-- Tunnels -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;">
+      Tunnels
+      <a href="/admin/tunnel" style="font-size:11px;color:var(--indigo);">manage →</a>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:14px;margin-top:10px;font-size:12.5px;">
+      <div>
+        <div style="color:var(--muted);font-size:11px;">Quick Tunnel</div>
+        {% if quick.running %}{{ pill('ok', '▶ running ' + humansec(quick.age_seconds or 0)) }}
+        {% elif quick.installed %}{{ pill('warn', '○ stopped') }}
+        {% else %}{{ pill('err', '✗ cloudflared missing') }}{% endif %}
+        {% if quick.public_url %}<div style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11px;word-break:break-all;"><a href="{{ quick.public_url }}" target="_blank">{{ quick.public_url }}</a></div>{% endif %}
+      </div>
+      <div>
+        <div style="color:var(--muted);font-size:11px;">Named Tunnel</div>
+        {% if named.running %}{{ pill('ok', '▶ running ' + humansec(named.age_seconds or 0)) }}
+        {% elif named.config_present %}{{ pill('warn', '○ configured · stopped') }}
+        {% elif named.logged_in %}{{ pill('warn', '○ logged in · not configured') }}
+        {% elif named.installed %}{{ pill('warn', '○ not logged in') }}
+        {% else %}{{ pill('err', '✗ cloudflared missing') }}{% endif %}
+        {% if named.public_url %}<div style="margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:11px;word-break:break-all;"><a href="{{ named.public_url }}" target="_blank">{{ named.public_url }}</a></div>{% endif %}
+      </div>
+      <div>
+        <div style="color:var(--muted);font-size:11px;">Auto-restart watchdog</div>
+        {% if watchdog.enabled and watchdog.thread_running %}{{ pill('ok', '● ON') }}
+        {% elif watchdog.enabled %}{{ pill('warn', '⚠ on · thread dead') }}
+        {% else %}{{ pill('idle', '○ off') }}{% endif %}
+        {% if watchdog.recent_attempts %}<div style="margin-top:4px;font-size:11px;color:var(--muted);">{{ watchdog.recent_attempts }} restart{{ '' if watchdog.recent_attempts == 1 else 's' }} in last {{ watchdog.window_minutes }} min{% if watchdog.recent_attempts >= watchdog.max_attempts_per_window %} · <span style="color:#be123c;">capped</span>{% endif %}</div>{% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- Schedulers -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Background workers</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;font-size:12.5px;">
+      <div>
+        <div style="color:var(--muted);font-size:11px;display:flex;justify-content:space-between;align-items:center;">
+          User-automation scheduler
+          <a href="/admin/user-automations" style="color:var(--indigo);">manage</a>
+        </div>
+        {% if user_sched.running %}{{ pill('ok', '● thread alive') }}{% else %}{{ pill('err', '✗ stopped') }}{% endif %}
+        {% if user_sched.last_tick.at %}
+        <div style="margin-top:4px;font-size:11px;color:var(--muted);">
+          last tick: <code>{{ user_sched.last_tick.at }}</code>
+          {% if user_sched.last_tick.due_rules is defined %}
+          · {{ user_sched.last_tick.due_rules }} due · {{ user_sched.last_tick.fired_rules }} fired
+          {% if user_sched.last_tick.errors %}· <span style="color:#be123c;">{{ user_sched.last_tick.errors }} err</span>{% endif %}
+          {% endif %}
+        </div>
+        {% endif %}
+      </div>
+      <div>
+        <div style="color:var(--muted);font-size:11px;display:flex;justify-content:space-between;align-items:center;">
+          Backup scheduler
+          <a href="/admin/backups" style="color:var(--indigo);">manage</a>
+        </div>
+        {% if backup.running and backup.settings.enabled %}{{ pill('ok', '● daily @ ' + '%02d'|format(backup.settings.hour) + ':00') }}
+        {% elif backup.running %}{{ pill('idle', '○ thread alive · disabled') }}
+        {% else %}{{ pill('err', '✗ stopped') }}{% endif %}
+        {% if backup.last_run.at %}
+        <div style="margin-top:4px;font-size:11px;color:var(--muted);">
+          last backup: {{ humansec(backup.last_run.age_seconds) }} ago · {{ humansize(backup.last_run.size_bytes) }}
+        </div>
+        {% else %}
+        <div style="margin-top:4px;font-size:11px;color:#92400e;">no backup has ever run — go enable it</div>
+        {% endif %}
+      </div>
+    </div>
+  </div>
+
+  <!-- DB -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Database</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:10px;font-size:12.5px;">
+      <div><div style="color:var(--muted);font-size:11px;">copilot.db</div><div>{{ humansize(db_size_bytes) }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">WAL pending</div><div>{% if wal_size_bytes > 50000000 %}<span style="color:#92400e;">{{ humansize(wal_size_bytes) }}</span>{% else %}{{ humansize(wal_size_bytes) }}{% endif %}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Tickets</div><div>{{ '{:,}'.format(n_tickets) }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Unanalyzed</div><div>{% if n_unanalyzed %}<span style="color:#92400e;">{{ '{:,}'.format(n_unanalyzed) }}</span>{% else %}0{% endif %}</div></div>
+    </div>
+    {% if wal_size_bytes > 50000000 %}
+    <div style="margin-top:10px;padding:8px 10px;background:#fef3c7;border:1px solid #fde68a;border-radius:6px;font-size:11.5px;color:#92400e;">
+      WAL is over 50 MB — SQLite usually checkpoints automatically, but the next clean shutdown will flush it. If this keeps growing, restart the app to force a checkpoint.
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- Recent errors -->
+  {% if recent_errors %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Recent errors <span style="font-size:11px;color:var(--muted);font-weight:400;">({{ recent_errors|length }})</span></div>
+    <table style="width:100%;margin-top:10px;border-collapse:collapse;font-size:11.5px;">
+      <thead><tr style="background:#f8fafc;text-align:left;">
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">When</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Who</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Event</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Detail</th>
+      </tr></thead>
+      <tbody>
+      {% for e in recent_errors %}
+      <tr>
+        <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);">{{ e.created_at|truncate(19,True,'') }}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;">{{ e.actor_email or '—' }}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-family:'JetBrains Mono',monospace;">{{ e.event_type }}</td>
+        <td style="padding:5px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;color:#991b1b;max-width:480px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.detail or '' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  {% else %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;background:#ecfdf5;border-color:#a7f3d0;">
+    <div style="font-size:12.5px;color:#065f46;">✓ No errors logged recently.</div>
+  </div>
+  {% endif %}
+
+  <!-- Tunnel event history -->
+  {% if recent_tunnel_events %}
+  <details class="admin-card admin-card-done" style="margin-top:14px;">
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;">▸</span><strong>Tunnel event history</strong>
+      <span style="font-size:11px;color:var(--muted);">({{ recent_tunnel_events|length }} most recent)</span>
+    </summary>
+    <table style="width:100%;margin-top:8px;border-collapse:collapse;font-size:11.5px;">
+      <tbody>
+      {% for e in recent_tunnel_events %}
+      <tr>
+        <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;font-family:'JetBrains Mono',monospace;font-size:10.5px;color:var(--muted);">{{ e.created_at|truncate(19,True,'') }}</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;font-family:'JetBrains Mono',monospace;">{{ e.event_type }}</td>
+        <td style="padding:4px 8px;border-bottom:1px solid #f1f5f9;font-size:11px;max-width:520px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ e.detail or '' }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+</main>
+
+<script>
+// Soft auto-refresh — every 30s reload the page so admins can leave this
+// open on a second monitor.
+setTimeout(() => location.reload(), 30000);
+</script>
+{% endblock %}

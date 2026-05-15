@@ -85,6 +85,9 @@ def _runtime_info_safe():
 TEMPLATES.env.globals["runtime_info"] = _runtime_info_safe
 
 
+import time as _time_module
+PROCESS_STARTED_AT = _time_module.time()  # F12 — used for uptime on /admin/status
+
 app = FastAPI(title="BetterPlace Co-Pilot")
 app.add_middleware(SessionMiddleware, secret_key=config.SESSION_SECRET, https_only=False, same_site="lax")
 # F6 · User activity logger — must be added AFTER SessionMiddleware so it can
@@ -3198,6 +3201,55 @@ def _stat_releases(c):
         return "—"
 
 
+def _stat_status(c):
+    """Cheap roll-up for the admin landing — green if everything's healthy,
+    yellow if something's worth checking. We deliberately don't go deep here;
+    the full state lives on /admin/status."""
+    issues: list[str] = []
+    try:
+        last_at = db.get_meta(c, "backup_last_run_at")
+        if not last_at:
+            issues.append("no backup")
+    except Exception: pass
+    try:
+        n = c.execute(
+            "SELECT COUNT(*) AS n FROM access_log "
+            "WHERE event_type LIKE '%error%' "
+            "AND created_at > datetime('now', '-1 day')"
+        ).fetchone()["n"]
+        if n:
+            issues.append(f"{n} errs/24h")
+    except Exception: pass
+    if issues:
+        return "⚠ " + " · ".join(issues)
+    return "✓ healthy"
+
+
+def _stat_backups(c):
+    """Quick read of last-backup state for the admin landing chip."""
+    try:
+        at = db.get_meta(c, "backup_last_run_at")
+        enabled = db.get_meta(c, "backup_enabled")
+        if not at:
+            return "⚠ never run"
+        from datetime import datetime as _dt
+        try:
+            t0 = _dt.fromisoformat(at.replace("Z", "+00:00"))
+            age = (_dt.now(t0.tzinfo) - t0).total_seconds()
+        except (ValueError, TypeError):
+            return "—"
+        if age < 3600:
+            tag = f"{int(age // 60)}m ago"
+        elif age < 86400:
+            tag = f"{int(age // 3600)}h ago"
+        else:
+            tag = f"{int(age // 86400)}d ago"
+        pill = "✓" if (enabled or "1") == "1" else "○"
+        return f"{pill} last {tag}"
+    except Exception:
+        return "—"
+
+
 def _stat_user_automations(c):
     try:
         total = c.execute("SELECT COUNT(*) AS n FROM user_automations").fetchone()["n"]
@@ -3389,6 +3441,16 @@ FEATURE_CATALOG = [
      "title": "User automations",
      "summary": "Event-driven rules for user lifecycle: auto-online on work day start, idle-during-work warning, role grants, leave triggers, etc. Two defaults seeded — fully editable. Driven by user_scheduler subprocess.",
      "setup_url": "/admin/user-automations", "stat_fn": _stat_user_automations},
+
+    {"key": "backups",        "category": "admin",       "status": "done",   "block": "F13",
+     "title": "Nightly DB backups",
+     "summary": "Automatic SQLite online backups run once a day at a configurable hour. Rotated automatically (default keeps last 14). Trigger one on demand from the page. Restore is a 4-step copy in the terminal — instructions on the page.",
+     "setup_url": "/admin/backups", "stat_fn": _stat_backups},
+
+    {"key": "status",         "category": "admin",       "status": "done",   "block": "F12",
+     "title": "System status",
+     "summary": "One-screen health dashboard — tunnels, schedulers, DB size, recent errors, version. Auto-refreshes every 30s. The page you open when something feels off.",
+     "setup_url": "/admin/status", "stat_fn": _stat_status},
 ]
 
 
@@ -5501,6 +5563,7 @@ async def admin_user_automations_toggle(
 # needs no manual management.
 
 from .. import user_scheduler as _user_sched
+from .. import backup_scheduler as _backup_sched  # F13
 
 @app.on_event("startup")
 async def _start_user_scheduler():
@@ -5509,6 +5572,28 @@ async def _start_user_scheduler():
         _user_sched.start()
     except Exception as e:
         print(f"[startup] failed to start user_scheduler: {e}")
+
+
+@app.on_event("startup")
+async def _start_backup_scheduler():
+    """F13 — nightly DB backup thread. Cheap (60s tick, no-op outside the
+    configured hour). Backups land in data/backups/copilot-YYYYMMDD-HHMM.db."""
+    try:
+        _backup_sched.start()
+    except Exception as e:
+        print(f"[startup] failed to start backup_scheduler: {e}")
+
+
+@app.on_event("startup")
+async def _start_tunnel_watchdog():
+    """F11 — Quick Tunnel watchdog thread. No-op unless the operator opts in
+    via /admin/tunnel. When enabled, polls the tunnel pid every 30s and
+    restarts on death with a 5-attempts-in-10-min backoff."""
+    try:
+        from .. import tunnel_watchdog as _twd
+        _twd.start()
+    except Exception as e:
+        print(f"[startup] failed to start tunnel_watchdog: {e}")
 
 
 @app.on_event("shutdown")
@@ -5528,6 +5613,113 @@ async def _on_shutdown():
 # ===========================================================================
 
 from .. import release as _release  # noqa: E402
+
+# ---------------------------------------------------------------------------
+# F12 · /admin/status — single-page health dashboard
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/status", response_class=HTMLResponse)
+async def admin_status(
+    request: Request,
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    """Consolidated view of every long-running thing the app cares about.
+
+    The page exists so that when something feels off (tunnel dead, AI idle,
+    backup never ran, scheduler stopped), there's one URL to look at instead
+    of three. Auto-refreshes every 30s on the client side.
+
+    None of these reads are expensive — they're just meta-table lookups,
+    stat() calls, and in-process status() calls."""
+    import time as _t
+    # --- Lazy imports for the per-thread status() calls ---
+    from .. import tunnel_watchdog as _twd_local
+
+    # Tunnels
+    quick = _detect_tunnel_state()
+    named = _named_tun.state()
+    wd = _twd_local.status()
+
+    # Schedulers
+    user_sched_status = _user_sched.status()
+    backup_status = _backup_sched.status()
+
+    # DB sizes + row counts
+    db_size = 0
+    wal_size = 0
+    try:
+        db_size = config.DB_PATH.stat().st_size
+    except OSError: pass
+    wal_path = config.DB_PATH.parent / (config.DB_PATH.name + "-wal")
+    try:
+        if wal_path.exists():
+            wal_size = wal_path.stat().st_size
+    except OSError: pass
+
+    with db.conn() as c:
+        try:
+            n_tickets = c.execute("SELECT COUNT(*) AS n FROM tickets").fetchone()["n"]
+        except Exception:
+            n_tickets = 0
+        try:
+            n_users = c.execute("SELECT COUNT(*) AS n FROM app_users WHERE status='active'").fetchone()["n"]
+        except Exception:
+            n_users = 0
+        try:
+            n_unanalyzed = c.execute(
+                "SELECT COUNT(*) AS n FROM tickets WHERE ai_summary IS NULL OR ai_summary=''"
+            ).fetchone()["n"]
+        except Exception:
+            n_unanalyzed = 0
+        # Recent errors — anything in access_log whose event_type contains 'error'
+        # OR whose detail mentions one. Cheap: limit 20.
+        try:
+            err_rows = c.execute("""
+                SELECT created_at, actor_email, event_type, detail
+                FROM access_log
+                WHERE event_type LIKE '%error%'
+                   OR event_type LIKE '%.fail%'
+                   OR (detail IS NOT NULL AND detail LIKE '%error%')
+                ORDER BY id DESC LIMIT 20
+            """).fetchall()
+            recent_errors = [dict(r) for r in err_rows]
+        except Exception:
+            recent_errors = []
+        # Recent watchdog activity
+        try:
+            wd_rows = c.execute("""
+                SELECT created_at, event_type, detail FROM access_log
+                WHERE event_type LIKE 'tunnel.%' ORDER BY id DESC LIMIT 10
+            """).fetchall()
+            recent_tunnel_events = [dict(r) for r in wd_rows]
+        except Exception:
+            recent_tunnel_events = []
+
+        sb = _sidebar_ctx(c, user)
+
+    uptime_sec = int(_t.time() - PROCESS_STARTED_AT)
+    info = _release.runtime_info()
+
+    return TEMPLATES.TemplateResponse("admin/status.html", {
+        "request": request, "user": user,
+        "uptime_sec": uptime_sec,
+        "runtime": info,
+        "quick": quick,
+        "named": named,
+        "watchdog": wd,
+        "user_sched": user_sched_status,
+        "backup": backup_status,
+        "db_size_bytes": db_size,
+        "wal_size_bytes": wal_size,
+        "n_tickets": n_tickets,
+        "n_users": n_users,
+        "n_unanalyzed": n_unanalyzed,
+        "recent_errors": recent_errors,
+        "recent_tunnel_events": recent_tunnel_events,
+        "current_view": "_admin", "in_detail": False, "search": "",
+        **sb,
+    })
+
 
 @app.get("/admin/releases", response_class=HTMLResponse)
 async def admin_releases(
@@ -5596,13 +5788,69 @@ async def admin_release_mark_rolled_back(
 async def admin_db_backup(
     user: dict = Depends(auth_mod.require("admin.feature_flags")),
 ):
-    """Trigger an immediate SQLite online backup. Returns the path written.
-    Used by /admin/ai-worker (or anywhere) for on-demand snapshots."""
-    try:
-        path = db.backup()
-    except Exception as e:
-        raise HTTPException(500, f"Backup failed: {e}")
-    return JSONResponse({"ok": True, "path": str(path)})
+    """Trigger an immediate SQLite online backup. Returns JSON with ok/error
+    so the admin UI can show the real cause when something fails — we
+    deliberately don't use HTTPException here because FastAPI converts that
+    to {"detail":...} which the frontend was reading as a missing error."""
+    out = _backup_sched.run_backup_now()
+    with db.conn() as c:
+        db.log_access(c, actor_email=user["email"],
+                      event_type=("db.backup.manual" if out.get("ok")
+                                  else "db.backup.error"),
+                      target_kind="system", target_id="",
+                      detail={"ok": out.get("ok"),
+                              "path": out.get("path"),
+                              "size_bytes": out.get("size_bytes"),
+                              "error": out.get("error")})
+    # Always return 200 with explicit ok flag — the UI inspects ok/error.
+    return JSONResponse(out)
+
+
+# ---------------------------------------------------------------------------
+# F13 · Backup admin page + settings
+# ---------------------------------------------------------------------------
+
+@app.get("/admin/backups", response_class=HTMLResponse)
+async def admin_backups(
+    request: Request,
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    """Schedule settings + manual trigger + list of existing backup files."""
+    with db.conn() as c:
+        sb = _sidebar_ctx(c, user)
+    state = _backup_sched.status()
+    files = _backup_sched.list_backups()
+    return TEMPLATES.TemplateResponse("admin/backups.html", {
+        "request": request, "user": user,
+        "backup": state, "files": files,
+        "current_view": "_admin", "in_detail": False, "search": "",
+        **sb,
+    })
+
+
+@app.post("/api/admin/backups/settings")
+async def admin_backups_settings(
+    enabled: int = Form(...),
+    hour: int = Form(...),
+    keep_last_n: int = Form(...),
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    out = _backup_sched.set_settings(
+        enabled=bool(int(enabled)), hour=int(hour), keep_last_n=int(keep_last_n),
+    )
+    with db.conn() as c:
+        db.log_access(c, actor_email=user["email"],
+                      event_type="db.backup.settings",
+                      target_kind="system", target_id="",
+                      detail=out)
+    return JSONResponse({"ok": True, "settings": out})
+
+
+@app.get("/api/admin/backups/status")
+async def admin_backups_status(
+    user: dict = Depends(auth_mod.require("admin.feature_flags")),
+):
+    return JSONResponse(_backup_sched.status())
 
 
 @app.post("/api/admin/user-automations/{rid}/run-now")
@@ -5626,54 +5874,181 @@ async def admin_user_scheduler_heartbeat(
     return JSONResponse(_user_sched.status())
 
 
+from .. import named_tunnel as _named_tun  # noqa: E402
+from .. import tunnel_watchdog as _twd  # noqa: E402
+
 @app.get("/admin/tunnel", response_class=HTMLResponse)
 async def admin_tunnel(request: Request,
                         user: dict = Depends(auth_mod.require("admin.tunnel"))):
     state = _detect_tunnel_state()
+    named_state = _named_tun.state()
+    named_tunnels = _named_tun.list_tunnels() if named_state["logged_in"] else []
+    suggested_host = named_state.get("hostname") or named_state.get("config_hostname") or "copilot.betterplace.co.in"
+    watchdog = _twd.status()
     with db.conn() as c:
         sb = _sidebar_ctx(c, user)
         feature = next((f for f in FEATURE_CATALOG if f["key"] == "tunnel"), {})
     return TEMPLATES.TemplateResponse("admin/tunnel.html", {
         "request": request, "user": user, "feature": feature,
         "state": state,
+        "named": named_state,
+        "named_tunnels": named_tunnels,
+        "suggested_host": suggested_host,
+        "watchdog": watchdog,
+        "app_port": config.APP_PORT,
         "current_view": "_admin", "in_detail": False, "search": "",
         **sb,
     })
 
 
-@app.post("/api/admin/tunnel/start-quick")
-async def admin_tunnel_start_quick(
+@app.post("/api/admin/tunnel/watchdog/toggle")
+async def admin_tunnel_watchdog_toggle(
+    enabled: int = Form(...),
     user: dict = Depends(auth_mod.require("admin.tunnel")),
 ):
-    """Start a Cloudflare Quick Tunnel pointed at our local FastAPI port.
-    Returns immediately; the worker writes the public URL to the heartbeat
-    once cloudflared prints it (usually within 5-10s)."""
+    """Flip the F11 watchdog on/off. When on, the in-process thread polls the
+    Quick Tunnel pid every 30s and restarts on death (with backoff)."""
+    out = _twd.set_enabled(bool(int(enabled)))
+    with db.conn() as c:
+        db.log_access(c, actor_email=user["email"],
+                      event_type="tunnel.watchdog.toggle",
+                      target_kind="system", target_id="",
+                      detail=out)
+    return JSONResponse({"ok": True, **out})
+
+
+@app.post("/api/admin/tunnel/watchdog/reset")
+async def admin_tunnel_watchdog_reset(
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    """Clear the recent-attempts log so the watchdog can retry immediately
+    after fixing whatever was making cloudflared exit fast."""
+    out = _twd.reset_attempts()
+    with db.conn() as c:
+        db.log_access(c, actor_email=user["email"],
+                      event_type="tunnel.watchdog.reset",
+                      target_kind="system", target_id="",
+                      detail=out)
+    return JSONResponse({"ok": True, **out})
+
+
+@app.get("/api/admin/tunnel/watchdog/status")
+async def admin_tunnel_watchdog_status(
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    return JSONResponse(_twd.status())
+
+
+# -----------------------------------------------------------------------------
+# F10 · Named Tunnel API
+# -----------------------------------------------------------------------------
+
+@app.post("/api/admin/tunnel/named/setup")
+async def admin_tunnel_named_setup(
+    name: str = Form(...),
+    hostname: str = Form(...),
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    """One-shot: create tunnel + DNS route + write config.yml.
+
+    Each step is idempotent — re-running is safe and useful (e.g. you ran
+    `cloudflared tunnel login` between attempts)."""
+    name = (name or "").strip()
+    hostname = (hostname or "").strip()
+    if not name or not hostname:
+        raise HTTPException(400, "name and hostname are required")
+    out = _named_tun.setup(name, hostname, port=config.APP_PORT)
+    with db.conn() as c:
+        db.log_access(c, actor_email=user["email"],
+                      event_type="tunnel.named.setup",
+                      target_kind="system", target_id="",
+                      detail={"name": name, "hostname": hostname, "ok": out["ok"]})
+    return JSONResponse(out)
+
+
+@app.post("/api/admin/tunnel/named/start")
+async def admin_tunnel_named_start(
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    """Start the named tunnel as a managed subprocess. If a Quick Tunnel is
+    running on the same machine, we leave it alone — the two are independent."""
+    out = _named_tun.start()
+    if out.get("ok") and (out.get("started") or out.get("already_running")):
+        with db.conn() as c:
+            db.set_meta(c, "named_tunnel_hostname", out.get("hostname") or "")
+            db.log_access(c, actor_email=user["email"],
+                          event_type="tunnel.named.start",
+                          target_kind="system", target_id="",
+                          detail={"pid": out.get("pid"), "hostname": out.get("hostname")})
+    return JSONResponse(out)
+
+
+@app.post("/api/admin/tunnel/named/stop")
+async def admin_tunnel_named_stop(
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    out = _named_tun.stop()
+    if out.get("ok"):
+        with db.conn() as c:
+            db.log_access(c, actor_email=user["email"],
+                          event_type="tunnel.named.stop",
+                          target_kind="system", target_id="",
+                          detail={"was_running": out.get("was_running")})
+    return JSONResponse(out)
+
+
+@app.get("/api/admin/tunnel/named/status")
+async def admin_tunnel_named_status(
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    return JSONResponse(_named_tun.state())
+
+
+@app.get("/api/admin/tunnel/named/log")
+async def admin_tunnel_named_log(
+    lines: int = 200,
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    return JSONResponse(_named_tun.log_tail(lines))
+
+
+def _start_quick_tunnel_proc(actor_email: str) -> dict:
+    """Spawn a fresh `cloudflared tunnel --url …trycloudflare…` process,
+    write the pid + heartbeat, and kick off a tail thread that parses the
+    public URL out of the log.
+
+    Used both by the /api/admin/tunnel/start-quick route (admin click) and
+    by the F11 watchdog (auto-restart). Returns {ok, pid, ...} — never
+    raises, so the watchdog can keep looping."""
     if not _shutil.which("cloudflared"):
-        raise HTTPException(400, "cloudflared not installed. Install it first (see the page).")
+        return {"ok": False, "error": "cloudflared not installed"}
     state = _detect_tunnel_state()
     if state["running"]:
-        return JSONResponse({"ok": True, "already_running": True, "pid": state["pid"],
-                             "public_url": state["public_url"]})
+        return {"ok": True, "already_running": True, "pid": state["pid"],
+                "public_url": state["public_url"]}
     import subprocess
-    # Wipe previous heartbeat so the UI doesn't show stale info
     if _TUNNEL_HEARTBEAT.exists():
         try: _TUNNEL_HEARTBEAT.unlink()
         except OSError: pass
-    # Open log fresh
-    log_f = open(_TUNNEL_LOG, "w")
+    try:
+        log_f = open(_TUNNEL_LOG, "w")
+    except OSError as e:
+        return {"ok": False, "error": f"cannot open log: {e}"}
     cmd = ["cloudflared", "tunnel", "--url", f"http://127.0.0.1:{config.APP_PORT}",
             "--no-autoupdate", "--metrics", "127.0.0.1:0"]
-    proc = subprocess.Popen(
-        cmd, stdout=log_f, stderr=log_f,
-        start_new_session=True,  # survive uvicorn reloads
-    )
+    try:
+        proc = subprocess.Popen(
+            cmd, stdout=log_f, stderr=log_f,
+            start_new_session=True,
+        )
+    except OSError as e:
+        return {"ok": False, "error": str(e)}
     _TUNNEL_PID_FILE.write_text(str(proc.pid))
     _write_tunnel_heartbeat(state="starting", pid=proc.pid,
                              started_at=db.now_iso(), public_url=None)
-    # Kick off a background URL-parser thread that tails the log and updates heartbeat.
     import threading, re, time
     def _parse_url_from_log():
-        deadline = time.time() + 60  # cloudflared usually prints URL in <10s
+        deadline = time.time() + 60
         url_re = re.compile(r"https?://[a-zA-Z0-9.-]+\.trycloudflare\.com")
         while time.time() < deadline:
             try:
@@ -5686,7 +6061,7 @@ async def admin_tunnel_start_quick(
                                                   public_url=m.group(0))
                         with db.conn() as c:
                             db.set_meta(c, "tunnel_public_url", m.group(0))
-                            db.log_access(c, actor_email=user["email"],
+                            db.log_access(c, actor_email=actor_email,
                                           event_type="tunnel.start",
                                           target_kind="system", target_id="",
                                           detail={"url": m.group(0), "pid": proc.pid})
@@ -5694,13 +6069,24 @@ async def admin_tunnel_start_quick(
             except Exception as e:
                 print(f"[tunnel parse] {e}")
             time.sleep(1)
-        # Didn't find a URL → write a 'failed' heartbeat so the UI shows error state
         _write_tunnel_heartbeat(state="error", pid=proc.pid,
                                   started_at=db.now_iso(), public_url=None,
                                   error="No trycloudflare URL appeared in 60s — check tunnel.log")
     threading.Thread(target=_parse_url_from_log, daemon=True).start()
-    return JSONResponse({"ok": True, "pid": proc.pid,
-                          "note": "Tunnel starting — poll /api/admin/tunnel/status for the public URL"})
+    return {"ok": True, "pid": proc.pid,
+            "note": "Tunnel starting — poll /api/admin/tunnel/status for the public URL"}
+
+
+@app.post("/api/admin/tunnel/start-quick")
+async def admin_tunnel_start_quick(
+    user: dict = Depends(auth_mod.require("admin.tunnel")),
+):
+    """Start a Cloudflare Quick Tunnel pointed at our local FastAPI port.
+    Returns immediately; a tail thread fills in the public URL within ~10s."""
+    out = _start_quick_tunnel_proc(actor_email=user["email"])
+    if not out.get("ok"):
+        raise HTTPException(400, out.get("error", "start failed"))
+    return JSONResponse(out)
 
 
 @app.post("/api/admin/tunnel/stop")

@@ -946,32 +946,66 @@ def _migrate(conn: sqlite3.Connection) -> None:
 
 def backup(target_dir: Path | None = None, keep_last_n: int = 7) -> Path:
     """Online backup using SQLite's Backup API — does NOT lock writers,
-    safe to call while the app is running. Writes to
-    data/backups/copilot-YYYYMMDD-HHMM.db and prunes to keep the last N.
-    Returns the path of the new backup file.
+    safe to call while the app is running. Writes to a `.tmp` file first
+    then atomically renames, so a half-failed copy never appears in the
+    list as a valid backup.
 
-    Triggered nightly by the in-process scheduler thread (or call manually
-    from /admin if you want a snapshot on demand)."""
+    Prunes only the auto-stamped `copilot-YYYYMMDD-HHMMSS.db` files —
+    `copilot-v1.x.y.db` files from `make release` are explicit historical
+    pins and are never auto-deleted by this function.
+
+    Triggered nightly by the F13 backup_scheduler thread (or call manually
+    from /admin/backups when you want a snapshot on demand). On failure,
+    raises so the caller (backup_scheduler.run_backup_now) can stamp the
+    error into meta and surface it to the admin UI."""
     from datetime import datetime as _dt
     target_dir = target_dir or (DATA_DIR / "backups")
     target_dir.mkdir(exist_ok=True)
-    stamp = _dt.now().strftime("%Y%m%d-%H%M")
+    stamp = _dt.now().strftime("%Y%m%d-%H%M%S")
     target = target_dir / f"copilot-{stamp}.db"
-    # SQLite Backup API: streams pages while live writers continue
+    tmp = target_dir / f"copilot-{stamp}.db.tmp"
+    # Sweep any leftover .tmp from a previous crashed run
+    if tmp.exists():
+        try: tmp.unlink()
+        except OSError: pass
+    src_size = DB_PATH.stat().st_size if DB_PATH.exists() else 0
     src = sqlite3.connect(str(DB_PATH))
     try:
-        dst = sqlite3.connect(str(target))
+        dst = sqlite3.connect(str(tmp))
         try:
-            src.backup(dst)
+            # pages=2000 → checkpoint every 2000 pages so we yield to writers
+            src.backup(dst, pages=2000, sleep=0)
+        except Exception as e:
+            print(f"[db.backup] copy failed for {tmp}: {type(e).__name__}: {e}")
+            try: dst.close()
+            except Exception: pass
+            try: tmp.unlink()
+            except OSError: pass
+            raise
         finally:
-            dst.close()
+            try: dst.close()
+            except Exception: pass
     finally:
         src.close()
-    # Prune — keep the N most recent
-    backups = sorted(target_dir.glob("copilot-*.db"), reverse=True)
-    for old in backups[keep_last_n:]:
+    # Atomic move — only now does the file enter the "valid backups" list
+    try:
+        tmp.rename(target)
+    except OSError as e:
+        print(f"[db.backup] rename {tmp} -> {target} failed: {e}")
+        raise RuntimeError(f"backup written but rename failed: {e}") from e
+    # Sanity check on size — catches the rare empty-file failure mode
+    if target.stat().st_size < min(4096, src_size or 4096):
+        print(f"[db.backup] suspicious size: target {target.stat().st_size}B, src {src_size}B")
+    # Prune — keep last N of the auto-named files only
+    import re as _re
+    auto_re = _re.compile(r"^copilot-\d{8}-\d{4,6}\.db$")
+    autos = sorted(
+        [p for p in target_dir.glob("copilot-*.db") if auto_re.match(p.name)],
+        reverse=True,
+    )
+    for old in autos[keep_last_n:]:
         try: old.unlink()
-        except OSError: pass
+        except OSError as e: print(f"[db.backup] prune {old}: {e}")
     return target
 
 

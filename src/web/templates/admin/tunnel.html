@@ -7,11 +7,32 @@
     <div class="admin-block-tag">{{ feature.block or 'F3' }}</div>
     <h1 class="admin-detail-title">Cloudflare Tunnel</h1>
     <div class="admin-detail-summary">
-      Expose this tool to teammates without opening firewall ports. The Quick
-      Tunnel option below gives you a public <code>*.trycloudflare.com</code> URL
-      in seconds — no Cloudflare account or DNS setup needed.
+      Expose this tool to teammates without opening firewall ports. Two paths:
+      <strong>Quick Tunnel</strong> (random *.trycloudflare.com URL, no setup)
+      for soft-launches; <strong>Named Tunnel</strong> (your own permanent
+      domain, e.g. copilot.betterplace.co.in) for the real team rollout.
     </div>
   </div>
+
+  <!-- Tab switcher -->
+  <div style="margin-top:18px;display:flex;gap:4px;border-bottom:1px solid var(--border);">
+    <button type="button" class="tab-btn active" data-tab="quick"
+            onclick="switchTab('quick')"
+            style="padding:8px 14px;background:none;border:none;border-bottom:2px solid var(--indigo);cursor:pointer;font-weight:600;font-size:13px;color:var(--indigo);">
+      Quick Tunnel
+    </button>
+    <button type="button" class="tab-btn" data-tab="named"
+            onclick="switchTab('named')"
+            style="padding:8px 14px;background:none;border:none;border-bottom:2px solid transparent;cursor:pointer;font-size:13px;color:#64748b;">
+      Named Tunnel · permanent domain
+      {% if named.running %}<span style="display:inline-block;width:6px;height:6px;background:#10b981;border-radius:50%;margin-left:6px;"></span>{% endif %}
+    </button>
+  </div>
+
+  <!-- ============================================================ -->
+  <!-- QUICK TUNNEL PANE                                             -->
+  <!-- ============================================================ -->
+  <div id="tab-quick" class="tab-pane">
 
   <!-- State summary -->
   <div class="admin-card admin-card-done" style="margin-top:18px;">
@@ -67,14 +88,57 @@
   </div>
   {% else %}
 
+  <!-- F11 Watchdog toggle -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;background:#f5f3ff;border-color:#ddd6fe;">
+    <div class="admin-card-title" style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;">
+      Auto-restart watchdog
+      <span style="font-size:11px;padding:2px 8px;border-radius:10px;
+                   background:{% if watchdog.enabled %}#dcfce7;color:#166534{% else %}#e5e7eb;color:#475569{% endif %};">
+        {% if watchdog.enabled %}● ON{% else %}○ off{% endif %}
+      </span>
+      {% if watchdog.recent_attempts %}
+      <span style="font-size:11px;color:var(--muted);">
+        {{ watchdog.recent_attempts }} restart{{ '' if watchdog.recent_attempts == 1 else 's' }} in last {{ watchdog.window_minutes }} min
+        {% if watchdog.recent_attempts >= watchdog.max_attempts_per_window %}
+        · <span style="color:#be123c;font-weight:600;">backoff (capped)</span>
+        {% endif %}
+      </span>
+      {% endif %}
+    </div>
+    <div style="font-size:12.5px;line-height:1.6;margin-top:6px;color:#475569;">
+      When ON, an in-app thread checks the Quick Tunnel every 30 seconds. If
+      the process has died (machine slept, network hiccup, cloudflared crash),
+      it gets restarted automatically. Capped at {{ watchdog.max_attempts_per_window }} retries per
+      {{ watchdog.window_minutes }} minutes so a genuinely-broken cloudflared
+      doesn't loop forever.
+    </div>
+    <div style="display:flex;gap:8px;align-items:center;margin-top:10px;flex-wrap:wrap;">
+      <button type="button" onclick="toggleWatchdog({% if watchdog.enabled %}0{% else %}1{% endif %}, this)" class="admin-card-btn"
+              style="{% if watchdog.enabled %}background:#fff1f2;color:#be123c;border:1px solid #fecdd3;{% else %}background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;{% endif %}padding:6px 14px;">
+        {% if watchdog.enabled %}Turn off{% else %}Turn on{% endif %}
+      </button>
+      {% if watchdog.recent_attempts %}
+      <button type="button" onclick="resetWatchdog(this)" class="admin-card-btn" style="font-size:11px;">Reset attempt counter</button>
+      {% endif %}
+      <span id="wd-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+    {% if watchdog.last_attempt_at %}
+    <div style="margin-top:8px;font-size:11px;color:var(--muted);">
+      Last attempt: <code>{{ watchdog.last_attempt_at }}</code> ·
+      {% if watchdog.last_attempt_ok %}<span style="color:#047857;">✓ ok</span>
+      {% else %}<span style="color:#be123c;">✗ failed</span>{% endif %}
+    </div>
+    {% endif %}
+  </div>
+
   <!-- Quick Tunnel — start/stop -->
   <div class="admin-card admin-card-done" style="margin-top:14px;">
     <div class="admin-card-title">Quick Tunnel — fastest way to share</div>
     <div style="font-size:13px;line-height:1.6;margin-top:6px;color:#475569;">
-      Spins up a Cloudflare tunnel pointed at <code>http://127.0.0.1:{{ 8000 }}</code> with
+      Spins up a Cloudflare tunnel pointed at <code>http://127.0.0.1:{{ app_port }}</code> with
       a random <code>*.trycloudflare.com</code> URL. No Cloudflare account or DNS
-      setup needed. URL persists until the tunnel is stopped or your laptop
-      sleeps. Perfect for soft-launching to engineers.
+      setup needed. URL changes on every restart — fine for soft-launching, not
+      for a permanent team URL.
     </div>
     <div style="display:flex;gap:10px;align-items:center;margin-top:14px;">
       {% if not state.running %}
@@ -91,43 +155,9 @@
       <span id="start-status" style="font-size:12px;color:var(--muted);"></span>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-top:10px;">
-      Note for OAuth: after the public URL appears below, go to
-      <a href="/admin/auth" style="color:var(--accent);">/admin/auth</a> and paste it
-      into <code>APP_PUBLIC_URL</code>, then add the corresponding
-      <code>/auth/callback</code> URL to your Google OAuth client.
+      Permanent URL preferred? Switch to the <a href="#" onclick="switchTab('named');return false;" style="color:var(--indigo);font-weight:600;">Named Tunnel</a> tab above.
     </div>
   </div>
-
-  <!-- Advanced: named tunnel -->
-  <details class="admin-card admin-card-done" style="margin-top:14px;">
-    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;">
-      <span style="font-size:11px;">▸</span>
-      <strong>Advanced · Named tunnel with custom domain</strong>
-      <span style="font-size:11px;color:var(--muted);">(e.g. copilot.betterplace.co.in)</span>
-    </summary>
-    <div style="margin-top:10px;font-size:13px;line-height:1.7;">
-      For a permanent URL under your own domain (requires Cloudflare account):
-      <ol style="padding-left:22px;margin-top:8px;">
-        <li><code>cloudflared tunnel login</code> — opens browser, pick the
-          <code>betterplace.co.in</code> zone.</li>
-        <li><code>cloudflared tunnel create copilot</code> — creates the tunnel.
-          Credentials saved under <code>~/.cloudflared/&lt;UUID&gt;.json</code>.</li>
-        <li><code>cloudflared tunnel route dns copilot copilot.betterplace.co.in</code> —
-          adds the DNS record.</li>
-        <li>Create <code>~/.cloudflared/config.yml</code> with:
-          <pre style="background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;font-size:11px;overflow-x:auto;">tunnel: copilot
-credentials-file: ~/.cloudflared/&lt;UUID&gt;.json
-ingress:
-  - hostname: copilot.betterplace.co.in
-    service: http://127.0.0.1:8000
-  - service: http_status:404</pre></li>
-        <li>Run: <code>cloudflared tunnel run copilot</code></li>
-        <li>Wire <strong>Cloudflare Access</strong> on the route to require
-          <code>@betterplace.co.in</code> Google login — defense in depth on top
-          of our app-level auth.</li>
-      </ol>
-    </div>
-  </details>
 
   <!-- Log tail (collapsible) -->
   <details class="admin-card admin-card-done" style="margin-top:14px;">
@@ -140,9 +170,248 @@ ingress:
     <button type="button" onclick="loadLog()" class="admin-card-btn" style="font-size:11px;">↻ Refresh log</button>
   </details>
   {% endif %}
+
+  </div><!-- /tab-quick -->
+
+  <!-- ============================================================ -->
+  <!-- NAMED TUNNEL PANE                                             -->
+  <!-- ============================================================ -->
+  <div id="tab-named" class="tab-pane" style="display:none;">
+
+  <!-- State pill -->
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title" style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+      Named tunnel state
+      <span style="font-size:11px;padding:2px 8px;border-radius:10px;
+                   background:{% if named.running %}#dcfce7;color:#166534
+                              {% elif named.config_present and named.tunnel_exists %}#dbeafe;color:#1e40af
+                              {% elif named.logged_in %}#fef3c7;color:#92400e
+                              {% elif named.installed %}#fef3c7;color:#92400e
+                              {% else %}#fee2e2;color:#991b1b{% endif %};">
+        {% if named.running %}▶ running
+        {% elif named.config_present and named.tunnel_exists %}◐ configured · not running
+        {% elif named.logged_in %}◐ logged in · needs configuration
+        {% elif named.installed %}◐ cloudflared installed · not logged in
+        {% else %}✗ cloudflared not installed{% endif %}
+      </span>
+      <span style="font-size:11px;color:var(--muted);">
+        cloudflared: {% if named.installed %}<code>{{ named.binary_path }}</code>{% else %}missing{% endif %}
+        · login cert: {% if named.logged_in %}✓{% else %}✗ <code>{{ named.cert_path }}</code>{% endif %}
+        · config.yml: {% if named.config_present %}✓{% else %}✗{% endif %}
+      </span>
+    </div>
+
+    {% if named.running and named.public_url %}
+    <div style="margin-top:12px;padding:14px;background:linear-gradient(135deg,#ecfdf5,#d1fae5);border:1px solid #6ee7b7;border-radius:10px;">
+      <div style="font-size:11px;color:#065f46;text-transform:uppercase;letter-spacing:0.08em;">Permanent URL — bookmark this</div>
+      <a href="{{ named.public_url }}" target="_blank" rel="noopener"
+         style="display:block;margin-top:4px;font-family:'JetBrains Mono',monospace;font-size:16px;color:#065f46;word-break:break-all;font-weight:700;">
+        {{ named.public_url }}
+      </a>
+      <div style="display:flex;gap:10px;align-items:center;margin-top:8px;font-size:11px;color:#475569;">
+        <button type="button" onclick="copyUrl('{{ named.public_url }}', this)" style="background:#fff;border:1px solid var(--border);padding:3px 10px;border-radius:6px;cursor:pointer;font-size:11px;">Copy</button>
+        <span>pid {{ named.pid }} · tunnel <code>{{ named.tunnel_name }}</code> · running for <span id="named-age">{{ named.age_seconds or 0 }}s</span></span>
+      </div>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- STEP 1 · Install -->
+  {% if not named.installed %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Step 1 · Install cloudflared</div>
+    <div style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:12px;">
+      $ brew install cloudflared
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;">
+      Then reload this page.
+      <button type="button" onclick="location.reload()" class="admin-card-btn" style="margin-left:8px;">↻ Reload</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- STEP 2 · Login -->
+  {% if named.installed and not named.logged_in %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Step 2 · Log into Cloudflare</div>
+    <div style="font-size:13px;line-height:1.6;margin-top:6px;color:#475569;">
+      Run this in a terminal — it opens your browser, you pick the
+      <code>betterplace.co.in</code> zone, and cloudflared writes
+      <code>{{ named.cert_path }}</code>:
+    </div>
+    <div style="background:#0f172a;color:#e2e8f0;padding:10px 14px;border-radius:8px;margin-top:8px;font-family:'JetBrains Mono',monospace;font-size:12px;">
+      $ cloudflared tunnel login
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:6px;">
+      Once that finishes, reload — the page will move on to step 3.
+      <button type="button" onclick="location.reload()" class="admin-card-btn" style="margin-left:8px;">↻ Reload</button>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- STEP 3 · One-shot setup -->
+  {% if named.logged_in and not named.config_present %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Step 3 · Create tunnel + DNS + config</div>
+    <div style="font-size:13px;line-height:1.6;margin-top:6px;color:#475569;">
+      This does three things in one click:
+      <ol style="margin:6px 0 0 22px;padding:0;font-size:12px;">
+        <li><code>cloudflared tunnel create &lt;name&gt;</code> — registers the tunnel under your CF account.</li>
+        <li><code>cloudflared tunnel route dns &lt;name&gt; &lt;hostname&gt;</code> — adds the CNAME record in Cloudflare DNS.</li>
+        <li>Writes <code>{{ named.config_path }}</code> pointing the hostname to <code>http://127.0.0.1:{{ app_port }}</code>.</li>
+      </ol>
+    </div>
+    <form onsubmit="return setupNamed(event)" style="margin-top:12px;display:grid;grid-template-columns:1fr 2fr auto;gap:10px;align-items:end;">
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Tunnel name</span>
+        <input name="name" required value="betterplace-copilot"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;">
+      </label>
+      <label style="font-size:12px;">
+        <span style="color:var(--muted);">Hostname (must be a subdomain of a zone you control)</span>
+        <input name="hostname" required value="{{ suggested_host }}"
+               style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;">
+      </label>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:9px 18px;">Set up</button>
+    </form>
+    <div id="setup-out" style="margin-top:10px;font-size:12px;"></div>
+  </div>
+  {% endif %}
+
+  <!-- STEP 4 · Start / Stop -->
+  {% if named.config_present %}
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">
+      {% if named.running %}Tunnel is running{% else %}Step 4 · Start the tunnel{% endif %}
+    </div>
+    <div style="font-size:13px;line-height:1.6;margin-top:6px;color:#475569;">
+      Config: tunnel <code>{{ named.config_tunnel }}</code> →
+      <code>{{ named.config_hostname }}</code> →
+      <code>{{ named.config_service }}</code>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;margin-top:12px;">
+      {% if not named.running %}
+      <button type="button" onclick="startNamed(this)" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:8px 18px;">
+        ▶ Start named tunnel
+      </button>
+      {% else %}
+      <button type="button" onclick="stopNamed(this)" class="admin-card-btn"
+              style="background:#fff1f2;color:#be123c;border:1px solid #fecdd3;padding:8px 18px;">
+        ■ Stop tunnel
+      </button>
+      {% endif %}
+      <span id="named-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+    {% if named.last_error %}
+    <div style="margin-top:10px;padding:10px;background:#fef2f2;border:1px solid #fecaca;border-radius:8px;font-size:12px;color:#991b1b;">
+      <strong>Last error:</strong> <code>{{ named.last_error }}</code>
+    </div>
+    {% endif %}
+  </div>
+
+  <!-- One-time post-setup checklist -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;background:#fefce8;border-color:#fde68a;">
+    <div class="admin-card-title">One-time setup outside this UI</div>
+    <div style="font-size:12.5px;line-height:1.7;margin-top:6px;">
+      Cloudflare and Google can't be configured purely from this app. Two things
+      to do <strong>once</strong> after you start the tunnel:
+
+      <div style="margin-top:10px;padding:10px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">a. Add Google OAuth redirect URI</div>
+        Open <a href="https://console.cloud.google.com/apis/credentials" target="_blank" rel="noopener" style="color:var(--indigo);">Google Cloud Console → APIs &amp; Services → Credentials</a>,
+        find your OAuth 2.0 Client, and add this <strong>Authorized redirect URI</strong>:
+        <div style="background:#0f172a;color:#e2e8f0;padding:8px 12px;border-radius:6px;margin-top:6px;font-family:'JetBrains Mono',monospace;font-size:12px;display:flex;justify-content:space-between;align-items:center;">
+          <span>https://{{ named.hostname or suggested_host }}/auth/callback</span>
+          <button type="button" onclick="copyUrl('https://{{ named.hostname or suggested_host }}/auth/callback', this)" style="background:#1e293b;color:#e2e8f0;border:1px solid #475569;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;">Copy</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;">
+          This is permanent — you'll never have to change it again, unlike the rotating Quick Tunnel URL.
+        </div>
+      </div>
+
+      <div style="margin-top:10px;padding:10px;background:#fff;border:1px solid #e5e7eb;border-radius:8px;">
+        <div style="font-weight:600;font-size:13px;margin-bottom:4px;">b. (Recommended) Add Cloudflare Access — defense in depth</div>
+        Open <a href="https://one.dash.cloudflare.com" target="_blank" rel="noopener" style="color:var(--indigo);">Cloudflare One dashboard → Access → Applications → Add an application → Self-hosted</a>, then:
+        <ol style="margin:4px 0 0 22px;padding:0;font-size:12px;line-height:1.6;">
+          <li>Application name: <code>BetterPlace Co-Pilot</code></li>
+          <li>Subdomain: <code>copilot</code> · Domain: <code>betterplace.co.in</code></li>
+          <li>Add a policy: Action <code>Allow</code>, Selector <code>Emails ending in</code> = <code>@betterplace.co.in</code></li>
+          <li>(Optional) Require Google as identity provider</li>
+        </ol>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px;">
+          Cloudflare will then challenge every request with its own login before
+          it even reaches our app — useful if our app-level auth ever has a bug.
+          You can layer this in/out without restarting the tunnel.
+        </div>
+      </div>
+    </div>
+  </div>
+  {% endif %}
+
+  <!-- Existing named tunnels (helpful diagnostic) -->
+  {% if named.logged_in and named_tunnels %}
+  <details class="admin-card admin-card-done" style="margin-top:14px;">
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;">▸</span>
+      <strong>{{ named_tunnels|length }} named tunnel{{ '' if named_tunnels|length == 1 else 's' }} in your Cloudflare account</strong>
+    </summary>
+    <table style="width:100%;margin-top:10px;border-collapse:collapse;font-size:12px;">
+      <thead><tr style="background:#f8fafc;text-align:left;">
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Name</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">UUID</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Created</th>
+        <th style="padding:6px 8px;border-bottom:1px solid var(--border);">Conns</th>
+      </tr></thead>
+      <tbody>
+      {% for t in named_tunnels %}
+      <tr>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;"><code>{{ t.name }}</code>
+          {% if t.name == named.config_tunnel %}<span style="font-size:9px;color:#1e40af;background:#dbeafe;padding:1px 5px;border-radius:4px;margin-left:4px;">in use</span>{% endif %}
+        </td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;font-family:'JetBrains Mono',monospace;font-size:11px;color:var(--muted);">{{ t.id }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;color:var(--muted);">{{ t.created_at|truncate(10, True, "") if t.created_at else '—' }}</td>
+        <td style="padding:6px 8px;border-bottom:1px solid #f1f5f9;">{{ t.connections|length if t.connections else 0 }}</td>
+      </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </details>
+  {% endif %}
+
+  <!-- Log tail -->
+  {% if named.config_present %}
+  <details class="admin-card admin-card-done" style="margin-top:14px;">
+    <summary style="cursor:pointer;list-style:none;display:flex;align-items:center;gap:8px;">
+      <span style="font-size:11px;">▸</span>
+      <strong>cloudflared (named) log tail</strong>
+    </summary>
+    <pre id="named-log-tail" style="background:#0f172a;color:#e2e8f0;padding:10px;border-radius:6px;font-size:11px;max-height:280px;overflow-y:auto;margin-top:8px;white-space:pre-wrap;">Click to load…</pre>
+    <button type="button" onclick="loadNamedLog()" class="admin-card-btn" style="font-size:11px;">↻ Refresh log</button>
+  </details>
+  {% endif %}
+
+  </div><!-- /tab-named -->
 </main>
 
 <script>
+// ---------- Tab switching ----------
+function switchTab(name) {
+  document.querySelectorAll('.tab-pane').forEach(p => p.style.display = 'none');
+  document.getElementById('tab-' + name).style.display = '';
+  document.querySelectorAll('.tab-btn').forEach(b => {
+    const active = b.dataset.tab === name;
+    b.style.borderBottom = active ? '2px solid var(--indigo)' : '2px solid transparent';
+    b.style.color = active ? 'var(--indigo)' : '#64748b';
+    b.style.fontWeight = active ? '600' : '400';
+  });
+  try { history.replaceState(null, '', '#' + name); } catch (e) {}
+}
+// Honor URL fragment on first load
+if (location.hash === '#named') switchTab('named');
+
+// ---------- Shared util ----------
 function copyUrl(url, btn) {
   navigator.clipboard.writeText(url).then(() => {
     const o = btn.textContent;
@@ -151,6 +420,7 @@ function copyUrl(url, btn) {
   });
 }
 
+// ---------- Quick Tunnel ----------
 async function startTunnel(btn) {
   const status = document.getElementById('start-status');
   btn.disabled = true;
@@ -212,7 +482,98 @@ async function loadLog() {
   } else { el.textContent = 'Failed to load log'; }
 }
 
-// Auto-tick the running-time display
+async function toggleWatchdog(enabled, btn) {
+  btn.disabled = true;
+  const st = document.getElementById('wd-status');
+  st.textContent = enabled ? 'Turning on…' : 'Turning off…';
+  st.style.color = '';
+  const fd = new FormData();
+  fd.append('enabled', String(enabled));
+  try {
+    const r = await fetch('/api/admin/tunnel/watchdog/toggle', { method: 'POST', body: fd });
+    if (r.ok) { setTimeout(() => location.reload(), 400); }
+    else { st.textContent = '✗ failed'; st.style.color = '#be123c'; btn.disabled = false; }
+  } catch (e) {
+    st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; btn.disabled = false;
+  }
+}
+
+async function resetWatchdog(btn) {
+  btn.disabled = true;
+  const r = await fetch('/api/admin/tunnel/watchdog/reset', { method: 'POST' });
+  if (r.ok) location.reload();
+  else { btn.disabled = false; alert('Reset failed'); }
+}
+
+// ---------- Named Tunnel ----------
+async function setupNamed(ev) {
+  ev.preventDefault();
+  const form = ev.target;
+  const out = document.getElementById('setup-out');
+  out.innerHTML = '<span style="color:var(--muted);">Running 3 steps — should take ~10s…</span>';
+  const fd = new FormData();
+  fd.append('name', form.elements['name'].value.trim());
+  fd.append('hostname', form.elements['hostname'].value.trim());
+  try {
+    const r = await fetch('/api/admin/tunnel/named/setup', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok) {
+      out.innerHTML = '<span style="color:#047857;">✓ All 3 steps complete — reloading page so you can hit Start…</span>';
+      setTimeout(() => location.reload(), 800);
+    } else {
+      const failed = (j.steps || []).find(s => s.ok === false);
+      const msg = failed ? `Step <code>${failed.step}</code> failed: ${failed.error}` : 'Setup failed.';
+      out.innerHTML = `<div style="padding:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#991b1b;">✗ ${msg}</div>`;
+    }
+  } catch (e) {
+    out.innerHTML = `<div style="padding:8px;background:#fef2f2;border:1px solid #fecaca;border-radius:6px;color:#991b1b;">✗ ${e.message}</div>`;
+  }
+  return false;
+}
+
+async function startNamed(btn) {
+  const status = document.getElementById('named-status');
+  btn.disabled = true;
+  status.textContent = 'Starting…';
+  status.style.color = '';
+  try {
+    const r = await fetch('/api/admin/tunnel/named/start', { method: 'POST' });
+    const j = await r.json();
+    if (j.ok) {
+      status.textContent = '✓ Tunnel up · reloading';
+      status.style.color = '#047857';
+      setTimeout(() => location.reload(), 800);
+    } else {
+      status.textContent = '✗ ' + (j.error || 'start failed');
+      status.style.color = '#be123c';
+      btn.disabled = false;
+    }
+  } catch (e) {
+    status.textContent = '✗ ' + e.message;
+    status.style.color = '#be123c';
+    btn.disabled = false;
+  }
+}
+
+async function stopNamed(btn) {
+  if (!confirm('Stop the named tunnel? https://{{ named.hostname or suggested_host }} will go down.')) return;
+  btn.disabled = true;
+  const r = await fetch('/api/admin/tunnel/named/stop', { method: 'POST' });
+  if (r.ok) location.reload();
+  else { btn.disabled = false; alert('Stop failed'); }
+}
+
+async function loadNamedLog() {
+  const el = document.getElementById('named-log-tail');
+  el.textContent = 'Loading…';
+  const r = await fetch('/api/admin/tunnel/named/log', { cache: 'no-store' });
+  if (r.ok) {
+    const j = await r.json();
+    el.textContent = j.present ? j.lines.join('\n') : '(no log yet)';
+  } else { el.textContent = 'Failed to load log'; }
+}
+
+// Quick Tunnel running-time ticker (preserved)
 {% if state.running and state.age_seconds is not none %}
 let _age = {{ state.age_seconds }};
 setInterval(() => {
@@ -223,10 +584,20 @@ setInterval(() => {
   else if (_age < 3600) el.textContent = Math.floor(_age/60) + 'm ' + (_age%60) + 's';
   else el.textContent = Math.floor(_age/3600) + 'h ' + Math.floor((_age%3600)/60) + 'm';
 }, 1000);
-// If running but no public URL yet, keep polling
-{% if not state.public_url %}
-pollStatus();
+{% if not state.public_url %}pollStatus();{% endif %}
 {% endif %}
+
+// Named tunnel running-time ticker
+{% if named.running and named.age_seconds is not none %}
+let _nage = {{ named.age_seconds }};
+setInterval(() => {
+  _nage++;
+  const el = document.getElementById('named-age');
+  if (!el) return;
+  if (_nage < 60) el.textContent = _nage + 's';
+  else if (_nage < 3600) el.textContent = Math.floor(_nage/60) + 'm ' + (_nage%60) + 's';
+  else el.textContent = Math.floor(_nage/3600) + 'h ' + Math.floor((_nage%3600)/60) + 'm';
+}, 1000);
 {% endif %}
 </script>
 {% endblock %}
