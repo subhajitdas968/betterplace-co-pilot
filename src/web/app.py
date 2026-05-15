@@ -409,6 +409,311 @@ async def submit_feedback_widget(
     return JSONResponse({"ok": True, "id": new_id})
 
 
+# ===========================================================================
+# Phase 3 · /admin/end-users + /admin/customer-portal
+# ===========================================================================
+
+import secrets as _secrets
+from datetime import timedelta as _timedelta
+
+PORTAL_INVITE_TTL_DAYS = 7
+PORTAL_DEFAULT_SETTINGS = {
+    "portal_url_path": "/portal",
+    "invite_email_subject": "Welcome to BetterPlace Co-Pilot Portal",
+    "invite_email_body": (
+        "Hi {{user.name}},\n\n"
+        "You've been given access to BetterPlace's support portal where you can "
+        "submit tickets and track the ones you've raised.\n\n"
+        "Set your password (one-time link, expires in 7 days):\n{{invite_url}}\n\n"
+        "If you didn't expect this email, you can ignore it.\n\n"
+        "— BetterPlace Support"
+    ),
+    "default_permissions": {
+        "can_submit": True, "can_see_own": True, "can_see_cc": True,
+        "can_see_org": False, "can_see_domain": False,
+    },
+}
+
+
+def _portal_settings() -> dict:
+    """Load global portal settings from meta. Falls back to defaults for
+    any missing key so partial config doesn't break anything."""
+    out = dict(PORTAL_DEFAULT_SETTINGS)
+    with db.conn() as c:
+        raw = db.get_meta(c, "portal_settings_json")
+    if raw:
+        try:
+            saved = json.loads(raw)
+            if isinstance(saved, dict):
+                # Default permissions need a nested merge
+                if "default_permissions" in saved and isinstance(saved["default_permissions"], dict):
+                    out["default_permissions"] = {
+                        **out["default_permissions"],
+                        **saved["default_permissions"],
+                    }
+                    saved = {k: v for k, v in saved.items() if k != "default_permissions"}
+                out.update(saved)
+        except json.JSONDecodeError:
+            pass
+    return out
+
+
+def _build_invite_url(request: Request, token: str) -> str:
+    """Construct the magic-link URL the admin will share. Honors x-forwarded
+    headers so it works behind the Cloudflare tunnel too."""
+    scheme = (request.headers.get("x-forwarded-proto") or request.url.scheme).split(",")[0].strip()
+    host = (request.headers.get("x-forwarded-host") or request.headers.get("host")
+            or request.url.netloc).split(",")[0].strip()
+    settings = _portal_settings()
+    base = settings.get("portal_url_path", "/portal").rstrip("/")
+    return f"{scheme}://{host}{base}/set-password?token={token}"
+
+
+@app.get("/admin/end-users", response_class=HTMLResponse)
+async def admin_end_users(
+    request: Request,
+    q: str = "",
+    org_id: int | None = None,
+    portal_only: int = 0,
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    with db.conn() as c:
+        sb = _sidebar_ctx(c, user)
+        rows = db.list_end_users(c, search=q or None, org_id=org_id or None,
+                                    portal_only=bool(int(portal_only)), limit=200)
+        # Lightweight org list for the filter dropdown (top 50 by ticket vol)
+        orgs = [dict(r) for r in c.execute("""
+            SELECT o.id, o.name,
+                   (SELECT COUNT(*) FROM tickets t WHERE t.organization_id = o.id) AS n
+              FROM organizations o
+             ORDER BY n DESC LIMIT 50
+        """).fetchall()]
+        counts = db.count_end_users(c)
+    return TEMPLATES.TemplateResponse("admin/end_users.html", {
+        "request": request, "user": user,
+        "users": rows, "orgs": orgs, "counts": counts,
+        "search": q, "org_id": org_id, "portal_only": bool(int(portal_only)),
+        "current_view": "_admin", "in_detail": False,
+        **sb,
+    })
+
+
+@app.get("/admin/end-users/{uid}", response_class=HTMLResponse)
+async def admin_end_user_edit(
+    uid: int, request: Request,
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    from .. import customer_360 as _c360
+    with db.conn() as c:
+        sb = _sidebar_ctx(c, user)
+        zd_user = c.execute(
+            "SELECT id, name, email, role, raw FROM users WHERE id=?", (uid,)
+        ).fetchone()
+        if not zd_user:
+            raise HTTPException(404, "End-user not found")
+        # Ensure a profile row exists so the edit form has something to show
+        profile = db.upsert_end_user_profile(c, uid)
+        # Reuse the 360 helper for stats + orgs + recent tickets (the agent
+        # ticket-detail card already proves this works end-to-end).
+        c360 = _c360.for_requester(c, uid)
+    invite_url = None
+    invite_meta = profile.get("portal_invite_sent_at")
+    if profile.get("portal_invite_token") and profile.get("portal_invite_expires_at"):
+        # If the token hasn't expired, surface the URL on the page so the
+        # admin can re-copy it (in case they lost the first modal).
+        if profile["portal_invite_expires_at"] > db.now_iso():
+            invite_url = _build_invite_url(request, profile["portal_invite_token"])
+    return TEMPLATES.TemplateResponse("admin/end_user_edit.html", {
+        "request": request, "user": user,
+        "zd_user": dict(zd_user), "profile": profile, "customer": c360,
+        "invite_url": invite_url,
+        "default_permissions": PORTAL_DEFAULT_SETTINGS["default_permissions"],
+        "current_view": "_admin", "in_detail": False, "search": "",
+        **sb,
+    })
+
+
+@app.post("/api/admin/end-users/{uid}/save")
+async def admin_end_user_save(
+    uid: int,
+    portal_access_enabled: int = Form(0),
+    is_vip: int = Form(0),
+    can_submit: int = Form(0),
+    can_see_own: int = Form(0),
+    can_see_cc: int = Form(0),
+    can_see_org: int = Form(0),
+    can_see_domain: int = Form(0),
+    admin_notes: str = Form(""),
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    perms = {
+        "can_submit": bool(int(can_submit)),
+        "can_see_own": bool(int(can_see_own)),
+        "can_see_cc": bool(int(can_see_cc)),
+        "can_see_org": bool(int(can_see_org)),
+        "can_see_domain": bool(int(can_see_domain)),
+    }
+    with db.conn() as c:
+        prof = db.upsert_end_user_profile(
+            c, uid,
+            portal_access_enabled=bool(int(portal_access_enabled)),
+            is_vip=bool(int(is_vip)),
+            permissions=perms,
+            admin_notes=admin_notes,
+        )
+        db.log_access(c, actor_email=user["email"],
+                      event_type="end_user.save",
+                      target_kind="end_user", target_id=str(uid),
+                      detail={"portal_access": prof["portal_access_enabled"],
+                              "permissions": perms})
+    return JSONResponse({"ok": True, "profile": prof})
+
+
+@app.post("/api/admin/end-users/{uid}/invite")
+async def admin_end_user_invite(
+    uid: int, request: Request,
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    """Generate a one-time portal-set-password URL the admin will share
+    out-of-band (email/WhatsApp/Slack). Sets portal_access_enabled=1 so
+    the user can actually log in after redeeming."""
+    from datetime import datetime as _dt
+    token = _secrets.token_urlsafe(32)
+    expires_at = (_dt.utcnow() + _timedelta(days=PORTAL_INVITE_TTL_DAYS)).isoformat() + "+00:00"
+    with db.conn() as c:
+        zd_user = c.execute("SELECT id, email FROM users WHERE id=?", (uid,)).fetchone()
+        if not zd_user:
+            raise HTTPException(404, "End-user not found")
+        db.set_end_user_invite(c, uid, token=token, expires_at=expires_at,
+                                  sent_by=user["email"])
+        # Enable access proactively so the redeem-set-password page can land them in
+        db.upsert_end_user_profile(c, uid, portal_access_enabled=True)
+        db.log_access(c, actor_email=user["email"],
+                      event_type="end_user.invite",
+                      target_kind="end_user", target_id=str(uid),
+                      detail={"email": zd_user["email"],
+                              "expires_at": expires_at})
+    url = _build_invite_url(request, token)
+    return JSONResponse({
+        "ok": True, "invite_url": url, "expires_at": expires_at,
+        "email": zd_user["email"],
+        "note": ("SMTP not configured — copy the URL below and send it to the user "
+                 "via your preferred channel. Once SMTP is wired up later, this same "
+                 "button will email automatically."),
+    })
+
+
+@app.post("/api/admin/end-users/{uid}/reset-password")
+async def admin_end_user_reset_password(
+    uid: int, request: Request,
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    """Same as invite, but explicitly clears the existing password hash
+    first — useful for the user-forgot-password case."""
+    from datetime import datetime as _dt
+    token = _secrets.token_urlsafe(32)
+    expires_at = (_dt.utcnow() + _timedelta(days=PORTAL_INVITE_TTL_DAYS)).isoformat() + "+00:00"
+    with db.conn() as c:
+        zd_user = c.execute("SELECT id, email FROM users WHERE id=?", (uid,)).fetchone()
+        if not zd_user:
+            raise HTTPException(404, "End-user not found")
+        # Clear hash + reissue token
+        db.upsert_end_user_profile(c, uid)
+        c.execute("UPDATE end_user_profiles SET portal_password_hash=NULL WHERE user_id=?", (uid,))
+        db.set_end_user_invite(c, uid, token=token, expires_at=expires_at,
+                                  sent_by=user["email"])
+        db.log_access(c, actor_email=user["email"],
+                      event_type="end_user.reset_password",
+                      target_kind="end_user", target_id=str(uid),
+                      detail={"email": zd_user["email"]})
+    return JSONResponse({
+        "ok": True, "invite_url": _build_invite_url(request, token),
+        "expires_at": expires_at, "email": zd_user["email"],
+    })
+
+
+@app.post("/api/admin/end-users/{uid}/link-org")
+async def admin_end_user_link_org(
+    uid: int, org_id: int = Form(...), is_primary: int = Form(0),
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    with db.conn() as c:
+        db.link_end_user_to_org(c, uid, org_id, source="manual",
+                                   linked_by=user["email"],
+                                   is_primary=bool(int(is_primary)))
+        db.log_access(c, actor_email=user["email"],
+                      event_type="end_user.link_org",
+                      target_kind="end_user", target_id=str(uid),
+                      detail={"org_id": org_id, "is_primary": bool(int(is_primary))})
+    return JSONResponse({"ok": True})
+
+
+@app.post("/api/admin/end-users/{uid}/unlink-org")
+async def admin_end_user_unlink_org(
+    uid: int, org_id: int = Form(...),
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    with db.conn() as c:
+        db.unlink_end_user_from_org(c, uid, org_id)
+        db.log_access(c, actor_email=user["email"],
+                      event_type="end_user.unlink_org",
+                      target_kind="end_user", target_id=str(uid),
+                      detail={"org_id": org_id})
+    return JSONResponse({"ok": True})
+
+
+# ---------- Global portal settings page ----------
+
+@app.get("/admin/customer-portal", response_class=HTMLResponse)
+async def admin_customer_portal_page(
+    request: Request,
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    with db.conn() as c:
+        sb = _sidebar_ctx(c, user)
+        counts = db.count_end_users(c)
+    settings = _portal_settings()
+    return TEMPLATES.TemplateResponse("admin/customer_portal.html", {
+        "request": request, "user": user,
+        "settings": settings, "counts": counts,
+        "current_view": "_admin", "in_detail": False, "search": "",
+        **sb,
+    })
+
+
+@app.post("/api/admin/customer-portal/settings")
+async def admin_customer_portal_save(
+    portal_url_path: str = Form("/portal"),
+    invite_email_subject: str = Form(""),
+    invite_email_body: str = Form(""),
+    default_can_submit: int = Form(0),
+    default_can_see_own: int = Form(0),
+    default_can_see_cc: int = Form(0),
+    default_can_see_org: int = Form(0),
+    default_can_see_domain: int = Form(0),
+    user: dict = Depends(auth_mod.require_any("admin.end_users", "admin.users")),
+):
+    settings = {
+        "portal_url_path": portal_url_path.strip() or "/portal",
+        "invite_email_subject": invite_email_subject.strip() or PORTAL_DEFAULT_SETTINGS["invite_email_subject"],
+        "invite_email_body": invite_email_body.strip() or PORTAL_DEFAULT_SETTINGS["invite_email_body"],
+        "default_permissions": {
+            "can_submit": bool(int(default_can_submit)),
+            "can_see_own": bool(int(default_can_see_own)),
+            "can_see_cc": bool(int(default_can_see_cc)),
+            "can_see_org": bool(int(default_can_see_org)),
+            "can_see_domain": bool(int(default_can_see_domain)),
+        },
+    }
+    with db.conn() as c:
+        db.set_meta(c, "portal_settings_json", json.dumps(settings))
+        db.log_access(c, actor_email=user["email"],
+                      event_type="customer_portal.settings",
+                      target_kind="system", target_id="",
+                      detail=settings)
+    return JSONResponse({"ok": True, "settings": settings})
+
+
 @app.get("/admin/feedback", response_class=HTMLResponse)
 async def admin_feedback(
     request: Request, status: str = "all",
@@ -1521,7 +1826,8 @@ def _full_ticket(c: sqlite3.Connection, ticket_id: int) -> dict | None:
     t = c.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
     if not t:
         return None
-    requester = c.execute("SELECT name, email FROM users WHERE id=?", (t["requester_id"],)).fetchone()
+    # Include id so the Customer 360 panel + assign-to-me widget can use it.
+    requester = c.execute("SELECT id, name, email FROM users WHERE id=?", (t["requester_id"],)).fetchone()
     org = c.execute("SELECT name FROM organizations WHERE id=?", (t["organization_id"],)).fetchone() if t["organization_id"] else None
     grp = c.execute("SELECT name FROM groups WHERE id=?", (t["group_id"],)).fetchone() if t["group_id"] else None
     assignee = c.execute("SELECT name FROM users WHERE id=?", (t["assignee_id"],)).fetchone() if t["assignee_id"] else None
@@ -1764,6 +2070,10 @@ def _full_ticket(c: sqlite3.Connection, ticket_id: int) -> dict | None:
         "tags": json.loads(t["tags"] or "[]"),
         "created_at": t["created_at"],
         "updated_at": t["updated_at"],
+        # Surface requester_id at the top level so callers don't have to
+        # depend on the nested requester dict (which is None when the ZD user
+        # record was deleted but the ticket retains the id).
+        "requester_id": t["requester_id"],
         "requester": dict(requester) if requester else None,
         "organization": dict(org) if org else None,
         "group": dict(grp) if grp else None,
@@ -2317,6 +2627,7 @@ async def create_native_ticket(
 async def ticket_detail(ident: str, request: Request, view: str = "open",
                         user: dict = Depends(require_user)):
     """Accept either a numeric ZD id (e.g. 595049) or a local_id (e.g. BP-000001)."""
+    from .. import customer_360 as _c360
     with db.conn() as c:
         ticket_id = _resolve_ticket_id(c, ident)
         if ticket_id is None:
@@ -2325,8 +2636,12 @@ async def ticket_detail(ident: str, request: Request, view: str = "open",
         if not t:
             raise HTTPException(404, "Ticket not found")
         sb = _sidebar_ctx(c, user)
+        # Phase 1 — assemble the requester-centric 360 view. Read-only, cheap.
+        customer = _c360.for_requester(c, t.get("requester_id"),
+                                         current_ticket_id=ticket_id)
     return TEMPLATES.TemplateResponse("ticket_detail.html", {
         "request": request, "user": user, "ticket": t,
+        "customer": customer,
         "current_view": view, "in_detail": True,
         "search": "",
         "translate_languages": TRANSLATE_LANGUAGES,
@@ -3201,6 +3516,24 @@ def _stat_releases(c):
         return "—"
 
 
+def _stat_end_users(c):
+    try:
+        counts = db.count_end_users(c)
+        if counts["with_portal"]:
+            return f"{counts['total']:,} · {counts['with_portal']} with portal"
+        return f"{counts['total']:,} end-users"
+    except Exception:
+        return "—"
+
+
+def _stat_customer_portal(c):
+    try:
+        v = db.get_meta(c, "portal_settings_json")
+        return "✓ configured" if v else "○ defaults"
+    except Exception:
+        return "—"
+
+
 def _stat_sync_worker(c):
     """Chip for the admin landing — uses pid liveness + last_sync_run_at."""
     try:
@@ -3485,6 +3818,16 @@ FEATURE_CATALOG = [
      "title": "Zendesk sync",
      "summary": "Pulls tickets, fields, forms, and groups from Zendesk into the local DB. Start/stop the loop or trigger a one-off pass from the UI — no terminal needed.",
      "setup_url": "/admin/sync", "stat_fn": _stat_sync_worker},
+
+    {"key": "end_users",      "category": "admin",       "status": "done",   "block": "Phase 3",
+     "title": "End-users & portal access",
+     "summary": "Manage everyone who's ever submitted a ticket. Toggle portal access per user, set their visibility scope (own / CC / org / domain), send one-time invite links. The Customer 360 panel on every ticket detail page is powered from here.",
+     "setup_url": "/admin/end-users", "stat_fn": _stat_end_users},
+
+    {"key": "customer_portal","category": "admin",       "status": "partial","block": "Phase 3",
+     "title": "Customer portal (foundation)",
+     "summary": "Global settings for the customer-facing portal: URL path, default permissions for new invitees, invite email template. The portal UI itself is Phase 4 — this page configures how it will behave when built.",
+     "setup_url": "/admin/customer-portal", "stat_fn": _stat_customer_portal},
 ]
 
 

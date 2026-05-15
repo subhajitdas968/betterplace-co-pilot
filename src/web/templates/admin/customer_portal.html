@@ -1,0 +1,114 @@
+{% extends "_base.html" %}
+{% block title %}Customer portal settings · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <a href="/admin/end-users" class="admin-card-btn" style="margin-left:auto;">👥 End-users list</a>
+  </div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">Phase 3</div>
+    <h1 class="admin-detail-title">Customer portal — global settings</h1>
+    <div class="admin-detail-summary">
+      Defaults applied when an admin enables portal access for a new end-user.
+      Per-user overrides happen on each user's edit page. The portal UI itself
+      ({{ settings.portal_url_path }}) is Phase 4 — these settings define how it
+      will behave when built.
+      <span style="color:var(--muted);"> · {{ counts.total }} end-users in the DB · {{ counts.with_portal }} with portal access enabled.</span>
+    </div>
+  </div>
+
+  <form id="settings-form" onsubmit="return saveSettings(event)">
+
+    <!-- URL / branding -->
+    <div class="admin-card admin-card-done" style="margin-top:18px;">
+      <div class="admin-card-title">URL &amp; branding</div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:10px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Portal URL path (Phase 4)</span>
+          <input name="portal_url_path" value="{{ settings.portal_url_path }}"
+                 placeholder="/portal"
+                 style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:'JetBrains Mono',monospace;">
+          <span style="font-size:11px;color:var(--muted);">Magic links will be <code>https://&lt;your-host&gt;{{ settings.portal_url_path }}/set-password?token=…</code></span>
+        </label>
+      </div>
+    </div>
+
+    <!-- Default permissions for new invites -->
+    <div class="admin-card admin-card-done" style="margin-top:14px;">
+      <div class="admin-card-title">Default permissions for new invited users</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+        These get applied automatically when an admin sends a portal invite. They can be overridden per user on the user's edit page.
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:10px;">
+        {% set d = settings.default_permissions %}
+        {% for key, label, desc in [
+          ('default_can_submit', 'Submit new tickets', 'Show the "New ticket" form.'),
+          ('default_can_see_own', 'See own tickets', 'List tickets where the user is the requester.'),
+          ('default_can_see_cc', 'See tickets CC\'d on', 'Include tickets where the user is in the CC list.'),
+          ('default_can_see_org', 'See organization tickets', 'List every ticket from any organization the user is linked to. Account-level visibility.'),
+          ('default_can_see_domain', 'See domain tickets', 'List every ticket from anyone @theirdomain.com.'),
+        ] %}
+        {% set k = key | replace('default_', '') %}
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid {% if k == 'can_see_org' or k == 'can_see_domain' %}#fef3c7{% else %}var(--border){% endif %};border-radius:6px;cursor:pointer;background:{% if k == 'can_see_org' or k == 'can_see_domain' %}#fefce8{% else %}#fff{% endif %};">
+          <input type="checkbox" name="{{ key }}" {% if d.get(k) %}checked{% endif %} style="margin-top:2px;">
+          <div style="flex:1;font-size:12px;">
+            <div style="font-weight:600;">{{ label }}</div>
+            <div style="font-size:11px;color:var(--muted);">{{ desc }}</div>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+    </div>
+
+    <!-- Invite email template -->
+    <div class="admin-card admin-card-done" style="margin-top:14px;">
+      <div class="admin-card-title">Invite email template</div>
+      <div style="font-size:12px;color:var(--muted);margin-top:4px;">
+        This is the template that <strong>will</strong> be sent when SMTP gets wired up later. Until then, the admin
+        copy-pastes the magic URL manually from the invite modal. Placeholders
+        <code>{{ '{{user.name}}' }}</code> and <code>{{ '{{invite_url}}' }}</code> are substituted at send time.
+      </div>
+      <div style="margin-top:10px;display:grid;grid-template-columns:1fr;gap:12px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Subject</span>
+          <input name="invite_email_subject" value="{{ settings.invite_email_subject }}"
+                 style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        </label>
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Body</span>
+          <textarea name="invite_email_body" rows="10"
+                    style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:inherit;font-size:12.5px;">{{ settings.invite_email_body }}</textarea>
+        </label>
+      </div>
+    </div>
+
+    <div style="margin-top:18px;display:flex;gap:8px;justify-content:flex-end;align-items:center;">
+      <span id="settings-status" style="font-size:12px;color:var(--muted);"></span>
+      <button type="submit" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 22px;">Save settings</button>
+    </div>
+  </form>
+</main>
+
+<script>
+async function saveSettings(ev) {
+  ev.preventDefault();
+  const form = document.getElementById('settings-form');
+  const st = document.getElementById('settings-status');
+  st.textContent = 'Saving…'; st.style.color = '';
+  const fd = new FormData();
+  const set = (n) => fd.append(n, form.elements[n].type === 'checkbox' ? (form.elements[n].checked ? '1' : '0') : (form.elements[n].value || ''));
+  ['portal_url_path','invite_email_subject','invite_email_body',
+   'default_can_submit','default_can_see_own','default_can_see_cc',
+   'default_can_see_org','default_can_see_domain'].forEach(set);
+  try {
+    const r = await fetch('/api/admin/customer-portal/settings', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok) { st.textContent = '✓ Saved'; st.style.color = '#047857'; }
+    else { st.textContent = '✗ ' + (j.detail || 'failed'); st.style.color = '#be123c'; }
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  return false;
+}
+</script>
+{% endblock %}

@@ -1,0 +1,234 @@
+{% extends "_base.html" %}
+{% block title %}{{ zd_user.name or zd_user.email }} · End-user · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row"><a href="/admin/end-users" class="back-link">← Back to end-users</a></div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">End-user</div>
+    <h1 class="admin-detail-title">
+      {{ zd_user.name or '(no name)' }}
+      {% if profile.is_vip %}<span style="font-size:13px;color:#92400e;background:#fef3c7;padding:2px 8px;border-radius:8px;font-weight:500;vertical-align:middle;">★ VIP</span>{% endif %}
+    </h1>
+    <div class="admin-detail-summary">
+      <code>{{ zd_user.email }}</code>{% if customer and customer.identity.phone %} · {{ customer.identity.phone }}{% endif %}
+      {% if customer and customer.orgs %} · 🏢 {% for o in customer.orgs %}{{ o.name }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    </div>
+  </div>
+
+  <!-- Activity summary (shares the Customer 360 helper, but with edit affordances below) -->
+  {% if customer %}
+  <div class="admin-card admin-card-done" style="margin-top:18px;">
+    <div class="admin-card-title">Activity snapshot</div>
+    <div style="display:grid;grid-template-columns:repeat(4,1fr);gap:14px;margin-top:10px;font-size:12.5px;">
+      <div><div style="color:var(--muted);font-size:11px;">Tickets total</div><div style="font-weight:600;font-size:16px;">{{ customer.stats.total }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Open right now</div><div style="font-weight:600;font-size:16px;color:{% if customer.stats.open %}#92400e{% else %}#0f172a{% endif %};">{{ customer.stats.open }}</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Last contact</div><div style="font-weight:500;">{{ customer.stats.last_contact_human }} ago</div></div>
+      <div><div style="color:var(--muted);font-size:11px;">Avg resolution</div><div style="font-weight:500;">{{ customer.stats.avg_resolution_human }}</div></div>
+    </div>
+    {% if customer.recent_tickets %}
+    <details style="margin-top:12px;">
+      <summary style="cursor:pointer;font-size:12px;color:var(--indigo);">View last {{ customer.recent_tickets|length }} tickets</summary>
+      <div style="margin-top:8px;display:flex;flex-direction:column;gap:4px;">
+        {% for r in customer.recent_tickets %}
+        <a href="/tickets/{{ r.id }}" style="display:flex;gap:8px;padding:5px 7px;border-radius:5px;text-decoration:none;color:#0f172a;font-size:11.5px;">
+          <span style="font-family:'JetBrains Mono',monospace;font-size:10px;color:#64748b;min-width:64px;">{{ r.local_id or ('#' ~ r.id) }}</span>
+          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ r.subject }}</span>
+          <span style="font-size:9px;color:#64748b;">{{ r.status }}</span>
+        </a>
+        {% endfor %}
+      </div>
+    </details>
+    {% endif %}
+  </div>
+  {% endif %}
+
+  <!-- Portal access + permissions -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Customer portal access</div>
+    <form id="save-form" onsubmit="return saveProfile(event)" style="margin-top:10px;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:14px;">
+        <label style="font-size:13px;display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:{% if profile.portal_access_enabled %}#dcfce7{% else %}#f8fafc{% endif %};">
+          <input type="checkbox" name="portal_access_enabled" {% if profile.portal_access_enabled %}checked{% endif %}>
+          <div>
+            <div style="font-weight:600;">Portal access enabled</div>
+            <div style="font-size:11px;color:var(--muted);">User can log in to <code>/portal</code> after redeeming an invite.</div>
+          </div>
+        </label>
+        <label style="font-size:13px;display:flex;align-items:center;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:{% if profile.is_vip %}#fef3c7{% else %}#f8fafc{% endif %};">
+          <input type="checkbox" name="is_vip" {% if profile.is_vip %}checked{% endif %}>
+          <div>
+            <div style="font-weight:600;">VIP flag</div>
+            <div style="font-size:11px;color:var(--muted);">Shows a ★ badge on tickets so agents handle with extra care.</div>
+          </div>
+        </label>
+      </div>
+
+      <div style="margin-top:14px;font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">What this user sees in the portal</div>
+      {% set perms = profile.permissions or default_permissions %}
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:8px;">
+        {% for key, label, desc in [
+          ('can_submit', 'Submit new tickets', 'Show the "New ticket" form in the portal.'),
+          ('can_see_own', 'See their own tickets', 'List tickets where they are the requester.'),
+          ('can_see_cc', 'See tickets they are CC\'d on', 'Include tickets where their email is in the CC list.'),
+          ('can_see_org', 'See all tickets from their organization', 'List every ticket whose org matches one they\'re linked to. Account-level visibility.'),
+          ('can_see_domain', 'See all tickets from their email domain', 'List every ticket from anyone @theirdomain.com. Useful for company-wide visibility.'),
+        ] %}
+        <label style="display:flex;align-items:flex-start;gap:8px;padding:8px;border:1px solid {% if key == 'can_see_org' or key == 'can_see_domain' %}#fef3c7{% else %}var(--border){% endif %};border-radius:6px;cursor:pointer;background:{% if key == 'can_see_org' or key == 'can_see_domain' %}#fefce8{% else %}#fff{% endif %};">
+          <input type="checkbox" name="{{ key }}" {% if perms.get(key) %}checked{% endif %} style="margin-top:2px;">
+          <div style="flex:1;font-size:12px;">
+            <div style="font-weight:600;">{{ label }}</div>
+            <div style="font-size:11px;color:var(--muted);line-height:1.4;">{{ desc }}</div>
+          </div>
+        </label>
+        {% endfor %}
+      </div>
+
+      <div style="margin-top:14px;">
+        <label style="font-size:12px;">
+          <span style="color:var(--muted);">Admin notes (visible on Customer 360 panel)</span>
+          <textarea name="admin_notes" rows="2" placeholder="e.g. Prefers WhatsApp follow-ups · Escalate critical issues to Priya"
+                    style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;font-family:inherit;">{{ profile.admin_notes or '' }}</textarea>
+        </label>
+      </div>
+
+      <div style="margin-top:14px;display:flex;gap:8px;align-items:center;">
+        <button type="submit" class="admin-card-btn"
+                style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">Save changes</button>
+        <span id="save-status" style="font-size:12px;color:var(--muted);"></span>
+      </div>
+    </form>
+  </div>
+
+  <!-- Invite / Reset password -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;">
+    <div class="admin-card-title">Portal credentials</div>
+    <div style="font-size:12.5px;line-height:1.6;margin-top:6px;color:#475569;">
+      {% if profile.portal_password_hash %}
+      <span style="color:#047857;">✓ User has set their password.</span> Last login:
+      <code>{{ profile.portal_last_login_at or 'never' }}</code>
+      {% else %}
+      User has not set a password yet. Send them an invite link below.
+      {% endif %}
+    </div>
+
+    {% if invite_url %}
+    <div style="margin-top:10px;padding:10px;background:#fefce8;border:1px solid #fde68a;border-radius:6px;font-size:12px;">
+      ⏳ Active invite — expires <code>{{ profile.portal_invite_expires_at }}</code>
+      <div style="display:flex;gap:6px;align-items:center;margin-top:6px;">
+        <input value="{{ invite_url }}" readonly style="flex:1;padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:11px;">
+        <button type="button" onclick="copyVal('{{ invite_url }}', this)" class="admin-card-btn" style="font-size:11px;">Copy</button>
+      </div>
+    </div>
+    {% endif %}
+
+    <div style="margin-top:12px;display:flex;gap:8px;align-items:center;">
+      <button type="button" onclick="invite(this)" class="admin-card-btn"
+              style="background:linear-gradient(135deg,#10b981,#059669);color:#fff;border:none;padding:8px 18px;">
+        ✉ Send portal invite
+      </button>
+      {% if profile.portal_password_hash %}
+      <button type="button" onclick="resetPw(this)" class="admin-card-btn"
+              style="background:#fff7ed;color:#c2410c;border:1px solid #fed7aa;padding:8px 18px;">
+        ↻ Reset password
+      </button>
+      {% endif %}
+      <span id="invite-status" style="font-size:12px;color:var(--muted);"></span>
+    </div>
+  </div>
+
+  <!-- Modal: invite URL (shown after successful POST) -->
+  <div id="invite-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.55);z-index:1000;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:12px;max-width:560px;padding:24px;box-shadow:0 12px 32px rgba(0,0,0,0.2);">
+      <h3 style="margin:0 0 10px 0;font-size:17px;">🔗 Portal invite link generated</h3>
+      <p id="invite-modal-body" style="font-size:13px;color:#475569;margin:0 0 12px 0;line-height:1.6;"></p>
+      <div style="display:flex;gap:6px;align-items:center;margin-bottom:14px;">
+        <input id="invite-modal-url" readonly style="flex:1;padding:8px 10px;border:1px solid var(--border);border-radius:6px;font-family:'JetBrains Mono',monospace;font-size:11px;">
+        <button type="button" onclick="copyFromInput('invite-modal-url', this)" class="admin-card-btn" style="font-size:11px;padding:7px 12px;">Copy</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);padding:8px 10px;background:#fefce8;border-radius:6px;border:1px solid #fde68a;">
+        ⓘ SMTP isn't wired up yet — paste this URL into Gmail, WhatsApp, or Slack
+        to send it to the user. Once SMTP is set up later, this button will
+        email automatically.
+      </div>
+      <div style="margin-top:14px;text-align:right;">
+        <button type="button" onclick="document.getElementById('invite-modal').style.display='none'" class="admin-card-btn"
+                style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">Done</button>
+      </div>
+    </div>
+  </div>
+</main>
+
+<script>
+const UID = {{ zd_user.id }};
+
+async function saveProfile(ev) {
+  ev.preventDefault();
+  const form = document.getElementById('save-form');
+  const st = document.getElementById('save-status');
+  st.textContent = 'Saving…'; st.style.color = '';
+  const fd = new FormData();
+  const get = (n) => form.elements[n] && form.elements[n].type === 'checkbox' ? (form.elements[n].checked ? '1' : '0') : (form.elements[n] ? form.elements[n].value : '');
+  fd.append('portal_access_enabled', get('portal_access_enabled'));
+  fd.append('is_vip', get('is_vip'));
+  fd.append('can_submit', get('can_submit'));
+  fd.append('can_see_own', get('can_see_own'));
+  fd.append('can_see_cc', get('can_see_cc'));
+  fd.append('can_see_org', get('can_see_org'));
+  fd.append('can_see_domain', get('can_see_domain'));
+  fd.append('admin_notes', get('admin_notes'));
+  try {
+    const r = await fetch('/api/admin/end-users/' + UID + '/save', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok) { st.textContent = '✓ Saved'; st.style.color = '#047857'; setTimeout(() => location.reload(), 500); }
+    else { st.textContent = '✗ ' + (j.detail || 'failed'); st.style.color = '#be123c'; }
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  return false;
+}
+
+async function invite(btn) {
+  btn.disabled = true;
+  const st = document.getElementById('invite-status');
+  st.textContent = 'Generating invite…'; st.style.color = '';
+  try {
+    const r = await fetch('/api/admin/end-users/' + UID + '/invite', { method: 'POST' });
+    const j = await r.json();
+    if (j.ok) {
+      showInviteModal(j.invite_url, j.email, j.expires_at, false);
+      st.textContent = '';
+    } else { st.textContent = '✗ ' + (j.detail || 'failed'); st.style.color = '#be123c'; }
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  btn.disabled = false;
+}
+
+async function resetPw(btn) {
+  if (!confirm('Reset password? Their current password will stop working immediately. They must redeem a new invite link to log in again.')) return;
+  btn.disabled = true;
+  const st = document.getElementById('invite-status');
+  st.textContent = 'Resetting…';
+  try {
+    const r = await fetch('/api/admin/end-users/' + UID + '/reset-password', { method: 'POST' });
+    const j = await r.json();
+    if (j.ok) { showInviteModal(j.invite_url, j.email, j.expires_at, true); st.textContent = ''; }
+    else { st.textContent = '✗ ' + (j.detail || 'failed'); st.style.color = '#be123c'; }
+  } catch (e) { st.textContent = '✗ ' + e.message; st.style.color = '#be123c'; }
+  btn.disabled = false;
+}
+
+function showInviteModal(url, email, expiresAt, isReset) {
+  document.getElementById('invite-modal-url').value = url;
+  const verb = isReset ? 'Password-reset link' : 'Invite link';
+  document.getElementById('invite-modal-body').textContent =
+    verb + ' for ' + email + '. Send this URL via your preferred channel — it expires on ' + expiresAt.split('T')[0] + '.';
+  document.getElementById('invite-modal').style.display = 'flex';
+}
+
+function copyVal(val, btn) {
+  navigator.clipboard.writeText(val).then(() => {
+    const o = btn.textContent; btn.textContent = '✓'; setTimeout(() => btn.textContent = o, 1200);
+  });
+}
+function copyFromInput(id, btn) {
+  copyVal(document.getElementById(id).value, btn);
+}
+</script>
+{% endblock %}

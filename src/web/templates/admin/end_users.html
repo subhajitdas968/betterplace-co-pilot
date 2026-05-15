@@ -1,0 +1,74 @@
+{% extends "_base.html" %}
+{% block title %}End-users · Admin{% endblock %}
+{% block main %}
+<main class="main-pane admin-pane">
+  <div class="back-link-row">
+    <a href="/admin" class="back-link">← Back to Admin &amp; Setup</a>
+    <a href="/admin/customer-portal" class="admin-card-btn" style="margin-left:auto;">⚙ Portal settings</a>
+  </div>
+  <div class="admin-detail-head">
+    <div class="admin-block-tag">Phase 3</div>
+    <h1 class="admin-detail-title">End-users <span style="font-size:12px;color:var(--muted);font-weight:400;margin-left:8px;">{{ counts.total }} total · {{ counts.with_portal }} with portal access</span></h1>
+    <div class="admin-detail-summary">
+      Everyone who has ever submitted a ticket. Click a row to edit their portal
+      access, permissions, organization links, and admin notes.
+    </div>
+  </div>
+
+  <!-- Filters -->
+  <form method="get" action="/admin/end-users" class="admin-card admin-card-done" style="margin-top:18px;display:grid;grid-template-columns:2fr 2fr auto auto;gap:10px;align-items:end;">
+    <label style="font-size:12px;">
+      <span style="color:var(--muted);">Search by name or email</span>
+      <input name="q" value="{{ search }}" placeholder="e.g. rajesh@acmecorp.com"
+             style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+    </label>
+    <label style="font-size:12px;">
+      <span style="color:var(--muted);">Organization</span>
+      <select name="org_id" style="display:block;width:100%;padding:8px 10px;border:1px solid var(--border);border-radius:8px;margin-top:4px;">
+        <option value="">— any —</option>
+        {% for o in orgs %}<option value="{{ o.id }}" {% if org_id == o.id %}selected{% endif %}>{{ o.name }} ({{ o.n }})</option>{% endfor %}
+      </select>
+    </label>
+    <label style="font-size:12px;display:flex;align-items:center;gap:6px;padding-bottom:8px;">
+      <input type="checkbox" name="portal_only" value="1" {% if portal_only %}checked{% endif %}>
+      <span>Portal access only</span>
+    </label>
+    <button type="submit" class="admin-card-btn"
+            style="background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;border:none;padding:8px 18px;">Filter</button>
+  </form>
+
+  <!-- Results table -->
+  <div class="admin-card admin-card-done" style="margin-top:14px;padding:0;overflow:hidden;">
+    <table style="width:100%;border-collapse:collapse;font-size:12.5px;">
+      <thead><tr style="background:#f8fafc;text-align:left;">
+        <th style="padding:8px 10px;border-bottom:1px solid var(--border);">Name</th>
+        <th style="padding:8px 10px;border-bottom:1px solid var(--border);">Email</th>
+        <th style="padding:8px 10px;border-bottom:1px solid var(--border);text-align:right;">Tickets</th>
+        <th style="padding:8px 10px;border-bottom:1px solid var(--border);">Portal</th>
+        <th style="padding:8px 10px;border-bottom:1px solid var(--border);">VIP</th>
+        <th style="padding:8px 10px;border-bottom:1px solid var(--border);">Last login</th>
+      </tr></thead>
+      <tbody>
+      {% for u in users %}
+      <tr style="cursor:pointer;" onclick="location.href='/admin/end-users/{{ u.id }}'"
+          onmouseover="this.style.background='#f8fafc';" onmouseout="this.style.background='';">
+        <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;font-weight:500;">{{ u.name or '—' }}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;color:#475569;font-family:'JetBrains Mono',monospace;font-size:11.5px;">{{ u.email or '—' }}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;text-align:right;">{{ u.ticket_count }}</td>
+        <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;">
+          {% if u.portal_access_enabled %}<span style="font-size:10px;color:#065f46;background:#dcfce7;padding:1px 6px;border-radius:4px;">● enabled</span>
+          {% else %}<span style="font-size:10px;color:#475569;">○ off</span>{% endif %}
+        </td>
+        <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;">
+          {% if u.is_vip %}<span style="font-size:10px;color:#92400e;background:#fef3c7;padding:1px 6px;border-radius:4px;">★ VIP</span>{% endif %}
+        </td>
+        <td style="padding:7px 10px;border-bottom:1px solid #f1f5f9;font-size:11px;color:var(--muted);">{{ u.portal_last_login_at[:10] if u.portal_last_login_at else '—' }}</td>
+      </tr>
+      {% else %}
+      <tr><td colspan="6" style="padding:18px;text-align:center;color:var(--muted);font-size:13px;">No end-users match these filters.</td></tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</main>
+{% endblock %}

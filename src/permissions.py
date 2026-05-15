@@ -142,6 +142,9 @@ PERMISSIONS: list[Permission] = [
     {"group": "Admin", "key": "admin.feedback", "label": "Manage feedback inbox",
      "description": "Read, triage, reply, close user-submitted feedback.",
      "destructive": False},
+    {"group": "Admin", "key": "admin.end_users", "label": "Manage end-users & portal access",
+     "description": "View and edit end-user profiles, enable/disable portal access, send portal invites, reset portal passwords. Powers /admin/end-users.",
+     "destructive": True},
 
     # ---------- Views ----------
     {"group": "Views", "key": "views.create_personal", "label": "Create personal views",

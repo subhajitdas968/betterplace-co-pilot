@@ -114,6 +114,7 @@ CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status);
 CREATE INDEX IF NOT EXISTS idx_tickets_group ON tickets(group_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_assignee ON tickets(assignee_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_org ON tickets(organization_id);
+CREATE INDEX IF NOT EXISTS idx_tickets_requester ON tickets(requester_id);
 CREATE INDEX IF NOT EXISTS idx_tickets_updated ON tickets(updated_at);
 
 CREATE TABLE IF NOT EXISTS ticket_comments (
@@ -778,6 +779,62 @@ CREATE TABLE IF NOT EXISTS releases (
     rolled_back_by TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_releases_created ON releases(created_at);
+
+-- ===== Customer 360 / End-user portal (Phase 2) =====
+-- Sidecar to the Zendesk-synced `users` table. We keep portal-specific
+-- fields here because the `users` table is overwritten on every sync —
+-- anything we add there would be wiped. The link is by user_id, so the
+-- relationship survives even when Zendesk renames a user.
+--
+-- This table is the source of truth for everything the customer portal
+-- (built in Phase 4 — not yet) needs:
+--   - portal_access_enabled  → can this person log in to /portal at all?
+--   - portal_password_hash   → bcrypt of self-set password (after invite redeem)
+--   - portal_invite_token    → one-time token for /portal/set-password?token=…
+--   - portal_invite_expires_at, portal_invite_sent_at, portal_invite_sent_by
+--   - portal_last_login_at
+--   - permissions_json       → {can_submit, can_see_own, can_see_cc,
+--                                can_see_org, can_see_domain} as flags
+--   - admin_notes            → free-text from agents (visible on Customer 360)
+CREATE TABLE IF NOT EXISTS end_user_profiles (
+    user_id INTEGER PRIMARY KEY,             -- FK → users.id
+    portal_access_enabled INTEGER NOT NULL DEFAULT 0,
+    portal_password_hash TEXT,
+    portal_invite_token TEXT,
+    portal_invite_expires_at TEXT,
+    portal_invite_sent_at TEXT,
+    portal_invite_sent_by TEXT,              -- app_user email
+    portal_last_login_at TEXT,
+    permissions_json TEXT NOT NULL DEFAULT '{}',
+    admin_notes TEXT,
+    is_vip INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_eup_portal_enabled ON end_user_profiles(portal_access_enabled);
+CREATE INDEX IF NOT EXISTS idx_eup_invite_token ON end_user_profiles(portal_invite_token);
+
+-- Many-to-many between end-users and the customer organizations they're
+-- attached to. ZD has a single organization_id per user; this table allows
+-- the multi-tag case (one person at multiple customers) requested in the
+-- product spec. Auto-populated by the sync worker each time it sees a
+-- ticket with (requester_id, organization_id) — `source='auto_from_ticket'`.
+-- Admins can also add manual links from /admin/end-users (`source='manual'`).
+CREATE TABLE IF NOT EXISTS end_user_organizations (
+    user_id INTEGER NOT NULL,
+    organization_id INTEGER NOT NULL,
+    is_primary INTEGER NOT NULL DEFAULT 0,   -- 1 = the auto-linked one from the latest ticket
+    source TEXT NOT NULL DEFAULT 'auto_from_ticket',  -- 'auto_from_ticket' | 'manual'
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    linked_by TEXT,                          -- app_user email for manual links
+    PRIMARY KEY (user_id, organization_id),
+    FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE,
+    FOREIGN KEY (organization_id) REFERENCES organizations(id) ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS idx_euo_user ON end_user_organizations(user_id);
+CREATE INDEX IF NOT EXISTS idx_euo_org ON end_user_organizations(organization_id);
 """
 
 
@@ -1263,6 +1320,18 @@ def upsert_ticket(c: sqlite3.Connection, t: dict) -> None:
         json.dumps(t),
         str(t["id"]),  # external_id mirrors id for ZD-sourced rows
     ))
+    # Phase 2 · auto-link the requester to this organization. Idempotent —
+    # if the (user_id, organization_id) link already exists, just bumps
+    # last_seen_at. Wrapped in try/except so a missing table on an old DB
+    # doesn't break sync (the auto-heal will run init() shortly anyway).
+    rid = t.get("requester_id")
+    oid = t.get("organization_id")
+    if rid and oid:
+        try:
+            link_end_user_to_org(c, rid, oid, source="auto_from_ticket")
+        except sqlite3.OperationalError:
+            # end_user_organizations table doesn't exist yet — pre-Phase 2 DB
+            pass
 
 
 # =============================================================================
@@ -3450,3 +3519,264 @@ def seed_default_views(c: sqlite3.Connection) -> dict:
               color, icon, pos, now, now))
         result["created"].append(name)
     return result
+
+
+# ===========================================================================
+# Customer 360 / End-user portal helpers (Phase 2)
+# ===========================================================================
+
+# Default permissions JSON for a freshly-invited end-user. Admins can tighten
+# these from the user's edit page. The portal (built in Phase 4) reads this
+# verbatim to decide what the user sees.
+END_USER_DEFAULT_PERMISSIONS = {
+    "can_submit": True,
+    "can_see_own": True,
+    "can_see_cc": True,
+    "can_see_org": False,
+    "can_see_domain": False,
+}
+
+
+def get_end_user_profile(c: sqlite3.Connection, user_id: int) -> dict | None:
+    r = c.execute("SELECT * FROM end_user_profiles WHERE user_id=?",
+                  (user_id,)).fetchone()
+    if not r:
+        return None
+    p = dict(r)
+    try:
+        p["permissions"] = json.loads(p.get("permissions_json") or "{}")
+    except json.JSONDecodeError:
+        p["permissions"] = {}
+    return p
+
+
+def upsert_end_user_profile(
+    c: sqlite3.Connection, user_id: int, *,
+    portal_access_enabled: bool | None = None,
+    permissions: dict | None = None,
+    admin_notes: str | None = None,
+    is_vip: bool | None = None,
+) -> dict:
+    """Create or update the sidecar profile. Pass only the fields you want
+    to change — the rest are preserved. Initial create gets default perms."""
+    existing = get_end_user_profile(c, user_id)
+    now = now_iso()
+    if existing is None:
+        perms = permissions if permissions is not None else dict(END_USER_DEFAULT_PERMISSIONS)
+        c.execute("""
+            INSERT INTO end_user_profiles
+                (user_id, portal_access_enabled, permissions_json,
+                 admin_notes, is_vip, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, int(bool(portal_access_enabled or False)),
+              json.dumps(perms), admin_notes or "",
+              int(bool(is_vip or False)), now, now))
+        return get_end_user_profile(c, user_id)
+
+    sets, vals = [], []
+    if portal_access_enabled is not None:
+        sets.append("portal_access_enabled=?"); vals.append(int(bool(portal_access_enabled)))
+    if permissions is not None:
+        sets.append("permissions_json=?"); vals.append(json.dumps(permissions))
+    if admin_notes is not None:
+        sets.append("admin_notes=?"); vals.append(admin_notes)
+    if is_vip is not None:
+        sets.append("is_vip=?"); vals.append(int(bool(is_vip)))
+    sets.append("updated_at=?"); vals.append(now)
+    vals.append(user_id)
+    c.execute(f"UPDATE end_user_profiles SET {','.join(sets)} WHERE user_id=?", vals)
+    return get_end_user_profile(c, user_id)
+
+
+def set_end_user_invite(c: sqlite3.Connection, user_id: int, *,
+                          token: str, expires_at: str, sent_by: str) -> dict:
+    """Record that an admin issued a portal invite link. The token is what
+    the user clicks; the admin UI shows it once for copy-paste. Stored so
+    /portal/set-password can validate it on the user's redeem visit."""
+    # Make sure a profile row exists first
+    upsert_end_user_profile(c, user_id)
+    now = now_iso()
+    c.execute("""
+        UPDATE end_user_profiles
+           SET portal_invite_token=?, portal_invite_expires_at=?,
+               portal_invite_sent_at=?, portal_invite_sent_by=?,
+               updated_at=?
+         WHERE user_id=?
+    """, (token, expires_at, now, sent_by, now, user_id))
+    return get_end_user_profile(c, user_id)
+
+
+def consume_end_user_invite(c: sqlite3.Connection, token: str) -> dict | None:
+    """Look up an invite by token. Returns the profile if valid + unexpired,
+    else None. Doesn't delete the token here — the caller does that on
+    successful password set."""
+    r = c.execute("""
+        SELECT * FROM end_user_profiles
+         WHERE portal_invite_token=? AND portal_invite_expires_at > ?
+         LIMIT 1
+    """, (token, now_iso())).fetchone()
+    return dict(r) if r else None
+
+
+def set_end_user_password(c: sqlite3.Connection, user_id: int,
+                            password_hash: str) -> None:
+    """Store a bcrypt hash for the end-user's portal login. Clears the
+    invite token (one-time use). Called after a successful /portal/set-password."""
+    now = now_iso()
+    c.execute("""
+        UPDATE end_user_profiles
+           SET portal_password_hash=?, portal_invite_token=NULL,
+               portal_invite_expires_at=NULL, portal_access_enabled=1,
+               updated_at=?
+         WHERE user_id=?
+    """, (password_hash, now, user_id))
+
+
+def list_end_users(c: sqlite3.Connection, *,
+                     search: str | None = None,
+                     org_id: int | None = None,
+                     portal_only: bool = False,
+                     limit: int = 200,
+                     offset: int = 0) -> list[dict]:
+    """List end-users (users.role IN end-user / NULL) with their profile
+    joined. Powers /admin/end-users. Filterable by email/name substring
+    and by organization.
+
+    Two-stage query: first pick candidate user IDs cheaply (search hits the
+    name/email indexes, org-filter hits idx_tickets_org), then aggregate
+    ticket counts only for that candidate set. Without this, on 56k users
+    the planner does a full scan + correlated subquery and times out."""
+    args: list = []
+
+    # ---- Stage 1: candidate user IDs that match the filters ----
+    if org_id:
+        # Anyone whose ticket history touches this org OR who is explicitly
+        # linked via end_user_organizations. UNION DISTINCT is fine — both
+        # sides hit indexes (idx_tickets_org and idx_euo_org respectively).
+        candidate_sql = """
+            SELECT DISTINCT u.id, u.name, u.email, u.role FROM users u WHERE u.id IN (
+              SELECT requester_id FROM tickets WHERE organization_id = ?
+              UNION
+              SELECT user_id FROM end_user_organizations WHERE organization_id = ?
+            )
+        """
+        args.extend([org_id, org_id])
+    else:
+        candidate_sql = "SELECT u.id, u.name, u.email, u.role FROM users u WHERE 1=1"
+
+    if search:
+        candidate_sql += " AND (LOWER(u.email) LIKE ? OR LOWER(u.name) LIKE ?)"
+        s = f"%{search.lower()}%"
+        args.extend([s, s])
+    # Always exclude agents/admins
+    candidate_sql += " AND COALESCE(u.role,'end-user') NOT IN ('agent','admin')"
+    # Bound the candidate set by a healthy multiplier of limit so we don't
+    # accidentally pull millions of rows before counting tickets.
+    candidate_sql += f" LIMIT {int(limit * 10)}"
+
+    # ---- Stage 2: join profile + count tickets only for candidates ----
+    q = f"""
+        WITH cands AS ({candidate_sql})
+        SELECT cands.id, cands.name, cands.email, cands.role,
+               p.portal_access_enabled, p.is_vip, p.portal_last_login_at,
+               p.portal_invite_sent_at,
+               COALESCE(tc.n, 0) AS ticket_count
+          FROM cands
+          LEFT JOIN end_user_profiles p ON p.user_id = cands.id
+          LEFT JOIN (
+              SELECT requester_id, COUNT(*) AS n FROM tickets
+              WHERE requester_id IN (SELECT id FROM cands)
+              GROUP BY requester_id
+          ) tc ON tc.requester_id = cands.id
+         {"WHERE p.portal_access_enabled = 1" if portal_only else ""}
+         ORDER BY ticket_count DESC, cands.name
+         LIMIT ? OFFSET ?
+    """
+    args.extend([limit, offset])
+    return [dict(r) for r in c.execute(q, args).fetchall()]
+
+
+def count_end_users(c: sqlite3.Connection) -> dict:
+    """Roll-up counts for the admin landing chip."""
+    total = c.execute(
+        "SELECT COUNT(*) AS n FROM users "
+        "WHERE COALESCE(role,'end-user') NOT IN ('agent','admin')"
+    ).fetchone()["n"]
+    with_portal = c.execute(
+        "SELECT COUNT(*) AS n FROM end_user_profiles WHERE portal_access_enabled=1"
+    ).fetchone()["n"]
+    return {"total": total, "with_portal": with_portal}
+
+
+def link_end_user_to_org(c: sqlite3.Connection, user_id: int,
+                          organization_id: int, *,
+                          source: str = "auto_from_ticket",
+                          linked_by: str | None = None,
+                          is_primary: bool | None = None) -> None:
+    """Idempotent link. If the (user_id, organization_id) pair already
+    exists, bumps last_seen_at. If `is_primary=True`, demotes any other
+    primary link for that user."""
+    now = now_iso()
+    existing = c.execute(
+        "SELECT * FROM end_user_organizations WHERE user_id=? AND organization_id=?",
+        (user_id, organization_id),
+    ).fetchone()
+    if existing:
+        sets = ["last_seen_at=?"]; vals: list = [now]
+        if is_primary is True:
+            sets.append("is_primary=1")
+        c.execute(
+            f"UPDATE end_user_organizations SET {','.join(sets)} "
+            "WHERE user_id=? AND organization_id=?",
+            (*vals, user_id, organization_id),
+        )
+    else:
+        c.execute("""
+            INSERT INTO end_user_organizations
+                (user_id, organization_id, is_primary, source,
+                 first_seen_at, last_seen_at, linked_by)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        """, (user_id, organization_id,
+              1 if is_primary else 0, source, now, now, linked_by))
+    if is_primary:
+        c.execute("""
+            UPDATE end_user_organizations SET is_primary=0
+             WHERE user_id=? AND organization_id != ?
+        """, (user_id, organization_id))
+
+
+def unlink_end_user_from_org(c: sqlite3.Connection, user_id: int,
+                                organization_id: int) -> None:
+    c.execute("DELETE FROM end_user_organizations WHERE user_id=? AND organization_id=?",
+              (user_id, organization_id))
+
+
+def auto_link_orgs_from_tickets(c: sqlite3.Connection,
+                                  user_id: int | None = None,
+                                  batch_size: int = 500) -> dict:
+    """Backfill / refresh the end_user_organizations table from existing
+    ticket data. Called once after Phase 2 ships (seed) and again as part
+    of the regular sync pass (incremental). If `user_id` is given, scopes
+    to that one user — used when a sync delta touches a known requester."""
+    if user_id is not None:
+        rows = c.execute("""
+            SELECT requester_id, organization_id, MAX(updated_at) AS last_at
+              FROM tickets
+             WHERE requester_id = ? AND organization_id IS NOT NULL
+             GROUP BY requester_id, organization_id
+        """, (user_id,)).fetchall()
+    else:
+        rows = c.execute("""
+            SELECT requester_id, organization_id, MAX(updated_at) AS last_at
+              FROM tickets
+             WHERE requester_id IS NOT NULL AND organization_id IS NOT NULL
+             GROUP BY requester_id, organization_id
+             LIMIT ?
+        """, (batch_size,)).fetchall()
+    linked = 0
+    for r in rows:
+        link_end_user_to_org(c, r["requester_id"], r["organization_id"],
+                              source="auto_from_ticket",
+                              is_primary=None)  # don't auto-promote primary
+        linked += 1
+    return {"linked": linked, "scope": "single" if user_id else "batch"}
