@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterator
 
-from .config import DB_PATH
+from .config import DATA_DIR, DB_PATH
 
 
 _TAG_RE = re.compile(r"<[^>]+>")
