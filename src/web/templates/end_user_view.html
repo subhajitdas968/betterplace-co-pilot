@@ -1,5 +1,10 @@
 {% extends "_base.html" %}
 {% block title %}{{ zd_user.name or zd_user.email }} · End-user{% endblock %}
+{# Tab bar metadata — drives the persistent tab bar in _base.html. #}
+{% block tab_kind %}user{% endblock %}
+{% block tab_id %}{{ zd_user.id }}{% endblock %}
+{% block tab_label %}{{ (zd_user.name or zd_user.email or 'User')|truncate(36, true, '…') }}{% endblock %}
+{% block tab_icon %}👤{% endblock %}
 {% block main %}
 <main class="main-pane admin-pane">
   <div class="back-link-row">

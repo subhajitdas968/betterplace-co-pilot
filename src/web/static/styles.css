@@ -122,7 +122,11 @@ body {
 /* === LAYOUT === */
 .layout {
   flex: 1; min-height: 0;
-  display: grid; grid-template-columns: 280px 1fr; gap: 0;
+  display: grid;
+  /* Width is driven by --sidebar-width (set by JS from localStorage) so the
+     drag-resize feels instant and survives reloads. Default 280px when unset. */
+  grid-template-columns: var(--sidebar-width, 280px) 1fr;
+  gap: 0;
   overflow: hidden;
 }
 
@@ -1676,4 +1680,326 @@ tr.row-status-closed:hover { background: #eef2ff; }
   .layout { grid-template-columns: 220px 1fr; }
   .ticket-body { grid-template-columns: 1fr; overflow-y: auto; }
   .fields-side, .conv-col, .right-col { border-right: none; border-bottom: 1px solid var(--border); }
+}
+
+/* ===========================================================================
+   Persistent ticket/user tab bar — chrome-style, sits below the topbar.
+   Inactive tabs are flat and transparent. Active tab "merges" into the
+   page below by losing its bottom border so it visually continues into the
+   content area (a la a real browser tab strip).
+   =========================================================================== */
+.bp-tab-bar {
+  background: linear-gradient(to bottom, #fafbfc 0%, #f5f7fa 100%);
+  border-bottom: 1px solid #e2e8f0;
+  padding: 6px 12px 0 12px;
+  gap: 1px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  align-items: flex-end;
+  scrollbar-width: thin;
+  scroll-padding: 12px;
+  /* sit just under the topbar */
+  position: sticky;
+  top: 0;
+  z-index: 50;
+}
+.bp-tab-bar::-webkit-scrollbar { height: 4px; }
+.bp-tab-bar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+
+.bp-tab {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 7px 8px 7px 12px;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 500;
+  color: #64748b;
+  background: transparent;
+  border: 1px solid transparent;
+  border-bottom: none;
+  border-top-left-radius: 8px;
+  border-top-right-radius: 8px;
+  max-width: 260px;
+  min-width: 90px;
+  white-space: nowrap;
+  cursor: pointer;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+  user-select: none;
+  /* Subtle wash to separate from neighbor tabs */
+  margin-bottom: -1px;        /* pull down to overlap the bar's bottom border */
+}
+
+.bp-tab:hover {
+  background: #ffffff;
+  color: #334155;
+}
+
+.bp-tab--active {
+  background: #ffffff;
+  color: #0f172a;
+  font-weight: 600;
+  border-color: #e2e8f0;
+  /* The active tab visually merges into the page content below by sitting
+     ON TOP of the bar's bottom border (white covers the border line) */
+  box-shadow: 0 -1px 0 #4f46e5 inset;
+  z-index: 2;
+}
+
+/* Status dot — colored by ticket status. Sits flush against the left edge.
+   Inherits the same palette as the view-list row tints + status badges. */
+.bp-tab-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  background: #cbd5e1;
+  transition: background .14s ease;
+}
+.bp-tab[data-status="open"]    .bp-tab-dot,
+.bp-tab[data-status="new"]     .bp-tab-dot  { background: #f59e0b; }
+.bp-tab[data-status="pending"] .bp-tab-dot  { background: #3b82f6; }
+.bp-tab[data-status="hold"]    .bp-tab-dot  { background: #ec4899; }
+.bp-tab[data-status="solved"]  .bp-tab-dot  { background: #10b981; }
+.bp-tab[data-status="closed"]  .bp-tab-dot  { background: #94a3b8; }
+
+.bp-tab-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+  pointer-events: none;
+}
+
+.bp-tab-label {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  pointer-events: none;
+  /* fade out long labels rather than abrupt ellipsis — feels softer */
+  mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
+  -webkit-mask-image: linear-gradient(to right, #000 calc(100% - 14px), transparent);
+}
+.bp-tab--active .bp-tab-label {
+  /* active tab gets the full subject — no fade on the truncated end since
+     it's "important" and the user can see the title attr on hover. */
+}
+
+/* Close button — invisible by default, appears on tab hover OR when active.
+   Aria-hidden state mirrors visibility for screen readers. */
+.bp-tab-x {
+  background: transparent;
+  border: none;
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  color: #94a3b8;
+  flex-shrink: 0;
+  opacity: 0;
+  transform: scale(0.9);
+  transition: opacity .14s ease, transform .14s ease, background .14s ease, color .14s ease;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+}
+.bp-tab:hover .bp-tab-x,
+.bp-tab--active .bp-tab-x { opacity: 1; transform: scale(1); }
+.bp-tab-x:hover {
+  background: #fee2e2;
+  color: #be123c;
+}
+
+/* Mobile / narrow viewport — tabs get a bit smaller */
+@media (max-width: 900px) {
+  .bp-tab-bar { padding: 4px 8px 0 8px; }
+  .bp-tab { min-width: 70px; padding: 6px 6px 6px 10px; font-size: 11.5px; max-width: 180px; }
+}
+
+/* ===========================================================================
+   Sidebar collapse — toggleable via the « / » buttons or Cmd+\
+   When body has .sidebar-collapsed:
+     - The left rail is squeezed to width 0 with a smooth transition
+     - The floating reopen button (»») slides into view top-left
+   =========================================================================== */
+
+/* Make the layout columns animate. Smooth 200ms feels lively without being
+   slow enough to be annoying when toggling rapidly. */
+.layout { transition: grid-template-columns .22s ease; }
+
+/* Hide button — top-right corner of the sidebar header. Subtle ghost style
+   that doesn't compete with the hero gradient behind it. */
+.sidebar-collapse-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255, 255, 255, 0.18);
+  color: rgba(255, 255, 255, 0.85);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .14s ease, color .14s ease;
+}
+.sidebar-collapse-btn:hover {
+  background: rgba(255, 255, 255, 0.32);
+  color: #fff;
+}
+/* The aside needs to be a positioning context so the button anchors correctly. */
+.nav { position: relative; }
+
+/* Floating reopen button — hidden by default, revealed when collapsed. */
+.sidebar-reopen-btn {
+  position: fixed;
+  top: 60px;        /* below the topbar */
+  left: 10px;
+  z-index: 200;
+  width: 30px;
+  height: 36px;
+  border-radius: 0 10px 10px 0;
+  border: 1px solid #e2e8f0;
+  border-left: none;
+  background: #fff;
+  color: #4f46e5;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: 2px 2px 8px rgba(15, 23, 42, 0.08);
+  display: none;     /* shown when body.sidebar-collapsed */
+  align-items: center;
+  justify-content: center;
+  transition: background .14s ease, color .14s ease, transform .14s ease;
+}
+.sidebar-reopen-btn:hover {
+  background: #4f46e5;
+  color: #fff;
+  transform: translateX(2px);
+}
+
+/* === The actual collapse === */
+body.sidebar-collapsed .layout { grid-template-columns: 0 1fr; }
+body.sidebar-collapsed .nav {
+  /* Width clamped + content hidden behind it. Setting display:none would
+     trash any focused inputs; visibility+overflow keeps state intact. */
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+body.sidebar-collapsed .sidebar-reopen-btn { display: inline-flex; }
+
+/* Tighter at the 1100px breakpoint to match the rest of the layout media query. */
+@media (max-width: 1100px) {
+  body.sidebar-collapsed .layout { grid-template-columns: 0 1fr; }
+}
+
+/* ===========================================================================
+   Sidebar drag-resize handle — invisible-ish hot zone on the right edge of
+   the nav. Hover/active show a thin indigo line so the user knows it's
+   there. Double-click resets width to the default.
+   =========================================================================== */
+.sidebar-resize-handle {
+  position: absolute;
+  top: 0;
+  right: -3px;        /* straddle the border so the hot zone is easy to hit */
+  width: 6px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 4;
+  background: transparent;
+  transition: background .14s ease;
+}
+.sidebar-resize-handle:hover,
+.sidebar-resize-handle:active {
+  background: rgba(79, 70, 229, 0.55);  /* indigo wash on grab */
+}
+/* When the sidebar is collapsed, hide the handle — nothing to resize. */
+body.sidebar-collapsed .sidebar-resize-handle { display: none; }
+
+/* ===========================================================================
+   Right-panel collapse (ticket detail only).
+   Body.right-col-collapsed + .body-detail flips the .ticket-body grid from
+   two-column to single-column and slides the AI/Customer 360 panel out.
+   =========================================================================== */
+.right-col { position: relative; }
+
+.right-col-collapse-btn {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  z-index: 5;
+  width: 22px;
+  height: 22px;
+  border-radius: 6px;
+  border: 1px solid #e2e8f0;
+  background: #ffffff;
+  color: #64748b;
+  font-size: 13px;
+  line-height: 1;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background .14s ease, color .14s ease, border-color .14s ease;
+}
+.right-col-collapse-btn:hover {
+  background: #4f46e5;
+  color: #fff;
+  border-color: #4f46e5;
+}
+
+/* Reopen button on the right edge — mirror of the sidebar one but flipped. */
+.rightcol-reopen-btn {
+  position: fixed;
+  top: 60px;
+  right: 10px;
+  z-index: 200;
+  width: 30px;
+  height: 36px;
+  border-radius: 10px 0 0 10px;
+  border: 1px solid #e2e8f0;
+  border-right: none;
+  background: #fff;
+  color: #4f46e5;
+  font-size: 16px;
+  cursor: pointer;
+  box-shadow: -2px 2px 8px rgba(15, 23, 42, 0.08);
+  display: none;
+  align-items: center;
+  justify-content: center;
+  transition: background .14s ease, color .14s ease, transform .14s ease;
+}
+.rightcol-reopen-btn:hover {
+  background: #4f46e5;
+  color: #fff;
+  transform: translateX(-2px);
+}
+
+/* The actual collapse — single-column conversation, right-col tucked away. */
+.ticket-body { transition: grid-template-columns .22s ease; }
+body.right-col-collapsed .ticket-body {
+  grid-template-columns: minmax(0, 1fr) 0;
+}
+body.right-col-collapsed .right-col {
+  visibility: hidden;
+  pointer-events: none;
+  overflow: hidden;
+}
+/* Reopen button only shows on detail pages where collapse is meaningful. */
+body.body-detail.right-col-collapsed .rightcol-reopen-btn {
+  display: inline-flex;
+}
+/* Match the 1100px breakpoint where the layout reshapes to single-column */
+@media (max-width: 1100px) {
+  /* On narrow viewports the layout already stacks columns vertically, so
+     hiding the right-col just means it doesn't appear at all. */
+  body.right-col-collapsed .ticket-body { grid-template-columns: 1fr; }
+  body.right-col-collapsed .right-col { display: none; }
 }

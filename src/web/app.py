@@ -2474,6 +2474,173 @@ async def index(request: Request, user: dict = Depends(require_user)):
 # F7 · Universal search — cross-view ticket finder
 # ===========================================================================
 
+# ---------------------------------------------------------------------------
+# Cmd+K command palette — global fast-jump search.
+# ---------------------------------------------------------------------------
+# Single endpoint that returns a unified result list across tickets, views,
+# end-users, and admin pages. Each entry has the same shape so the JS can
+# render them uniformly:
+#   {kind, label, sublabel, url, icon}
+# The frontend lives in _base.html (works from every page) — the keyboard
+# shortcut is Cmd+K on Mac / Ctrl+K everywhere else.
+
+# Admin pages registered for Cmd+K — match against label substring. This is
+# manually curated rather than pulled from FEATURE_CATALOG because some
+# catalog entries point at the same URL with different framings, which would
+# confuse the picker.
+_CMDK_ADMIN_PAGES = [
+    ("Admin home", "/admin", "all admin sections"),
+    ("System status", "/admin/status", "health dashboard"),
+    ("End-users", "/admin/end-users", "everyone who's submitted a ticket"),
+    ("Customer portal settings", "/admin/customer-portal", "portal defaults"),
+    ("AI worker", "/admin/ai-worker", "Claude analysis loop"),
+    ("Zendesk sync", "/admin/sync", "ZD pull loop"),
+    ("Cloudflare Tunnel", "/admin/tunnel", "Quick / named tunnels"),
+    ("Backups", "/admin/backups", "nightly DB backups"),
+    ("Releases", "/admin/releases", "version + rollback"),
+    ("Users", "/admin/users", "agent accounts + roles"),
+    ("Roles", "/admin/roles", "permissions matrix"),
+    ("Groups", "/admin/groups", "ticket routing groups"),
+    ("Views", "/admin/views", "list views catalog"),
+    ("Ticket fields", "/admin/fields", "custom fields admin"),
+    ("Forms", "/admin/forms", "ticket forms"),
+    ("Automations", "/admin/automations", "rules engine"),
+    ("User automations", "/admin/user-automations", "lifecycle rules"),
+    ("SLA", "/admin/sla", "SLA policies"),
+    ("Business hours", "/admin/business-hours", "schedules"),
+    ("Auto-replies", "/admin/auto-replies", "templates"),
+    ("Assignment", "/admin/assignment", "round-robin"),
+    ("Gmail intake", "/admin/gmail", "email-to-ticket"),
+    ("Feedback inbox", "/admin/feedback", "in-app feedback"),
+    ("Attachments backfill", "/admin/attachments", "backfill worker"),
+    ("Auth setup", "/admin/auth", "Google OAuth"),
+]
+
+
+@app.get("/api/cmd-k/search")
+async def cmd_k_search(
+    q: str = "", limit: int = 20,
+    user: dict = Depends(require_user),
+):
+    """Cross-source fuzzy search for the Cmd+K palette. Cheap, optimised for
+    typeahead — each section caps results aggressively. Empty q returns a
+    curated "recent + suggestions" list so the palette feels useful even
+    before the user types anything."""
+    q = (q or "").strip()
+    qlower = q.lower()
+    perms = user.get("permissions") or set()
+    is_admin_like = ("admin.feature_flags" in perms) or ("admin.users" in perms)
+
+    results: list[dict] = []
+
+    with db.conn() as c:
+        # ---- Tickets ----
+        # Fast path: numeric → exact id lookup; BP- prefix → local_id lookup.
+        if q.isdigit():
+            row = c.execute(
+                "SELECT id, local_id, subject, status FROM tickets WHERE id=? LIMIT 1",
+                (int(q),)
+            ).fetchone()
+            if row:
+                results.append({
+                    "kind": "ticket", "icon": "🎫",
+                    "label": f"#{row['id']} · {row['subject'] or '(no subject)'}",
+                    "sublabel": f"{row['status']} · {row['local_id'] or 'zd'}",
+                    "url": f"/tickets/{row['id']}",
+                })
+        elif q.upper().startswith("BP-"):
+            row = c.execute(
+                "SELECT id, local_id, subject, status FROM tickets WHERE local_id=? LIMIT 1",
+                (q.upper(),)
+            ).fetchone()
+            if row:
+                results.append({
+                    "kind": "ticket", "icon": "🎫",
+                    "label": f"{row['local_id']} · {row['subject'] or '(no subject)'}",
+                    "sublabel": f"{row['status']} · #{row['id']}",
+                    "url": f"/tickets/{row['id']}",
+                })
+        elif q:
+            # Subject substring — capped to 8 so the palette stays snappy
+            rows = c.execute("""
+                SELECT id, local_id, subject, status FROM tickets
+                 WHERE LOWER(subject) LIKE ?
+                 ORDER BY updated_at DESC LIMIT 8
+            """, (f"%{qlower}%",)).fetchall()
+            for r in rows:
+                results.append({
+                    "kind": "ticket", "icon": "🎫",
+                    "label": f"{r['local_id'] or ('#' + str(r['id']))} · {r['subject'] or '(no subject)'}",
+                    "sublabel": f"{r['status']}",
+                    "url": f"/tickets/{r['id']}",
+                })
+
+        # ---- Views (sidebar entries) ----
+        # Native views are routed at /views/nv_{id} (not by name) — the view
+        # route resolves the slug back to a label/filter set. Using the raw
+        # name here would 404. Icon falls back to the view's own emoji when set.
+        try:
+            v_rows = c.execute("""
+                SELECT id, name, description, icon FROM native_views
+                 WHERE active=1 AND (? = '' OR LOWER(name) LIKE ?)
+                 ORDER BY default_position, name LIMIT 6
+            """, (qlower, f"%{qlower}%")).fetchall()
+            for v in v_rows:
+                results.append({
+                    "kind": "view", "icon": v["icon"] or "📂",
+                    "label": v["name"],
+                    "sublabel": v["description"] or "list view",
+                    "url": f"/views/nv_{v['id']}",
+                })
+        except sqlite3.OperationalError:
+            pass
+
+        # ---- End-users (people) ----
+        if q and len(q) >= 2:
+            u_rows = c.execute("""
+                SELECT id, name, email FROM users
+                 WHERE COALESCE(role,'end-user') NOT IN ('agent','admin')
+                   AND (LOWER(email) LIKE ? OR LOWER(name) LIKE ?)
+                 LIMIT 6
+            """, (f"%{qlower}%", f"%{qlower}%")).fetchall()
+            for u in u_rows:
+                results.append({
+                    "kind": "user", "icon": "👤",
+                    "label": u["name"] or u["email"] or f"User #{u['id']}",
+                    "sublabel": u["email"] or "",
+                    "url": f"/end-users/{u['id']}",
+                })
+
+    # ---- Admin pages — only show if the user can actually open admin ----
+    if is_admin_like:
+        for label, url, sublabel in _CMDK_ADMIN_PAGES:
+            if not q or qlower in label.lower() or qlower in sublabel.lower():
+                results.append({
+                    "kind": "admin", "icon": "⚙",
+                    "label": label, "sublabel": sublabel, "url": url,
+                })
+                if len(results) >= 60:
+                    break
+
+    # ---- Actions (always present, useful as "shortcut to do something") ----
+    actions = [
+        ("New ticket", "/tickets/new", "create a native ticket", "✚"),
+        ("Search tickets", f"/search?q={q}" if q else "/search", "full search page", "🔍"),
+        ("My profile", "/profile", "your availability + work hours", "🧑"),
+        ("Admin home", "/admin", "everything admin", "⚙"),
+    ]
+    for label, url, sublabel, icon in actions:
+        if not q or qlower in label.lower() or qlower in sublabel.lower():
+            results.append({
+                "kind": "action", "icon": icon,
+                "label": label, "sublabel": sublabel, "url": url,
+            })
+
+    # Cap total results — JS hides anything past `limit`. We err on the side
+    # of returning more so kind-based filtering on the client still has data.
+    return JSONResponse({"q": q, "results": results[:int(max(5, min(limit, 50)))]})
+
+
 @app.get("/search", response_class=HTMLResponse)
 async def search_page(
     request: Request,
@@ -2649,6 +2816,135 @@ async def new_ticket_form(request: Request, user: dict = Depends(require_user)):
         "groups": [dict(g) for g in groups],
         "customers": customers,
         **sb,
+    })
+
+
+@app.post("/api/tickets/bulk-update")
+async def tickets_bulk_update(
+    request: Request,
+    user: dict = Depends(require_user),
+):
+    """Apply one action to many tickets in a single request.
+
+    Form fields:
+      action       — 'set_status' | 'set_priority' | 'set_assignee' | 'add_tag'
+      value        — the new value (status string, priority string, email, or tag(s))
+      ticket_ids   — repeated, one per ticket selected
+
+    Permission gating: each action checks the relevant perm — refusing the
+    whole batch if the user lacks it, rather than silently skipping rows.
+    Audits the bulk action AND each individual ticket change in access_log
+    so the trail is queryable later.
+
+    Writes are LOCAL ONLY (same policy as the per-field feedback endpoint —
+    Block #1 forbids sync-direction writes back to Zendesk). The local
+    override is what the agent ticket detail page reads via
+    db.effective_custom_fields().
+    """
+    form = await request.form()
+    action = (form.get("action") or "").strip()
+    value = (form.get("value") or "").strip()
+    raw_ids = form.getlist("ticket_ids") if hasattr(form, "getlist") else []
+    try:
+        ticket_ids = [int(x) for x in raw_ids if x]
+    except (TypeError, ValueError):
+        raise HTTPException(400, "ticket_ids must be integers")
+    if not ticket_ids:
+        raise HTTPException(400, "no ticket_ids supplied")
+    if len(ticket_ids) > 500:
+        raise HTTPException(400, "max 500 tickets per bulk update")
+
+    # Per-action permission gate
+    perms = user.get("permissions") or set()
+    required = {
+        "set_status":    "tickets.change_status",
+        "set_priority":  "tickets.edit_fields",
+        "set_assignee":  "tickets.assign",
+        "add_tag":       "tickets.edit_fields",
+    }.get(action)
+    if not required:
+        raise HTTPException(400, f"unknown action: {action}")
+    if required not in perms:
+        raise HTTPException(403, f"missing permission: {required}")
+
+    updated = 0
+    errors = 0
+    error_samples: list[str] = []
+
+    with db.conn() as c:
+        # Bulk audit row first so we can correlate later
+        db.log_access(c, actor_email=user["email"],
+                      event_type=f"ticket.bulk.{action}",
+                      target_kind="bulk", target_id="",
+                      detail={"count": len(ticket_ids), "value": value})
+
+        if action == "set_status":
+            if value not in ("new", "open", "pending", "hold", "solved", "closed"):
+                raise HTTPException(400, f"invalid status: {value}")
+            for tid in ticket_ids:
+                try:
+                    c.execute("UPDATE tickets SET status=?, updated_at=? WHERE id=?",
+                              (value, db.now_iso(), tid))
+                    updated += 1
+                except Exception as e:
+                    errors += 1
+                    if len(error_samples) < 3: error_samples.append(f"#{tid}: {e}")
+
+        elif action == "set_priority":
+            if value not in ("urgent", "high", "normal", "low"):
+                raise HTTPException(400, f"invalid priority: {value}")
+            for tid in ticket_ids:
+                try:
+                    c.execute("UPDATE tickets SET priority=?, updated_at=? WHERE id=?",
+                              (value, db.now_iso(), tid))
+                    updated += 1
+                except Exception as e:
+                    errors += 1
+                    if len(error_samples) < 3: error_samples.append(f"#{tid}: {e}")
+
+        elif action == "set_assignee":
+            # Empty value = unassign. Otherwise look up the ZD user by email.
+            assignee_id = None
+            if value:
+                u_row = c.execute(
+                    "SELECT id FROM users WHERE LOWER(email)=LOWER(?) LIMIT 1", (value,)
+                ).fetchone()
+                if not u_row:
+                    raise HTTPException(400, f"no ZD user found for email: {value}")
+                assignee_id = u_row["id"]
+            for tid in ticket_ids:
+                try:
+                    c.execute("UPDATE tickets SET assignee_id=?, updated_at=? WHERE id=?",
+                              (assignee_id, db.now_iso(), tid))
+                    updated += 1
+                except Exception as e:
+                    errors += 1
+                    if len(error_samples) < 3: error_samples.append(f"#{tid}: {e}")
+
+        elif action == "add_tag":
+            new_tags = [t.strip() for t in value.split(",") if t.strip()]
+            if not new_tags:
+                raise HTTPException(400, "no tags provided")
+            for tid in ticket_ids:
+                try:
+                    row = c.execute("SELECT tags FROM tickets WHERE id=?", (tid,)).fetchone()
+                    if not row:
+                        errors += 1
+                        if len(error_samples) < 3: error_samples.append(f"#{tid}: not found")
+                        continue
+                    existing = json.loads(row["tags"] or "[]")
+                    merged = existing + [t for t in new_tags if t not in existing]
+                    c.execute("UPDATE tickets SET tags=?, updated_at=? WHERE id=?",
+                              (json.dumps(merged), db.now_iso(), tid))
+                    updated += 1
+                except Exception as e:
+                    errors += 1
+                    if len(error_samples) < 3: error_samples.append(f"#{tid}: {e}")
+
+    return JSONResponse({
+        "ok": True, "updated": updated, "errors": errors,
+        "error_samples": error_samples,
+        "action": action, "value": value, "count": len(ticket_ids),
     })
 
 

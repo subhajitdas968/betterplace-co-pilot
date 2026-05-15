@@ -1,5 +1,12 @@
 {% extends "_base.html" %}
 {% block title %}#{{ ticket.id }} · BetterPlace Co-Pilot{% endblock %}
+{# Tab bar metadata — drives the persistent tab bar in _base.html. #}
+{% block tab_kind %}ticket{% endblock %}
+{% block tab_id %}{{ ticket.id }}{% endblock %}
+{% block tab_label %}{{ ticket.local_id or ('#' ~ ticket.id) }} · {{ (ticket.subject or 'No subject')|truncate(40, true, '…') }}{% endblock %}
+{% block tab_icon %}🎫{% endblock %}
+{# Per-status dot color is set in CSS via [data-tab-status="…"] on the tab pill #}
+{% block tab_status %}{{ ticket.status or '' }}{% endblock %}
 {% block main %}
 
 <main class="main-pane main-pane-detail">
@@ -233,6 +240,12 @@
 
     <!-- RIGHT: Fields (collapsible) + AI panel -->
     <div class="right-col">
+      <!-- Collapse this panel — floating expand button is in _base.html -->
+      <button type="button" class="right-col-collapse-btn"
+              onclick="window._toggleRightCol(true)"
+              aria-label="Hide right panel" title="Hide panel (⌘])">
+        <span aria-hidden="true">»</span>
+      </button>
 
       <!-- Customer 360 — Phase 1: identity + activity + recent tickets + AI pattern.
            Open by default so the agent sees the requester history alongside

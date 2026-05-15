@@ -9,7 +9,12 @@
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="/static/styles.css?v={{ asset_v }}">
 </head>
-<body class="{% if in_detail %}body-detail{% else %}body-list{% endif %}">
+<body class="{% if in_detail %}body-detail{% else %}body-list{% endif %}"
+      data-tab-kind="{% block tab_kind %}{% endblock %}"
+      data-tab-id="{% block tab_id %}{% endblock %}"
+      data-tab-label="{% block tab_label %}{% endblock %}"
+      data-tab-icon="{% block tab_icon %}{% endblock %}"
+      data-tab-status="{% block tab_status %}{% endblock %}">
 
 <div class="topbar">
   <div class="brand">
@@ -268,10 +273,267 @@ refreshNotifs();
 setInterval(refreshNotifs, 30000);
 </script>
 
+<!-- Persistent tab bar — see styles.css for `.bp-tab*` rules. -->
+<div id="tab-bar" class="bp-tab-bar" style="display:none;">
+  <!-- Tab pills injected here by JS -->
+</div>
+<script>
+(function() {
+  const STORAGE_KEY = 'bp_tabs_v2';
+  const MAX_TABS = 12;
+
+  function loadTabs() {
+    try {
+      const raw = localStorage.getItem(STORAGE_KEY);
+      const arr = raw ? JSON.parse(raw) : [];
+      return Array.isArray(arr) ? arr : [];
+    } catch (e) { return []; }
+  }
+  function saveTabs(tabs) {
+    try { localStorage.setItem(STORAGE_KEY, JSON.stringify(tabs)); } catch (e) {}
+  }
+
+  function currentTab() {
+    const b = document.body;
+    const kind = b.dataset.tabKind || '';
+    const id = b.dataset.tabId || '';
+    if (!kind || !id) return null;
+    let url, icon;
+    if (kind === 'ticket') { url = '/tickets/' + id; icon = '🎫'; }
+    else if (kind === 'user') { url = '/end-users/' + id; icon = '👤'; }
+    else return null;
+    return {
+      kind, id, url,
+      label: (b.dataset.tabLabel || '').trim() || (kind + ' ' + id),
+      icon: (b.dataset.tabIcon || '').trim() || icon,
+      status: (b.dataset.tabStatus || '').trim() || '',
+    };
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function render() {
+    let tabs = loadTabs();
+    const bar = document.getElementById('tab-bar');
+    if (!bar) return;
+    if (!tabs.length) { bar.style.display = 'none'; return; }
+    bar.style.display = 'flex';
+    const here = window.location.pathname.split('?')[0];
+    bar.innerHTML = tabs.map(t => {
+      const isActive = here === t.url.split('?')[0];
+      const statusAttr = t.status ? ` data-status="${escapeHtml(t.status)}"` : '';
+      return `<div class="bp-tab${isActive ? ' bp-tab--active' : ''}"
+                   data-url="${escapeHtml(t.url)}"${statusAttr}
+                   title="${escapeHtml(t.label)}">
+        <span class="bp-tab-dot" aria-hidden="true"></span>
+        <span class="bp-tab-icon" aria-hidden="true">${escapeHtml(t.icon || '·')}</span>
+        <span class="bp-tab-label">${escapeHtml(t.label)}</span>
+        <button type="button" class="bp-tab-x" data-url="${escapeHtml(t.url)}"
+                aria-label="Close tab" title="Close (⌘W)">×</button>
+      </div>`;
+    }).join('');
+  }
+
+  function ensureCurrentTabPresent() {
+    const cur = currentTab();
+    if (!cur) return;
+    let tabs = loadTabs();
+    const i = tabs.findIndex(t => t.url === cur.url);
+    if (i >= 0) {
+      tabs[i] = {...tabs[i], ...cur};
+      tabs.unshift(tabs.splice(i, 1)[0]);
+    } else {
+      tabs.unshift(cur);
+    }
+    if (tabs.length > MAX_TABS) tabs = tabs.slice(0, MAX_TABS);
+    saveTabs(tabs);
+  }
+
+  // Delegated click — handles tab open + close
+  document.addEventListener('click', (e) => {
+    const closeBtn = e.target.closest('.bp-tab-x');
+    if (closeBtn) {
+      e.preventDefault(); e.stopPropagation();
+      const url = closeBtn.dataset.url;
+      let tabs = loadTabs().filter(t => t.url !== url);
+      saveTabs(tabs);
+      if (window.location.pathname.split('?')[0] === url.split('?')[0]) {
+        const lastView = sessionStorage.getItem('bp_last_view') || '/views/nv_1';
+        window.location.href = lastView;
+      } else { render(); }
+      return;
+    }
+    const tab = e.target.closest('.bp-tab');
+    if (tab) {
+      const url = tab.dataset.url;
+      if (url) window.location.href = url;
+    }
+  });
+
+  // Middle-click on a tab = close (browser-style)
+  document.addEventListener('mousedown', (e) => {
+    if (e.button !== 1) return;
+    const tab = e.target.closest('.bp-tab');
+    if (!tab) return;
+    e.preventDefault();
+    const url = tab.dataset.url;
+    let tabs = loadTabs().filter(t => t.url !== url);
+    saveTabs(tabs);
+    if (window.location.pathname.split('?')[0] === url.split('?')[0]) {
+      const lastView = sessionStorage.getItem('bp_last_view') || '/views/nv_1';
+      window.location.href = lastView;
+    } else { render(); }
+  });
+
+  function rememberLastView() {
+    const cur = currentTab();
+    if (cur) return;
+    const path = window.location.pathname;
+    if (path.startsWith('/views/') || path.startsWith('/admin') || path === '/') {
+      try { sessionStorage.setItem('bp_last_view', window.location.pathname + window.location.search); } catch (e) {}
+    }
+  }
+
+  ensureCurrentTabPresent();
+  rememberLastView();
+  render();
+})();
+
+// ---- Sidebar collapse + drag-resize + right-panel collapse ----
+(function() {
+  const SB_COLLAPSE_KEY = 'bp_sidebar_collapsed';
+  const SB_WIDTH_KEY    = 'bp_sidebar_width';
+  const RC_COLLAPSE_KEY = 'bp_rightcol_collapsed';
+  const SB_MIN = 200, SB_MAX = 460, SB_DEFAULT = 280;
+
+  // ---------------------- Sidebar collapse ----------------------
+  function applySidebar(collapsed) {
+    document.body.classList.toggle('sidebar-collapsed', collapsed);
+  }
+  window._toggleSidebar = function(forceCollapsed) {
+    const cur = document.body.classList.contains('sidebar-collapsed');
+    const next = (typeof forceCollapsed === 'boolean') ? forceCollapsed : !cur;
+    applySidebar(next);
+    try { localStorage.setItem(SB_COLLAPSE_KEY, next ? '1' : '0'); } catch (e) {}
+  };
+  try { if (localStorage.getItem(SB_COLLAPSE_KEY) === '1') applySidebar(true); } catch (e) {}
+
+  // ---------------------- Sidebar width persistence ----------------------
+  function applySidebarWidth(px) {
+    px = Math.max(SB_MIN, Math.min(SB_MAX, Number(px) || SB_DEFAULT));
+    document.documentElement.style.setProperty('--sidebar-width', px + 'px');
+    return px;
+  }
+  try {
+    const saved = parseInt(localStorage.getItem(SB_WIDTH_KEY) || '', 10);
+    if (!Number.isNaN(saved)) applySidebarWidth(saved);
+  } catch (e) {}
+
+  // ---------------------- Sidebar drag-resize ----------------------
+  // The handle div is inserted at the right edge of `.nav` after DOMContentLoaded
+  // since the aside might not exist yet during this script's first pass.
+  function attachResizeHandle() {
+    const aside = document.querySelector('aside.nav');
+    if (!aside || aside.querySelector('.sidebar-resize-handle')) return;
+    const handle = document.createElement('div');
+    handle.className = 'sidebar-resize-handle';
+    handle.setAttribute('aria-label', 'Resize sidebar');
+    handle.setAttribute('title', 'Drag to resize');
+    aside.appendChild(handle);
+
+    let dragging = false;
+    let startX = 0, startW = 0;
+    handle.addEventListener('mousedown', (e) => {
+      // Refuse to drag when the sidebar is collapsed — would be confusing
+      if (document.body.classList.contains('sidebar-collapsed')) return;
+      dragging = true;
+      startX = e.clientX;
+      startW = aside.getBoundingClientRect().width;
+      document.body.style.cursor = 'col-resize';
+      document.body.style.userSelect = 'none';
+      e.preventDefault();
+    });
+    document.addEventListener('mousemove', (e) => {
+      if (!dragging) return;
+      const delta = e.clientX - startX;
+      applySidebarWidth(startW + delta);
+    });
+    document.addEventListener('mouseup', () => {
+      if (!dragging) return;
+      dragging = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      // Persist final width
+      try {
+        const cssVal = getComputedStyle(document.documentElement).getPropertyValue('--sidebar-width').trim();
+        const px = parseInt(cssVal, 10);
+        if (!Number.isNaN(px)) localStorage.setItem(SB_WIDTH_KEY, String(px));
+      } catch (e) {}
+    });
+    // Double-click handle → reset to default
+    handle.addEventListener('dblclick', () => {
+      applySidebarWidth(SB_DEFAULT);
+      try { localStorage.setItem(SB_WIDTH_KEY, String(SB_DEFAULT)); } catch (e) {}
+    });
+  }
+  // Sidebar exists in DOM by the time this script runs because it's emitted
+  // before us, but be defensive anyway.
+  if (document.readyState !== 'loading') attachResizeHandle();
+  else document.addEventListener('DOMContentLoaded', attachResizeHandle);
+
+  // ---------------------- Right-col collapse (ticket detail only) ----------------------
+  function applyRightCol(collapsed) {
+    document.body.classList.toggle('right-col-collapsed', collapsed);
+  }
+  window._toggleRightCol = function(forceCollapsed) {
+    const cur = document.body.classList.contains('right-col-collapsed');
+    const next = (typeof forceCollapsed === 'boolean') ? forceCollapsed : !cur;
+    applyRightCol(next);
+    try { localStorage.setItem(RC_COLLAPSE_KEY, next ? '1' : '0'); } catch (e) {}
+  };
+  try { if (localStorage.getItem(RC_COLLAPSE_KEY) === '1') applyRightCol(true); } catch (e) {}
+
+  // ---------------------- Keyboard shortcuts ----------------------
+  // Cmd+\ → toggle sidebar (VS Code convention)
+  // Cmd+] → toggle right panel
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmd = isMac ? e.metaKey : e.ctrlKey;
+    if (!cmd) return;
+    if (e.key === '\\') { e.preventDefault(); window._toggleSidebar(); }
+    else if (e.key === ']') { e.preventDefault(); window._toggleRightCol(); }
+  });
+})();
+</script>
+
+<!-- Floating button to expand sidebar when it's hidden. Shown via CSS only
+     when <body> has `sidebar-collapsed` class. -->
+<button type="button" id="sidebar-reopen" class="sidebar-reopen-btn"
+        onclick="window._toggleSidebar(false)" aria-label="Show sidebar" title="Show sidebar (⌘\)">
+  <span aria-hidden="true">»</span>
+</button>
+
+<!-- Floating button to bring back the right panel on ticket detail. Hidden by
+     default; CSS reveals when body has `right-col-collapsed` AND we're on a
+     detail page (body-detail). -->
+<button type="button" id="rightcol-reopen" class="rightcol-reopen-btn"
+        onclick="window._toggleRightCol(false)"
+        aria-label="Show right panel" title="Show panel (⌘])">
+  <span aria-hidden="true">«</span>
+</button>
+
 <div class="layout {% if in_detail %}layout-detail{% else %}layout-list{% endif %}">
 
   <!-- LEFT: Views sidebar -->
   <aside class="nav">
+    <!-- Collapse button — sits in the top-right corner of the sidebar header -->
+    <button type="button" class="sidebar-collapse-btn"
+            onclick="window._toggleSidebar(true)" aria-label="Hide sidebar" title="Hide sidebar (⌘\)">
+      <span aria-hidden="true">«</span>
+    </button>
     <div class="nav-hero">
       <h4>Views</h4>
       <div style="font-size:10.5px;color:rgba(255,255,255,0.7);">click to load tickets</div>
@@ -537,6 +799,183 @@ async function sendFb() {
 }
 </script>
 {% endif %}
+
+<!-- ============================================================ -->
+<!-- Cmd+K command palette — available on every page              -->
+<!-- ============================================================ -->
+<div id="cmdk-modal" style="display:none;position:fixed;inset:0;background:rgba(15,23,42,0.45);z-index:2000;align-items:flex-start;justify-content:center;padding-top:80px;">
+  <div style="background:#fff;border-radius:12px;width:min(640px,90vw);box-shadow:0 20px 60px rgba(15,23,42,0.3);overflow:hidden;">
+    <div style="padding:14px 16px;border-bottom:1px solid #e5e7eb;display:flex;align-items:center;gap:10px;">
+      <span style="font-size:16px;color:#94a3b8;">⌘</span>
+      <input id="cmdk-input" placeholder="Search tickets, views, users, admin pages…" autocomplete="off"
+             style="flex:1;border:none;outline:none;font-size:15px;background:transparent;">
+      <kbd style="font-size:10px;color:#94a3b8;background:#f1f5f9;padding:2px 6px;border-radius:4px;">esc</kbd>
+    </div>
+    <div id="cmdk-results" style="max-height:60vh;overflow-y:auto;"></div>
+    <div style="padding:8px 16px;border-top:1px solid #f1f5f9;font-size:10.5px;color:#94a3b8;display:flex;gap:12px;">
+      <span><kbd style="background:#f1f5f9;padding:1px 4px;border-radius:3px;">↑↓</kbd> navigate</span>
+      <span><kbd style="background:#f1f5f9;padding:1px 4px;border-radius:3px;">↵</kbd> open</span>
+      <span><kbd style="background:#f1f5f9;padding:1px 4px;border-radius:3px;">⌘K</kbd> toggle</span>
+      <span style="margin-left:auto;">Tip: type <code>BP-1234</code> or a ticket id to jump</span>
+    </div>
+  </div>
+</div>
+<script>
+(function() {
+  let cmdkOpen = false;
+  let cmdkResults = [];
+  let cmdkActive = 0;
+  let cmdkSearchTimer = null;
+
+  const modal = () => document.getElementById('cmdk-modal');
+  const input = () => document.getElementById('cmdk-input');
+  const resultsEl = () => document.getElementById('cmdk-results');
+
+  function openPalette() {
+    modal().style.display = 'flex';
+    input().value = '';
+    cmdkOpen = true;
+    cmdkActive = 0;
+    setTimeout(() => input().focus(), 10);
+    wireResultsDelegation();  // safe to call repeatedly — guards itself
+    runSearch('');
+  }
+  function closePalette() {
+    modal().style.display = 'none';
+    cmdkOpen = false;
+  }
+
+  async function runSearch(q) {
+    clearTimeout(cmdkSearchTimer);
+    cmdkSearchTimer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/cmd-k/search?q=' + encodeURIComponent(q || ''));
+        if (!r.ok) return;
+        const j = await r.json();
+        cmdkResults = j.results || [];
+        cmdkActive = 0;
+        render();
+      } catch (e) {}
+    }, 80);
+  }
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function render() {
+    if (!cmdkResults.length) {
+      resultsEl().innerHTML = '<div style="padding:24px;text-align:center;font-size:13px;color:#94a3b8;">No results.</div>';
+      return;
+    }
+    // Group by kind, in stable display order
+    const order = ['ticket', 'view', 'user', 'admin', 'action'];
+    const labels = {ticket: 'Tickets', view: 'Views', user: 'People', admin: 'Admin', action: 'Actions'};
+    const groups = {};
+    cmdkResults.forEach((r, i) => { (groups[r.kind] = groups[r.kind] || []).push({...r, _i: i}); });
+    let html = '';
+    for (const k of order) {
+      if (!groups[k]) continue;
+      html += `<div style="padding:6px 16px;font-size:10px;color:#94a3b8;text-transform:uppercase;letter-spacing:0.06em;background:#fafbfc;border-bottom:1px solid #f1f5f9;">${labels[k]}</div>`;
+      for (const r of groups[k]) {
+        const isActive = r._i === cmdkActive;
+        // No inline onclick/onmouseover — delegated below. data-idx is the
+        // ONLY thing the handlers need to find the result.
+        html += `<div class="cmdk-row" data-idx="${r._i}"
+          style="padding:9px 16px;cursor:pointer;display:flex;align-items:center;gap:12px;
+                 background:${isActive ? '#eef2ff' : 'transparent'};
+                 border-left:3px solid ${isActive ? '#4f46e5' : 'transparent'};">
+          <span style="font-size:15px;width:18px;text-align:center;pointer-events:none;">${escapeHtml(r.icon || '·')}</span>
+          <div style="flex:1;min-width:0;pointer-events:none;">
+            <div style="font-size:13px;color:#0f172a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.label)}</div>
+            ${r.sublabel ? `<div style="font-size:11px;color:#64748b;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${escapeHtml(r.sublabel)}</div>` : ''}
+          </div>
+          ${isActive ? '<kbd style="font-size:10px;color:#4f46e5;background:#e0e7ff;padding:1px 6px;border-radius:4px;pointer-events:none;">↵</kbd>' : ''}
+        </div>`;
+      }
+    }
+    resultsEl().innerHTML = html;
+    // Scroll active item into view
+    const activeEl = resultsEl().querySelector(`[data-idx="${cmdkActive}"]`);
+    if (activeEl) activeEl.scrollIntoView({block: 'nearest'});
+  }
+
+  function activateIdx(i) {
+    const r = cmdkResults[i];
+    if (!r || !r.url) return;
+    // Close synchronously then navigate — even if navigation is blocked
+    // by the browser the palette stays closed (so user can retry).
+    closePalette();
+    window.location.href = r.url;
+  }
+
+  // Delegated handlers — wired ONCE on the results container, so dynamically
+  // rendered rows don't need per-row onclick attributes. This avoids the
+  // template-literal-escaping pitfalls that broke the first version.
+  function wireResultsDelegation() {
+    const box = resultsEl();
+    if (!box || box._cmdkWired) return;
+    box._cmdkWired = true;
+    box.addEventListener('click', (e) => {
+      const row = e.target.closest('.cmdk-row');
+      if (!row) return;
+      const idx = Number(row.dataset.idx);
+      if (Number.isNaN(idx)) return;
+      e.preventDefault();
+      e.stopPropagation();
+      activateIdx(idx);
+    });
+    box.addEventListener('mousemove', (e) => {
+      const row = e.target.closest('.cmdk-row');
+      if (!row) return;
+      const idx = Number(row.dataset.idx);
+      if (Number.isNaN(idx) || idx === cmdkActive) return;
+      cmdkActive = idx;
+      render();
+    });
+  }
+
+  // Global keyboard handler
+  document.addEventListener('keydown', (e) => {
+    const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+    const cmd = isMac ? e.metaKey : e.ctrlKey;
+    if (cmd && (e.key === 'k' || e.key === 'K')) {
+      e.preventDefault();
+      cmdkOpen ? closePalette() : openPalette();
+      return;
+    }
+    if (!cmdkOpen) return;
+    if (e.key === 'Escape') { e.preventDefault(); closePalette(); return; }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      cmdkActive = Math.min(cmdkActive + 1, cmdkResults.length - 1);
+      render(); return;
+    }
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      cmdkActive = Math.max(cmdkActive - 1, 0);
+      render(); return;
+    }
+    if (e.key === 'Enter') {
+      e.preventDefault();
+      window._cmdkActivate(cmdkActive);
+      return;
+    }
+  });
+
+  // Search-on-type
+  document.addEventListener('input', (e) => {
+    if (e.target && e.target.id === 'cmdk-input') runSearch(e.target.value);
+  });
+
+  // Click on the dark backdrop (the modal element itself, NOT children)
+  // closes the palette. Capture-phase + identity check on `target` is safer
+  // than the previous version which sometimes lost the click race.
+  modal().addEventListener('mousedown', (e) => {
+    if (e.target === modal()) closePalette();
+  });
+})();
+</script>
 
 </body>
 </html>

@@ -65,10 +65,50 @@
   </div>
 
   {% if tickets %}
+
+  <!-- Bulk-action toolbar (hidden until ≥1 row selected) -->
+  <div id="bulk-bar" style="display:none;position:sticky;top:0;z-index:50;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:10px 16px;border-radius:10px;margin-bottom:10px;display:none;align-items:center;gap:12px;flex-wrap:wrap;">
+    <span id="bulk-count" style="font-weight:600;font-size:13px;">0 selected</span>
+    <button type="button" onclick="bulkClear()" style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:4px 10px;border-radius:6px;cursor:pointer;font-size:11px;">Clear</button>
+    <div style="flex:1;"></div>
+    {% if user.permissions and 'tickets.change_status' in user.permissions %}
+    <select id="bulk-status" onchange="bulkApply('set_status', this.value); this.value='';"
+            style="font-size:12px;padding:5px 8px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;">
+      <option value="">Set status…</option>
+      <option value="open">Open</option>
+      <option value="pending">Pending</option>
+      <option value="hold">On hold</option>
+      <option value="solved">Solved</option>
+      <option value="closed">Closed</option>
+    </select>
+    {% endif %}
+    {% if user.permissions and 'tickets.edit_fields' in user.permissions %}
+    <select id="bulk-priority" onchange="bulkApply('set_priority', this.value); this.value='';"
+            style="font-size:12px;padding:5px 8px;border-radius:6px;border:none;background:rgba(255,255,255,0.15);color:#fff;">
+      <option value="">Set priority…</option>
+      <option value="urgent">Urgent</option>
+      <option value="high">High</option>
+      <option value="normal">Normal</option>
+      <option value="low">Low</option>
+    </select>
+    <button type="button" onclick="bulkAddTag()"
+            style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;">+ Tag</button>
+    {% endif %}
+    {% if user.permissions and 'tickets.assign' in user.permissions %}
+    <button type="button" onclick="bulkAssign()"
+            style="background:rgba(255,255,255,0.15);border:none;color:#fff;padding:5px 10px;border-radius:6px;cursor:pointer;font-size:12px;">Assign…</button>
+    {% endif %}
+    <span id="bulk-status-msg" style="font-size:11px;opacity:0.9;"></span>
+  </div>
+
   <div class="ticket-table-wrap">
     <table class="ticket-table">
       <thead>
         <tr>
+          <th style="width:28px;padding:0 6px;">
+            <input type="checkbox" id="bulk-master" onchange="bulkToggleAll(this)"
+                   onclick="event.stopPropagation();" title="Select all on this page">
+          </th>
           {% for col in view_columns %}
           <th class="{{ col.th }}">{{ col.label }}</th>
           {% endfor %}
@@ -76,7 +116,12 @@
       </thead>
       <tbody>
         {% for t in tickets %}
-        <tr class="ticket-table-row row-status-{{ t.status }}" onclick="location.href='/tickets/{{ t.local_id or t.id }}?view={{ current_view }}'">
+        <tr class="ticket-table-row row-status-{{ t.status }}" data-ticket-id="{{ t.id }}"
+            onclick="if (!event.target.matches('input,button,select,option,a')) location.href='/tickets/{{ t.local_id or t.id }}?view={{ current_view }}';">
+          <td style="width:28px;padding:0 6px;text-align:center;">
+            <input type="checkbox" class="bulk-cb" value="{{ t.id }}"
+                   onchange="bulkOnChange()" onclick="event.stopPropagation();">
+          </td>
           {% for col in view_columns %}
             {% if col.kind == 'id' %}
               <td class="{{ col.td }}">
@@ -116,5 +161,72 @@
   </div>
   {% endif %}
 </main>
+
+<script>
+// ---------- Bulk operations ----------
+function bulkSelected() {
+  return Array.from(document.querySelectorAll('.bulk-cb:checked')).map(cb => Number(cb.value));
+}
+function bulkOnChange() {
+  const ids = bulkSelected();
+  const bar = document.getElementById('bulk-bar');
+  if (ids.length) {
+    bar.style.display = 'flex';
+    document.getElementById('bulk-count').textContent = ids.length + ' selected';
+  } else {
+    bar.style.display = 'none';
+  }
+  // Sync the master checkbox tri-state
+  const master = document.getElementById('bulk-master');
+  const total = document.querySelectorAll('.bulk-cb').length;
+  if (!total) return;
+  if (ids.length === 0) { master.checked = false; master.indeterminate = false; }
+  else if (ids.length === total) { master.checked = true; master.indeterminate = false; }
+  else { master.checked = false; master.indeterminate = true; }
+}
+function bulkToggleAll(masterCb) {
+  document.querySelectorAll('.bulk-cb').forEach(cb => cb.checked = masterCb.checked);
+  bulkOnChange();
+}
+function bulkClear() {
+  document.querySelectorAll('.bulk-cb').forEach(cb => cb.checked = false);
+  document.getElementById('bulk-master').checked = false;
+  bulkOnChange();
+}
+
+async function bulkApply(action, value) {
+  const ids = bulkSelected();
+  if (!ids.length || !value) return;
+  if (!confirm(`Apply "${action}=${value}" to ${ids.length} ticket${ids.length === 1 ? '' : 's'}?`)) return;
+  const msg = document.getElementById('bulk-status-msg');
+  msg.textContent = 'Applying to ' + ids.length + '…';
+  const fd = new FormData();
+  fd.append('action', action);
+  fd.append('value', value);
+  ids.forEach(id => fd.append('ticket_ids', String(id)));
+  try {
+    const r = await fetch('/api/tickets/bulk-update', { method: 'POST', body: fd });
+    const j = await r.json();
+    if (j.ok) {
+      msg.textContent = '✓ ' + j.updated + ' updated' + (j.errors ? ' · ' + j.errors + ' failed' : '');
+      setTimeout(() => location.reload(), 700);
+    } else {
+      msg.textContent = '✗ ' + (j.detail || j.error || 'failed');
+    }
+  } catch (e) { msg.textContent = '✗ ' + e.message; }
+}
+
+async function bulkAddTag() {
+  const tag = prompt('Add tag to selected tickets (comma-separated for multiple):');
+  if (!tag) return;
+  bulkApply('add_tag', tag.trim());
+}
+
+async function bulkAssign() {
+  const email = prompt('Assignee email (e.g. priya@betterplace.co.in) — leave empty to unassign:');
+  if (email === null) return;
+  bulkApply('set_assignee', (email || '').trim());
+}
+</script>
 
 {% endblock %}
