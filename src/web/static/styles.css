@@ -2406,6 +2406,12 @@ body.compact .kanban-card-foot { margin-top: 5px; padding-top: 4px; }
 html[data-theme="dark"] .theme-menu-label--light { display: none; }
 html[data-theme="dark"] .theme-menu-label--dark { display: inline; }
 
+/* Nav-position label — flip based on body.nav-top so it offers the OPPOSITE
+   of the current state. */
+.nav-pos-label--top { display: none; }
+body.nav-top .nav-pos-label--left { display: none; }
+body.nav-top .nav-pos-label--top { display: inline; }
+
 /* ===========================================================================
    Dark-mode patches for hard-coded #fff / #f1f5f9 / etc. surfaces.
    These selectors mirror the most-used pages so the high-traffic agent
@@ -2785,6 +2791,313 @@ a { transition: color 0.14s ease, opacity 0.14s ease; }
   transition: border-color 0.14s, color 0.14s;
 }
 .saved-filter-save:hover { border-color: var(--indigo); color: var(--indigo); }
+
+/* ===========================================================================
+   RIGHT-SIDE PREVIEW PANE ON LIST VIEWS
+   Toggleable per-user via the "Preview" button. Splits the main pane 60/40.
+   =========================================================================== */
+.list-preview-split {
+  display: grid;
+  grid-template-columns: 1fr 0;
+  height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  transition: grid-template-columns .25s cubic-bezier(.2,.6,.2,1);
+}
+body.preview-on .list-preview-split {
+  grid-template-columns: 1fr min(540px, 42%);
+}
+.list-preview-main {
+  min-width: 0;
+  overflow: auto;
+}
+.list-preview-aside {
+  border-left: 1px solid var(--border);
+  background: var(--card);
+  overflow-y: auto;
+  display: none;
+}
+body.preview-on .list-preview-aside { display: block; }
+
+/* Active row highlight when preview is showing it */
+.ticket-table-row.preview-active {
+  background: var(--indigo-soft) !important;
+  box-shadow: inset 3px 0 0 var(--indigo) !important;
+}
+
+/* Preview-toggle button visual states */
+.preview-on-label { display: none; }
+body.preview-on .preview-off-label { display: none; }
+body.preview-on .preview-on-label { display: inline; color: var(--indigo); font-weight: 600; }
+
+/* Loading + empty states inside the pane */
+.prv-empty {
+  padding: 60px 24px;
+  text-align: center;
+  color: var(--muted);
+}
+.prv-loading {
+  padding: 40px 24px;
+  text-align: center;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+/* ============= Preview content (returned by /api/tickets/{id}/preview-html) ============= */
+.prv-pane { padding: 16px 18px; color: var(--ink); }
+
+.prv-head { padding-bottom: 12px; border-bottom: 1px solid var(--border); margin-bottom: 12px; }
+.prv-head-top { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; margin-bottom: 6px; }
+.prv-id {
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 700; font-size: 13px;
+  color: var(--indigo);
+}
+.prv-status {
+  font-size: 10.5px; font-weight: 600;
+  padding: 2px 8px; border-radius: 999px;
+  text-transform: uppercase; letter-spacing: 0.03em;
+}
+.prv-status-open    { background: #fef3c7; color: #92400e; }
+.prv-status-new     { background: #fef3c7; color: #92400e; }
+.prv-status-pending { background: #dbeafe; color: #1e40af; }
+.prv-status-hold    { background: #fce7f3; color: #9d174d; }
+.prv-status-solved  { background: #dcfce7; color: #166534; }
+.prv-status-closed  { background: #e5e7eb; color: #475569; }
+
+.prv-pri {
+  font-size: 10px; font-weight: 600;
+  padding: 1px 7px; border-radius: 4px;
+  text-transform: capitalize;
+}
+.prv-pri-urgent { background: #fee2e2; color: #991b1b; }
+.prv-pri-high   { background: #fef3c7; color: #92400e; }
+.prv-pri-normal { background: #e0e7ff; color: #3730a3; }
+.prv-pri-low    { background: #f1f5f9; color: #475569; }
+
+.prv-open-btn {
+  margin-left: auto;
+  font-size: 11px;
+  padding: 4px 10px;
+  border-radius: 6px;
+  background: var(--indigo);
+  color: #fff;
+  text-decoration: none;
+  font-weight: 500;
+  transition: background .14s ease;
+}
+.prv-open-btn:hover { background: #4338ca; }
+
+.prv-subject {
+  font-size: 16px !important;
+  font-weight: 700;
+  line-height: 1.3;
+  letter-spacing: -0.01em;
+  margin: 4px 0 8px !important;
+  color: var(--ink);
+}
+.prv-meta {
+  display: flex; flex-wrap: wrap; gap: 6px 12px;
+  font-size: 11.5px;
+  color: var(--muted);
+}
+.prv-meta .prv-sla { font-weight: 500; }
+
+/* AI insight block */
+.prv-ai {
+  background: linear-gradient(180deg, var(--indigo-soft), transparent);
+  border: 1px solid #c7d2fe;
+  border-radius: 10px;
+  padding: 10px 12px;
+  margin-bottom: 12px;
+}
+.prv-ai-head {
+  font-size: 10.5px; font-weight: 700; color: var(--indigo);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  margin-bottom: 6px;
+}
+.prv-ai-block { margin-top: 6px; }
+.prv-ai-label { font-size: 10px; color: var(--muted); font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; }
+.prv-ai-body { font-size: 12.5px; line-height: 1.5; color: var(--ink); margin-top: 2px; }
+
+/* Customer 360 mini grid */
+.prv-c360 {
+  display: grid; grid-template-columns: repeat(4, 1fr);
+  gap: 8px;
+  padding: 10px;
+  background: var(--surface-sunken);
+  border-radius: 8px;
+  margin-bottom: 12px;
+}
+.prv-c360 > div { text-align: center; }
+.prv-c360 strong { display: block; font-size: 15px; font-weight: 700; color: var(--ink); }
+.prv-c360 span { display: block; font-size: 10px; color: var(--muted); margin-top: 1px; text-transform: uppercase; letter-spacing: 0.04em; }
+
+/* Conversation list */
+.prv-conv-head {
+  font-size: 10.5px; color: var(--muted);
+  text-transform: uppercase; letter-spacing: 0.06em;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+.prv-msg {
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 8px 10px;
+  margin-bottom: 8px;
+  font-size: 12px;
+}
+.prv-msg-agent { background: linear-gradient(180deg, var(--card), rgba(124,58,237,0.04)); }
+.prv-msg-internal { background: linear-gradient(180deg, var(--card), rgba(245,158,11,0.06)); border-color: #fde68a; }
+.prv-msg-head {
+  display: flex; align-items: center; gap: 6px; flex-wrap: wrap;
+  margin-bottom: 4px;
+}
+.prv-msg-author { font-weight: 600; }
+.prv-msg-tag {
+  font-size: 9px; font-weight: 600;
+  padding: 1px 5px; border-radius: 3px;
+  text-transform: uppercase;
+}
+.prv-msg-time { margin-left: auto; font-size: 10px; color: var(--muted); }
+.prv-msg-body {
+  font-size: 12px; line-height: 1.45; color: var(--ink);
+  white-space: pre-line;
+  word-break: break-word;
+}
+.prv-see-all {
+  display: block; text-align: center;
+  padding: 6px;
+  font-size: 11px;
+  color: var(--indigo);
+  text-decoration: none;
+}
+.prv-see-all:hover { text-decoration: underline; }
+
+/* Dark mode patches for preview pane */
+html[data-theme="dark"] .list-preview-aside { background: var(--card); border-color: var(--border); }
+html[data-theme="dark"] .ticket-table-row.preview-active { background: rgba(79,70,229,0.18) !important; }
+html[data-theme="dark"] .prv-ai { background: linear-gradient(180deg, rgba(79,70,229,0.12), transparent); border-color: rgba(79,70,229,0.3); }
+html[data-theme="dark"] .prv-c360 { background: var(--surface-sunken); }
+html[data-theme="dark"] .prv-msg { background: var(--card); }
+html[data-theme="dark"] .prv-msg-internal { background: linear-gradient(180deg, var(--card), rgba(245,158,11,0.10)); }
+
+/* ===========================================================================
+   @MENTION AUTOCOMPLETE DROPDOWN
+   =========================================================================== */
+.mention-dropdown {
+  /* Use position:fixed so the getBoundingClientRect() coords map directly to
+     viewport — `position: absolute` was anchoring to the textarea's containing
+     block which put the dropdown off-screen. */
+  position: fixed;
+  z-index: 9500;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15,23,42,0.15);
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 4px;
+  /* When hidden (style="display:none"), guarantee no pointer events leak to
+     elements behind it. */
+}
+.mention-dropdown[style*="display:none"],
+.mention-dropdown[style*="display: none"] { pointer-events: none !important; }
+.mention-item {
+  display: grid;
+  grid-template-columns: 28px 1fr auto;
+  gap: 8px;
+  align-items: center;
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12.5px;
+  transition: background 0.10s ease;
+}
+.mention-item:hover,
+.mention-item--active { background: var(--indigo-soft); }
+.mention-icon {
+  width: 24px; height: 24px;
+  border-radius: 50%;
+  display: flex; align-items: center; justify-content: center;
+  font-weight: 600; font-size: 11px;
+  color: #fff;
+  grid-row: 1 / 3;
+}
+.mention-icon-agent { background: linear-gradient(135deg, #818cf8, #4f46e5); }
+.mention-icon-cust  { background: linear-gradient(135deg, #34d399, #10b981); }
+.mention-name { font-weight: 600; color: var(--ink); font-size: 13px; }
+.mention-email { font-size: 11px; color: var(--muted); font-family: 'JetBrains Mono', monospace; grid-column: 2; }
+.mention-tag {
+  font-size: 9.5px; font-weight: 600;
+  padding: 1px 6px; border-radius: 4px;
+  background: var(--indigo-soft); color: var(--indigo);
+  text-transform: uppercase; letter-spacing: 0.04em;
+  grid-row: 1 / 3;
+  align-self: center;
+}
+.mention-empty { padding: 12px; text-align: center; color: var(--muted); font-size: 12px; }
+
+/* ===========================================================================
+   TOP NAV (opt-in alternative to left sidebar)
+   When <body class="nav-top">, the left rail is hidden and a horizontal
+   nav bar appears below the topbar with primary views as tabs.
+   =========================================================================== */
+/* When the top nav is active, the left sidebar is irrelevant. Switch the
+   layout from grid (sidebar | main) to a single-column flex so the main
+   pane gets the entire viewport width unambiguously. Setting display:none
+   on the aside removes it from the layout entirely. */
+body.nav-top .layout {
+  display: flex !important;
+  flex-direction: column !important;
+  grid-template-columns: none !important;
+}
+body.nav-top .nav { display: none !important; }
+body.nav-top .main-pane { flex: 1 1 auto; min-height: 0; width: 100%; }
+body.nav-top .sidebar-resize-handle,
+body.nav-top .sidebar-reopen-btn { display: none !important; }
+
+.top-nav {
+  display: none;
+  background: var(--card);
+  border-bottom: 1px solid var(--border);
+  padding: 4px 16px;
+  gap: 4px;
+  overflow-x: auto;
+  align-items: center;
+  scrollbar-width: thin;
+}
+body.nav-top .top-nav { display: flex; }
+.top-nav-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  border-radius: 7px;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 12.5px;
+  font-weight: 500;
+  white-space: nowrap;
+  transition: background 0.14s ease, color 0.14s ease;
+}
+.top-nav-item:hover { background: var(--surface-hover); color: var(--ink); }
+.top-nav-item.active {
+  background: var(--indigo-soft);
+  color: var(--indigo);
+  font-weight: 600;
+}
+.top-nav-count {
+  font-size: 10.5px;
+  font-family: 'JetBrains Mono', monospace;
+  font-weight: 600;
+  padding: 1px 6px;
+  border-radius: 8px;
+  background: var(--surface-sunken);
+  color: var(--muted);
+}
+.top-nav-item.active .top-nav-count { background: var(--card); color: var(--indigo); }
 
 /* ===========================================================================
    Sidebar drag-resize handle — invisible-ish hot zone on the right edge of

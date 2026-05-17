@@ -635,6 +635,42 @@ async def admin_end_user_edit(
     })
 
 
+@app.get("/api/users/search")
+async def users_search(
+    q: str = "", limit: int = 8,
+    user: dict = Depends(require_user),
+):
+    """Typeahead used by the @mention autocomplete in the reply box. Returns
+    a small mixed list: agents/admins first (the most likely mention target),
+    then end-users — capped at `limit` to keep the dropdown short."""
+    s = (q or "").strip().lower()
+    if len(s) < 1:
+        return JSONResponse({"users": []})
+    with db.conn() as c:
+        # Agents first — they're who agents typically @mention
+        agents = c.execute("""
+            SELECT id, name, email, role
+              FROM users
+             WHERE role IN ('agent', 'admin')
+               AND (LOWER(email) LIKE ? OR LOWER(name) LIKE ?)
+             ORDER BY name LIMIT ?
+        """, (f"%{s}%", f"%{s}%", int(max(1, min(limit, 20))))).fetchall()
+        agents_out = [dict(r) for r in agents]
+        # Fill remaining slots with end-users
+        remaining = max(0, int(limit) - len(agents_out))
+        end_users = []
+        if remaining:
+            end_users = c.execute("""
+                SELECT id, name, email, COALESCE(role,'end-user') AS role
+                  FROM users
+                 WHERE COALESCE(role,'end-user') NOT IN ('agent','admin')
+                   AND (LOWER(email) LIKE ? OR LOWER(name) LIKE ?)
+                 ORDER BY name LIMIT ?
+            """, (f"%{s}%", f"%{s}%", remaining)).fetchall()
+            end_users = [dict(r) for r in end_users]
+    return JSONResponse({"users": agents_out + end_users})
+
+
 @app.get("/api/admin/orgs/search")
 async def admin_orgs_search(
     q: str = "", limit: int = 30,
@@ -3065,6 +3101,29 @@ async def create_native_ticket(
         except Exception as e:
             print(f"rules dispatch failed: {e}")
     return JSONResponse({"ok": True, **result, "url": f"/tickets/{result['local_id']}"})
+
+
+@app.get("/api/tickets/{ident}/preview-html", response_class=HTMLResponse)
+async def ticket_preview_html(ident: str, request: Request,
+                               user: dict = Depends(require_user)):
+    """Compact preview rendered for the list-view right-pane. Returns just
+    the ticket's header + summary + last few comments + reply shortcut —
+    NOT the full detail page chrome. Used by view_list.html's preview mode
+    JS which injects this HTML into a side panel via fetch()."""
+    from .. import customer_360 as _c360
+    with db.conn() as c:
+        ticket_id = _resolve_ticket_id(c, ident)
+        if ticket_id is None:
+            raise HTTPException(404, "Ticket not found")
+        t = _full_ticket(c, ticket_id)
+        if not t:
+            raise HTTPException(404, "Ticket not found")
+        customer = _c360.for_requester(c, t.get("requester_id"),
+                                         current_ticket_id=ticket_id)
+    return TEMPLATES.TemplateResponse("ticket_preview.html", {
+        "request": request, "user": user, "ticket": t,
+        "customer": customer,
+    })
 
 
 @app.get("/tickets/{ident}", response_class=HTMLResponse)

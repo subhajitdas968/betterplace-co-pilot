@@ -1,0 +1,77 @@
+{# Compact ticket preview — embedded inside the list view's right pane.
+   Returned by /api/tickets/{id}/preview-html as a partial (NO _base.html). #}
+
+<div class="prv-pane">
+  <header class="prv-head">
+    <div class="prv-head-top">
+      <span class="prv-id">{{ ticket.local_id or ('#' ~ ticket.id) }}</span>
+      <span class="prv-status prv-status-{{ ticket.status }}">{{ ticket.custom_status_label or ticket.status }}</span>
+      {% if ticket.priority and ticket.priority != '—' %}
+      <span class="prv-pri prv-pri-{{ ticket.priority }}">{{ ticket.priority }}</span>
+      {% endif %}
+      <a href="/tickets/{{ ticket.local_id or ticket.id }}" class="prv-open-btn" title="Open full ticket">↗ Open full</a>
+    </div>
+    <h2 class="prv-subject">{{ ticket.subject or '(no subject)' }}</h2>
+    <div class="prv-meta">
+      {% if ticket.requester %}<span>👤 {{ ticket.requester.name or ticket.requester.email }}</span>{% endif %}
+      {% if ticket.organization %}<span>🏢 {{ ticket.organization.name }}</span>{% endif %}
+      {% if ticket.assignee %}<span>🎯 {{ ticket.assignee.name }}</span>{% else %}<span style="color:var(--muted);">🎯 unassigned</span>{% endif %}
+      <span class="prv-sla sla-{{ ticket.sla.level }}">SLA · {{ ticket.sla.label }}</span>
+    </div>
+  </header>
+
+  {# AI insight summary if available — most valuable at-a-glance content #}
+  {% if ticket.insight and (ticket.insight.issue_summary or ticket.insight.recommended_action) %}
+  <section class="prv-ai">
+    <div class="prv-ai-head">✦ AI insight</div>
+    {% if ticket.insight.issue_summary %}
+    <div class="prv-ai-block">
+      <div class="prv-ai-label">Issue</div>
+      <div class="prv-ai-body">{{ ticket.insight.issue_summary }}</div>
+    </div>
+    {% endif %}
+    {% if ticket.insight.recommended_action %}
+    <div class="prv-ai-block">
+      <div class="prv-ai-label">Recommended next step</div>
+      <div class="prv-ai-body">{{ ticket.insight.recommended_action }}</div>
+    </div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {# Customer 360 mini — just total / open / CSAT for at-a-glance triage #}
+  {% if customer %}
+  <section class="prv-c360">
+    <div><strong>{{ customer.stats.total }}</strong><span>tickets total</span></div>
+    <div><strong{% if customer.stats.open %} style="color:#92400e;"{% endif %}>{{ customer.stats.open }}</strong><span>open now</span></div>
+    <div><strong>{{ customer.stats.last_contact_human }}</strong><span>last contact</span></div>
+    {% if customer.stats.csat_n %}
+    <div><strong style="color:{% if customer.stats.csat_band == 'good' %}#047857{% elif customer.stats.csat_band == 'poor' %}#be123c{% else %}#92400e{% endif %};">{{ customer.stats.csat_avg }}/10</strong><span>CSAT ({{ customer.stats.csat_n }})</span></div>
+    {% endif %}
+  </section>
+  {% endif %}
+
+  {# Last 4 comments, newest first. The full conversation is one click away. #}
+  <section class="prv-conv">
+    <div class="prv-conv-head">Conversation · {{ ticket.comments|length }} message{{ '' if ticket.comments|length == 1 else 's' }}</div>
+    {% set recent = (ticket.comments|reverse|list)[:4] %}
+    {% for c in recent %}
+    {% set is_agent = c.author_role in ['agent','admin'] %}
+    <div class="prv-msg {% if is_agent %}prv-msg-agent{% else %}prv-msg-cust{% endif %} {% if not c.public %}prv-msg-internal{% endif %}">
+      <div class="prv-msg-head">
+        <span class="prv-msg-author">{{ c.author_name or 'Unknown' }}</span>
+        {% if not c.public %}<span class="prv-msg-tag" style="background:#fef3c7;color:#92400e;">Internal</span>
+        {% elif is_agent %}<span class="prv-msg-tag" style="background:#dbeafe;color:#1e40af;">Agent</span>
+        {% else %}<span class="prv-msg-tag" style="background:#dcfce7;color:#166534;">Customer</span>{% endif %}
+        <span class="prv-msg-time">{{ c.created_at|ist }}</span>
+      </div>
+      <div class="prv-msg-body">{{ (c.body|clean)|truncate(360, true, '…') }}</div>
+    </div>
+    {% else %}
+    <div style="color:var(--muted);font-size:12px;padding:8px;">No comments yet.</div>
+    {% endfor %}
+    {% if ticket.comments|length > 4 %}
+    <a href="/tickets/{{ ticket.local_id or ticket.id }}" class="prv-see-all">see all {{ ticket.comments|length }} messages →</a>
+    {% endif %}
+  </section>
+</div>

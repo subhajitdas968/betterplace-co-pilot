@@ -218,7 +218,9 @@
         </div>
 
         <textarea id="reply-text" class="ph-autocomplete"
-                  placeholder="Type your reply. Markdown supported. Type {{ '{{' }} to insert a placeholder (ticket id, customer name, last comment, etc.)."></textarea>
+                  placeholder="Type your reply. @ to mention agents · {{ '{{' }} to insert a placeholder."></textarea>
+        <!-- @mention dropdown — positioned absolutely below the cursor when active -->
+        <div id="mention-dropdown" class="mention-dropdown" style="display:none;"></div>
 
         <!-- Pending uploads chip row (populated by handleAttachFiles) -->
         <div class="reply-attachments" id="reply-attachments" style="display:none;"></div>
@@ -1386,6 +1388,156 @@ async function assignTo(zdUserId, displayName) {
     location.reload();
   }
 }
+
+// ---------- @mention autocomplete in the reply textarea ----------
+// When the agent types "@" followed by 1+ chars in #reply-text, fetch
+// matching agents/customers and show a positioned dropdown. Arrow keys
+// navigate; Enter/Tab inserts "@Full Name " into the textarea at the
+// caret position. Click an item to insert it the same way.
+(function() {
+  const ta = document.getElementById('reply-text');
+  const dd = document.getElementById('mention-dropdown');
+  if (!ta || !dd) return;
+
+  let candidates = [];
+  let activeIdx = 0;
+  let triggerStart = -1;  // index in textarea where the "@" lives
+  let searchTimer = null;
+
+  function escapeHtml(s) {
+    return String(s == null ? '' : s).replace(/[&<>"']/g,
+      c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  }
+
+  function close() {
+    dd.style.display = 'none';
+    dd.innerHTML = '';
+    candidates = [];
+    triggerStart = -1;
+  }
+
+  // Move dropdown to <body> so position:fixed coords map cleanly to viewport
+  // (any positioned ancestor would shift the dropdown otherwise).
+  if (dd.parentNode !== document.body) document.body.appendChild(dd);
+
+  function positionDropdown() {
+    // Position:fixed → coords are viewport-relative. No scroll offset needed.
+    const r = ta.getBoundingClientRect();
+    dd.style.left = r.left + 'px';
+    dd.style.top = (r.bottom + 4) + 'px';
+    dd.style.width = Math.min(360, r.width) + 'px';
+  }
+
+  function render() {
+    if (!candidates.length) {
+      dd.innerHTML = '<div class="mention-empty">No matches</div>';
+      return;
+    }
+    dd.innerHTML = candidates.map((u, i) => {
+      const isAgent = u.role === 'agent' || u.role === 'admin';
+      return `<div class="mention-item ${i === activeIdx ? 'mention-item--active' : ''}" data-idx="${i}">
+        <span class="mention-icon ${isAgent ? 'mention-icon-agent' : 'mention-icon-cust'}">${escapeHtml((u.name || u.email || '?')[0].toUpperCase())}</span>
+        <div class="mention-name">${escapeHtml(u.name || '(no name)')}</div>
+        <div class="mention-email">${escapeHtml(u.email || '')}</div>
+        ${isAgent ? '<span class="mention-tag">agent</span>' : ''}
+      </div>`;
+    }).join('');
+  }
+
+  function getTriggerInfo() {
+    // Look back from the caret to find a "@" that starts a mention.
+    // Mention is active iff: caret is after a "@" that comes after a
+    // word-boundary, AND there's no whitespace between "@" and caret.
+    const caret = ta.selectionStart;
+    const text = ta.value.slice(0, caret);
+    const at = text.lastIndexOf('@');
+    if (at < 0) return null;
+    // Must be at start OR preceded by whitespace
+    const prev = at === 0 ? '' : text[at - 1];
+    if (prev && !/\s/.test(prev)) return null;
+    const fragment = text.slice(at + 1);
+    if (/\s/.test(fragment)) return null;  // user typed past the mention
+    return { atIdx: at, query: fragment };
+  }
+
+  async function maybeOpen() {
+    const trigger = getTriggerInfo();
+    if (!trigger) { close(); return; }
+    triggerStart = trigger.atIdx;
+    if (trigger.query.length < 1) {
+      // Show top results for "@" alone
+      candidates = []; activeIdx = 0; render();
+      positionDropdown();
+      dd.style.display = 'block';
+      return;
+    }
+    // Debounce fetch
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(async () => {
+      try {
+        const r = await fetch('/api/users/search?q=' + encodeURIComponent(trigger.query));
+        if (!r.ok) return;
+        const j = await r.json();
+        candidates = j.users || [];
+        activeIdx = 0;
+        render();
+        positionDropdown();
+        dd.style.display = 'block';
+      } catch (e) {}
+    }, 100);
+  }
+
+  function insert(u) {
+    if (triggerStart < 0) return;
+    const caret = ta.selectionStart;
+    const before = ta.value.slice(0, triggerStart);
+    const after = ta.value.slice(caret);
+    const insertion = '@' + (u.name || u.email || 'user') + ' ';
+    ta.value = before + insertion + after;
+    const newCaret = (before + insertion).length;
+    ta.setSelectionRange(newCaret, newCaret);
+    ta.focus();
+    close();
+  }
+
+  ta.addEventListener('input', maybeOpen);
+  ta.addEventListener('click', maybeOpen);
+  ta.addEventListener('keyup', (e) => {
+    // Arrow keys handled in keydown; other keys just refresh the trigger
+    if (['ArrowDown','ArrowUp','Enter','Tab','Escape'].indexOf(e.key) >= 0) return;
+    maybeOpen();
+  });
+  ta.addEventListener('keydown', (e) => {
+    if (dd.style.display !== 'block' || !candidates.length) {
+      if (e.key === 'Escape') close();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      activeIdx = Math.min(activeIdx + 1, candidates.length - 1);
+      render();
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      activeIdx = Math.max(activeIdx - 1, 0);
+      render();
+    } else if (e.key === 'Enter' || e.key === 'Tab') {
+      e.preventDefault();
+      insert(candidates[activeIdx]);
+    } else if (e.key === 'Escape') {
+      e.preventDefault();
+      close();
+    }
+  });
+  dd.addEventListener('click', (e) => {
+    const row = e.target.closest('.mention-item');
+    if (!row) return;
+    const i = Number(row.dataset.idx);
+    if (!Number.isNaN(i) && candidates[i]) insert(candidates[i]);
+  });
+  document.addEventListener('click', (e) => {
+    if (!dd.contains(e.target) && e.target !== ta) close();
+  });
+})();
 </script>
 
 {% endblock %}

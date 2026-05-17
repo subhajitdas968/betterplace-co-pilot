@@ -19,11 +19,18 @@
               ▦ Kanban
             </a>
           </span>
+          <!-- Preview pane toggle — splits list 60/40, click row loads preview right -->
+          <button type="button" class="density-toggle" id="preview-toggle-btn" onclick="window._togglePreview()"
+                  title="Toggle preview pane (P)" aria-label="Toggle preview pane" style="margin-left:6px;">
+            <span class="preview-off-label">⊟ Preview off</span>
+            <span class="preview-on-label">⊟ Preview on</span>
+          </button>
           <!-- Density toggle — flips body.compact on / off. Persisted in localStorage. -->
           <button type="button" class="density-toggle" onclick="window._toggleDensity()" title="Toggle row density" aria-label="Toggle density" style="margin-left:6px;">
             <span class="density-comfortable">⊞ Comfortable</span>
             <span class="density-compact">▤ Compact</span>
           </button>
+          <button type="button" class="density-toggle" onclick="window._setDefaultDisplay('list')" title="Use List as default for all views" style="margin-left:2px;">★ Set as default</button>
         </div>
       </div>
 
@@ -91,6 +98,9 @@
   </div>
 
   {% if tickets %}
+
+  <div class="list-preview-split" id="list-preview-split">
+  <div class="list-preview-main">
 
   <!-- Bulk-action toolbar (hidden until ≥1 row selected) -->
   <div id="bulk-bar" style="display:none;position:sticky;top:0;z-index:50;background:linear-gradient(135deg,#4f46e5,#7c3aed);color:#fff;padding:10px 16px;border-radius:10px;margin-bottom:10px;display:none;align-items:center;gap:12px;flex-wrap:wrap;">
@@ -204,6 +214,18 @@
       </tbody>
     </table>
   </div>
+  </div><!-- /.list-preview-main -->
+
+  <!-- Preview pane — populated by JS when a row is clicked in preview mode -->
+  <aside class="list-preview-aside" id="preview-pane" aria-label="Ticket preview">
+    <div class="prv-empty">
+      <div style="font-size:24px;opacity:0.4;margin-bottom:8px;">⊟</div>
+      <div style="font-size:13px;color:var(--muted);">Click a ticket to preview it here</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;opacity:0.7;">Use ↑↓ or J/K to step through · Esc to close</div>
+    </div>
+  </aside>
+  </div><!-- /.list-preview-split -->
+
   {% else %}
   <div class="empty-state">
     <div style="font-size:14px;color:#64748b;">No tickets in this view.</div>
@@ -337,6 +359,92 @@ async function bulkAssign() {
   };
 
   render();
+})();
+
+// ---------- Right-side preview pane ----------
+// Toggles a 60/40 split layout. When ON, clicking a row fetches the
+// /api/tickets/{id}/preview-html partial into the right pane instead of
+// navigating away. Esc / × closes the preview without leaving the list.
+(function() {
+  const KEY = 'bp_preview_enabled';
+  const body = document.body;
+  function apply(enabled) {
+    body.classList.toggle('preview-on', enabled);
+  }
+  try { if (localStorage.getItem(KEY) === '1') apply(true); } catch (e) {}
+
+  window._togglePreview = function() {
+    const next = !body.classList.contains('preview-on');
+    apply(next);
+    try { localStorage.setItem(KEY, next ? '1' : '0'); } catch (e) {}
+    if (!next) closePreview();
+  };
+
+  function closePreview() {
+    const pane = document.getElementById('preview-pane');
+    if (pane) pane.innerHTML = `<div class="prv-empty">
+      <div style="font-size:24px;opacity:0.4;margin-bottom:8px;">⊟</div>
+      <div style="font-size:13px;color:var(--muted);">Click a ticket to preview it here</div>
+    </div>`;
+    document.querySelectorAll('.ticket-table-row.preview-active').forEach(r => r.classList.remove('preview-active'));
+  }
+
+  let _loadingTid = null;
+  async function loadPreview(tid, row) {
+    if (!tid || _loadingTid === tid) return;
+    _loadingTid = tid;
+    const pane = document.getElementById('preview-pane');
+    if (!pane) return;
+    pane.innerHTML = '<div class="prv-loading">Loading…</div>';
+    document.querySelectorAll('.ticket-table-row.preview-active').forEach(r => r.classList.remove('preview-active'));
+    if (row) row.classList.add('preview-active');
+    try {
+      const r = await fetch('/api/tickets/' + tid + '/preview-html', { headers: { 'Accept': 'text/html' }});
+      if (!r.ok) throw new Error(r.status);
+      pane.innerHTML = await r.text();
+      pane.scrollTop = 0;
+    } catch (e) {
+      pane.innerHTML = '<div class="prv-empty" style="color:#be123c;">Preview failed: ' + e.message + '</div>';
+    } finally { _loadingTid = null; }
+  }
+
+  // Intercept row clicks when preview is on. Scope strictly to .ticket-table
+   // descendants so we never swallow clicks elsewhere on the page.
+  const tableEl = document.querySelector('.ticket-table');
+  if (tableEl) {
+    tableEl.addEventListener('click', (e) => {
+      if (!body.classList.contains('preview-on')) return;
+      const row = e.target.closest('.ticket-table-row');
+      if (!row) return;
+      if (e.target.matches('input, button, select, option, a')) return;
+      if (e.target.closest('.row-quick-actions-cell')) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const tid = row.dataset.ticketId;
+      if (tid) loadPreview(tid, row);
+    }, true);
+  }
+
+  // Keyboard: Esc closes preview; J/K + ↑↓ step through rows
+  document.addEventListener('keydown', (e) => {
+    if (!body.classList.contains('preview-on')) return;
+    // Ignore when typing in inputs/textareas
+    const t = e.target;
+    if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+    if (e.key === 'Escape') { e.preventDefault(); closePreview(); return; }
+    if (e.key === 'p' || e.key === 'P') { e.preventDefault(); window._togglePreview(); return; }
+    if (e.key === 'j' || e.key === 'k' || e.key === 'ArrowDown' || e.key === 'ArrowUp') {
+      const rows = Array.from(document.querySelectorAll('.ticket-table-row'));
+      if (!rows.length) return;
+      const curIdx = rows.findIndex(r => r.classList.contains('preview-active'));
+      const step = (e.key === 'k' || e.key === 'ArrowUp') ? -1 : 1;
+      const nextIdx = curIdx < 0 ? 0 : Math.max(0, Math.min(rows.length - 1, curIdx + step));
+      e.preventDefault();
+      const next = rows[nextIdx];
+      next.scrollIntoView({ block: 'nearest' });
+      loadPreview(next.dataset.ticketId, next);
+    }
+  });
 })();
 
 // ---------- Inline row quick action ----------
