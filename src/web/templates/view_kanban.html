@@ -88,6 +88,11 @@
       {% if filter_jira %}<span class="filter-pill">Jira: {{ filter_jira }} <a href="{{ qs({'jira':''}) }}">×</a></span>{% endif %}
       {% if filter_rc1 %}<span class="filter-pill">RC1: {{ filter_rc1 }} <a href="{{ qs({'rc1':''}) }}">×</a></span>{% endif %}
 
+      <!-- Preview-pane toggle — same UX as list view -->
+      <button type="button" class="density-toggle" onclick="window._toggleKanbanPreview()"
+              title="Open a preview pane on the right (clicking a card loads it there instead of navigating)"
+              style="margin-left:8px;">👁 Preview</button>
+
       <button type="submit" style="display:none;">Apply</button>
     </form>
   </div>
@@ -128,7 +133,8 @@
     {% endfor %}
   {% endif %}
 
-  <div class="kanban-board" id="kanban-board">
+  <div class="kanban-split">
+  <div class="kanban-board kanban-board-pane" id="kanban-board">
     {% for key, label, bg, fg in group_defs %}
       {% set col_tickets = [] %}
       {% for t in tickets %}
@@ -184,6 +190,15 @@
       {% endif %}
     {% endfor %}
   </div>
+  <!-- Preview pane — hidden unless body has .kanban-preview-on (toggled by button) -->
+  <aside class="kanban-preview-aside" id="kanban-preview-pane" aria-label="Ticket preview">
+    <div class="prv-empty">
+      <div style="font-size:24px;opacity:0.4;margin-bottom:8px;">⊟</div>
+      <div style="font-size:13px;color:var(--muted);">Click a card to preview it here</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;opacity:0.7;">Esc to close · click again to open full ticket</div>
+    </div>
+  </aside>
+  </div><!-- /.kanban-split -->
   {% else %}
   <div class="empty-state">
     <div style="font-size:14px;color:var(--muted);">No tickets in this view.</div>
@@ -281,5 +296,80 @@ window._kanbanColFilter = function(input) {
   });
 })();
 {% endif %}
+
+// ---------- Kanban preview pane ----------
+// Mirrors the list-view preview UX: toggle button flips a body class;
+// when enabled, clicking a card fetches /api/tickets/{id}/preview-html
+// into the right pane instead of navigating away. Esc closes.
+(function() {
+  const KEY = 'bp_kanban_preview_enabled';
+  const body = document.body;
+  function apply(on) { body.classList.toggle('kanban-preview-on', on); }
+  try { if (localStorage.getItem(KEY) === '1') apply(true); } catch (e) {}
+
+  window._toggleKanbanPreview = function() {
+    const next = !body.classList.contains('kanban-preview-on');
+    apply(next);
+    try { localStorage.setItem(KEY, next ? '1' : '0'); } catch (e) {}
+    if (!next) closePreview();
+  };
+
+  function closePreview() {
+    const pane = document.getElementById('kanban-preview-pane');
+    if (pane) pane.innerHTML =
+      `<div class="prv-empty">
+        <div style="font-size:24px;opacity:0.4;margin-bottom:8px;">⊟</div>
+        <div style="font-size:13px;color:var(--muted);">Click a card to preview it here</div>
+      </div>`;
+    document.querySelectorAll('.kanban-card.preview-active').forEach(c =>
+      c.classList.remove('preview-active'));
+  }
+
+  let _loadingTid = null;
+  async function loadPreview(tid, card) {
+    if (!tid || _loadingTid === tid) return;
+    _loadingTid = tid;
+    const pane = document.getElementById('kanban-preview-pane');
+    if (!pane) return;
+    pane.innerHTML = '<div class="prv-loading">Loading…</div>';
+    document.querySelectorAll('.kanban-card.preview-active').forEach(c =>
+      c.classList.remove('preview-active'));
+    if (card) card.classList.add('preview-active');
+    try {
+      const r = await fetch('/api/tickets/' + tid + '/preview-html',
+                            { headers: { 'Accept': 'text/html' }});
+      if (!r.ok) throw new Error(r.status);
+      pane.innerHTML = await r.text();
+      pane.scrollTop = 0;
+    } catch (e) {
+      pane.innerHTML = '<div class="prv-empty" style="color:#be123c;">Preview failed: ' + e.message + '</div>';
+    } finally { _loadingTid = null; }
+  }
+
+  // Intercept kanban-card clicks when preview is on. Capture phase + scoped
+  // to .kanban-board so we don't swallow clicks anywhere else.
+  const boardEl = document.getElementById('kanban-board');
+  if (boardEl) {
+    boardEl.addEventListener('click', (e) => {
+      if (!body.classList.contains('kanban-preview-on')) return;
+      const card = e.target.closest('.kanban-card');
+      if (!card) return;
+      // If the user clicked an inner button/input (e.g. drag handle), let it through
+      if (e.target.matches('input, button, select')) return;
+      e.preventDefault();
+      e.stopImmediatePropagation();
+      const tid = card.dataset.ticketId;
+      if (tid) loadPreview(tid, card);
+    }, true);
+  }
+
+  // Esc closes preview
+  document.addEventListener('keydown', (e) => {
+    if (!body.classList.contains('kanban-preview-on')) return;
+    const t = e.target;
+    if (t.tagName === 'INPUT' || t.tagName === 'TEXTAREA' || t.isContentEditable) return;
+    if (e.key === 'Escape') { e.preventDefault(); closePreview(); }
+  });
+})();
 </script>
 {% endblock %}

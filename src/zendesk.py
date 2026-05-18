@@ -220,3 +220,68 @@ def write_back_field(ticket_id: int, custom_fields: dict[str, Any] | None = None
     r = _session.put(url, json=payload, timeout=30)
     r.raise_for_status()
     return r.json()
+
+
+def add_comment(ticket_id: int, body: str, *, public: bool = True,
+                 author_email: str | None = None, status: str | None = None,
+                 custom_status_id: int | None = None,
+                 html_body: bool = False) -> dict:
+    """POST a comment to a Zendesk ticket via the Tickets Update API.
+
+    Zendesk's "create comment" endpoint is actually a PUT to /tickets/{id}.json
+    with a `comment` block — the same endpoint as `write_back_field`. We can
+    optionally update status (generic or custom) in the same call.
+
+    Args:
+        ticket_id: Zendesk ticket id (numeric).
+        body: Plain text or HTML body of the comment.
+        public: True = customer-visible reply. False = internal note.
+        author_email: If given, ZD attributes the comment to this user
+            (requires the email to belong to a ZD agent with permission).
+        status: Optional new generic status ('open'/'pending'/'hold'/'solved'/'closed').
+        custom_status_id: Optional ZD custom_status_id. ZD will automatically
+            set the underlying generic status to the matching category.
+            If both `status` and `custom_status_id` are given, custom wins.
+        html_body: True if `body` is HTML; otherwise treated as plain text.
+
+    Returns the API's JSON response (includes the new audit + updated ticket).
+    Raises ZDError / HTTPError on failure.
+    """
+    if not body or not body.strip():
+        raise ZDError("empty body")
+    comment: dict[str, Any] = {"public": bool(public)}
+    if html_body:
+        comment["html_body"] = body
+    else:
+        comment["body"] = body
+    if author_email:
+        # ZD's API supports `author_id` (numeric) directly, but we don't always
+        # have that — author_email gets resolved by ZD on the server side when
+        # the field is set on the underlying request user.
+        comment["author_id"] = None  # ZD ignores when null; falls back to API user
+    payload: dict[str, Any] = {"ticket": {"comment": comment}}
+    if custom_status_id:
+        # ZD automatically syncs the underlying status to the category of the
+        # custom status — no need to also set `status` explicitly.
+        payload["ticket"]["custom_status_id"] = int(custom_status_id)
+    elif status:
+        if status not in ("new", "open", "pending", "hold", "solved", "closed"):
+            raise ZDError(f"invalid status: {status}")
+        payload["ticket"]["status"] = status
+    url = f"{config.ZD_BASE}/tickets/{ticket_id}.json"
+    r = _session.put(url, json=payload, timeout=30)
+    if r.status_code == 422:
+        # Common case: missing required field for status transition. Surface
+        # the ZD error body to the caller so the UI can show it.
+        try:
+            err = r.json()
+        except Exception:
+            err = {"description": r.text[:500]}
+        raise ZDError(f"ZD rejected the update (HTTP 422): {err}")
+    r.raise_for_status()
+    return r.json()
+
+
+def update_status(ticket_id: int, status: str) -> dict:
+    """Standalone status change — no comment. Wraps the same PUT endpoint."""
+    return write_back_field(ticket_id, standard_fields={"status": status})

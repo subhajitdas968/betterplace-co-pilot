@@ -49,13 +49,19 @@
     popup = document.createElement('div');
     popup.className = 'ph-popup';
     popup.style.cssText = [
-      'position:absolute', 'z-index:9999', 'display:none',
+      // position:fixed so coords from getBoundingClientRect() map to the
+      // viewport — `absolute` was getting anchored to any transformed
+      // ancestor (sidebar layout etc.) and the popup ended up off-screen.
+      'position:fixed', 'z-index:9999', 'display:none',
       'background:#0f172a', 'color:#e2e8f0',
       'border:1px solid #475569', 'border-radius:8px',
       'box-shadow:0 10px 30px rgba(0,0,0,.45)',
-      'max-width:420px', 'max-height:300px', 'overflow:auto',
+      'min-width:340px', 'max-width:480px',
+      'max-height:340px', 'overflow:auto',
       'font-family:Inter,system-ui,sans-serif',
     ].join(';');
+    // Ensure the popup lives directly on body — escapes any positioned
+    // ancestor that would otherwise clip or shift it.
     document.body.appendChild(popup);
     popup.addEventListener('mousedown', (ev) => {
       // mousedown so click happens before blur
@@ -100,10 +106,22 @@
   }
 
   function positionPopupBelow(el) {
+    // position:fixed → coords are viewport-relative; no scroll offset needed.
     const r = el.getBoundingClientRect();
-    popup.style.left = (window.scrollX + r.left + 12) + 'px';
-    popup.style.top  = (window.scrollY + r.bottom + 4) + 'px';
-    popup.style.minWidth = Math.min(360, r.width) + 'px';
+    // Prefer placing below caret-ish area; if not enough room, flip above.
+    const viewportH = window.innerHeight;
+    const spaceBelow = viewportH - r.bottom;
+    const popupH = 340;
+    if (spaceBelow >= 200 || spaceBelow >= r.top) {
+      popup.style.top  = (r.bottom + 4) + 'px';
+      popup.style.bottom = 'auto';
+    } else {
+      // Not enough space below — anchor above textarea
+      popup.style.top = Math.max(8, r.top - Math.min(popupH, r.top - 8) - 4) + 'px';
+      popup.style.bottom = 'auto';
+    }
+    popup.style.left = Math.max(8, r.left + 12) + 'px';
+    popup.style.minWidth = Math.min(360, Math.max(240, r.width - 24)) + 'px';
   }
 
   function hidePopup() {

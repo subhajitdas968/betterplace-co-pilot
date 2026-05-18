@@ -3142,12 +3142,32 @@ async def ticket_detail(ident: str, request: Request, view: str = "open",
         # Phase 1 — assemble the requester-centric 360 view. Read-only, cheap.
         customer = _c360.for_requester(c, t.get("requester_id"),
                                          current_ticket_id=ticket_id)
+        # Pull active custom statuses so the reply box + header status menu
+        # can offer them (BetterPlace uses ~16 custom statuses, not just the
+        # 5 generic ones). Grouped by category for the dropdown UI.
+        all_cs_rows = c.execute("""
+            SELECT id, agent_label, status_category, end_user_label
+              FROM custom_statuses
+             WHERE COALESCE(active, 1) = 1
+             ORDER BY
+               CASE status_category
+                 WHEN 'new' THEN 0 WHEN 'open' THEN 1 WHEN 'pending' THEN 2
+                 WHEN 'hold' THEN 3 WHEN 'solved' THEN 4 WHEN 'closed' THEN 5
+                 ELSE 9 END,
+               agent_label
+        """).fetchall()
+        all_custom_statuses = [
+            {"id": r["id"], "label": r["agent_label"],
+             "category": r["status_category"] or "open"}
+            for r in all_cs_rows
+        ]
     return TEMPLATES.TemplateResponse("ticket_detail.html", {
         "request": request, "user": user, "ticket": t,
         "customer": customer,
         "current_view": view, "in_detail": True,
         "search": "",
         "translate_languages": TRANSLATE_LANGUAGES,
+        "all_custom_statuses": all_custom_statuses,
         **sb,
     })
 
@@ -3233,6 +3253,28 @@ async def submit_feedback(
         db.audit(c, actor=user["email"], action=f"ai_feedback_{decision}",
                  target_type="ticket", target_id=str(ticket_id),
                  detail=f"field={field} suggested={ai_suggested} final={final} write={write_status}")
+        # Per-ticket timeline — every AI decision becomes a visible event.
+        # Three variants so the History panel can colour them differently:
+        #   ai.suggestion_approved · ai.suggestion_rejected · ai.suggestion_edited
+        if decision == "approved":
+            summary = f"✓ AI suggestion approved for {field} → {final or ai_suggested}"
+        elif decision == "rejected":
+            reason = f" (reason: {rejection_reason})" if rejection_reason else ""
+            summary = f"✕ AI suggestion rejected for {field} (was: {ai_suggested}){reason}"
+        else:  # edited
+            summary = f"✎ AI suggestion edited for {field}: {ai_suggested} → {final}"
+        db.audit_ticket(
+            c, ticket_id=ticket_id,
+            event_type=f"ai.suggestion_{decision}",
+            event_summary=summary,
+            actor_email=user["email"], actor_type="agent",
+            field_key=field,
+            before=ai_current or None, after=final,
+            raw={"ai_suggested": ai_suggested, "confidence": conf,
+                 "rejection_reason": rejection_reason or None,
+                 "insight_id": insight_id, "feedback_id": fb_id,
+                 "write_status": write_status},
+        )
     return JSONResponse({"ok": True, "feedback_id": fb_id, "decision": decision,
                          "write_status": write_status, "final_value": final})
 
@@ -3448,6 +3490,149 @@ async def upload_reply_attachment(
     })
 
 
+def _missing_mandatory_for_ticket(c: sqlite3.Connection, ticket_id: int) -> list[dict]:
+    """Return [{id, title}] of required fields that are empty for this ticket.
+
+    Mirrors the visibility + required logic used by the ticket detail render
+    so the gating matches what the agent sees. Skips fields hidden by the
+    native form's conditional visibility rules.
+
+    Used by /api/tickets/{id}/reply to block public replies when something
+    mandatory is unfilled (per the user's requirement: replies only allowed
+    when all mandatory fields are filled properly)."""
+    t = c.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+    if not t:
+        return []
+    cfs = db.effective_custom_fields(t)
+    field_rows = {r["id"]: r for r in c.execute("SELECT * FROM ticket_fields").fetchall()}
+    # Try to match a native form for visibility + form-level required overrides
+    grp_id = t["group_id"]
+    native_form = db.resolve_form_for_ticket(c, group_id=grp_id, existing_form_id=None) \
+                  if hasattr(db, "resolve_form_for_ticket") else None
+    visible_ids: set[int] | None = None
+    form_required_ids: set[int] = set()
+    rule_required_overrides: dict[int, bool] = {}
+    if native_form:
+        cur_int = {int(k): (v or "") for k, v in cfs.items() if str(k).isdigit()}
+        try:
+            visible_ids, _why, rule_required_overrides = db.evaluate_visibility(native_form, cur_int)
+        except Exception:
+            visible_ids = None
+        form_required_ids = set(int(x) for x in (native_form.get("required_field_ids") or []))
+
+    missing: list[dict] = []
+    for fid, f in field_rows.items():
+        ftype = (f["type"] or "").lower()
+        if ftype in SYSTEM_FIELD_TYPES:
+            continue
+        if visible_ids is not None and int(fid) not in visible_ids:
+            continue
+        # Required resolution — same precedence chain as ticket detail render
+        try:
+            req_override = f["required_override"]
+        except (IndexError, KeyError):
+            req_override = None
+        if int(fid) in rule_required_overrides:
+            is_required = rule_required_overrides[int(fid)]
+        elif native_form:
+            is_required = (int(fid) in form_required_ids)
+        elif req_override is not None:
+            is_required = bool(req_override)
+        else:
+            is_required = bool(f["required"])
+        if not is_required:
+            continue
+        raw_val = cfs.get(str(fid))
+        if raw_val in (None, "", []):
+            missing.append({"id": fid, "title": f["title"] or f"Field #{fid}"})
+    return missing
+
+
+@app.post("/api/tickets/{ticket_id}/status")
+async def post_status_change(
+    ticket_id: int, request: Request,
+    status: str = Form(""),                       # generic status — used when no custom_status_id
+    custom_status_id: str = Form(""),             # ZD custom_status_id — preferred path
+    user: dict = Depends(auth_mod.require("tickets.change_status")),
+):
+    """Status-only change. Writes to Zendesk (so the rest of the org sees it)
+    AND updates the local mirror so the UI reflects immediately. Accepts
+    either a generic status OR a ZD custom_status_id (preferred — that's
+    what BetterPlace actually uses)."""
+    csid_int: int | None = None
+    cs_label: str | None = None
+    cs_category: str | None = None
+    if custom_status_id and custom_status_id.strip().isdigit():
+        csid_int = int(custom_status_id.strip())
+        with db.conn() as c:
+            r = c.execute(
+                "SELECT agent_label, status_category FROM custom_statuses WHERE id=?",
+                (csid_int,)
+            ).fetchone()
+            if not r:
+                raise HTTPException(400, f"unknown custom_status_id: {csid_int}")
+            cs_label = r["agent_label"]
+            cs_category = (r["status_category"] or "open").lower()
+            status = cs_category  # underlying generic status that ZD will set
+
+    if not status:
+        raise HTTPException(400, "either status or custom_status_id required")
+    if status not in ("new", "open", "pending", "hold", "solved", "closed"):
+        raise HTTPException(400, f"invalid status: {status}")
+    # Mandatory check fires for solved/closed transitions (ZD itself would
+    # reject these with a 422 otherwise — better UX to catch early).
+    if status in ("solved", "closed"):
+        with db.conn() as c:
+            missing = _missing_mandatory_for_ticket(c, ticket_id)
+        if missing:
+            return JSONResponse({
+                "ok": False,
+                "error": "mandatory_fields_empty",
+                "missing": missing,
+                "detail": f"{len(missing)} required field(s) are empty. Fill them before moving to {cs_label or status}.",
+            }, status_code=400)
+    # Try Zendesk first. On success, mirror locally.
+    try:
+        from .. import zendesk
+        if csid_int:
+            zendesk.write_back_field(
+                ticket_id,
+                standard_fields={"custom_status_id": csid_int},
+            )
+        else:
+            zendesk.update_status(ticket_id, status)
+    except Exception as e:
+        raise HTTPException(502, f"Zendesk rejected the status change: {e}")
+    with db.conn() as c:
+        # Mirror underlying status + custom_status_id (stored in raw blob)
+        if csid_int:
+            row = c.execute("SELECT raw FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            try:
+                raw_obj = json.loads(row["raw"] or "{}") if row else {}
+            except Exception:
+                raw_obj = {}
+            raw_obj["custom_status_id"] = csid_int
+            c.execute("UPDATE tickets SET status=?, raw=?, updated_at=? WHERE id=?",
+                      (status, json.dumps(raw_obj), db.now_iso(), ticket_id))
+        else:
+            c.execute("UPDATE tickets SET status=?, updated_at=? WHERE id=?",
+                      (status, db.now_iso(), ticket_id))
+        db.log_access(c, actor_email=user["email"],
+                      event_type="ticket.status_change",
+                      target_kind="ticket", target_id=str(ticket_id),
+                      detail={"new_status": status, "custom_status_id": csid_int,
+                              "custom_status_label": cs_label})
+        summary = (f"Status → {cs_label} ({status})" if cs_label
+                   else f"Status → {status}")
+        db.audit_ticket(c, ticket_id=ticket_id, event_type="status.changed",
+                        event_summary=summary,
+                        actor_email=user["email"], actor_type="agent",
+                        raw={"status": status, "custom_status_id": csid_int,
+                             "custom_status_label": cs_label})
+    return JSONResponse({"ok": True, "status": status,
+                         "custom_status_id": csid_int, "custom_status_label": cs_label})
+
+
 @app.post("/api/tickets/{ticket_id}/reply")
 async def post_reply(
     ticket_id: int, request: Request,
@@ -3456,11 +3641,23 @@ async def post_reply(
     body_format: str = Form("markdown"),      # 'plain' | 'markdown'
     attachment_ids: str = Form(""),           # comma-separated negative ids from /upload-attachment
     source_language: str = Form(""),          # if the draft was translated, capture original lang
+    new_status: str = Form(""),                # optional generic status (open/pending/hold/solved)
+    new_custom_status_id: str = Form(""),     # optional ZD custom_status_id (overrides new_status)
     user: dict = Depends(auth_mod.require_any("tickets.public_reply", "tickets.internal_note")),
 ):
-    """Save a native comment on this ticket. Stays entirely local (Block #1
-    policy — no Zendesk write). Attachments uploaded via /upload-attachment are
-    associated to the new comment id."""
+    """Save a native comment AND write it to Zendesk via the API.
+
+    Behaviour:
+      - mode='public' → posted to Zendesk as a customer-visible comment
+      - mode='internal' → posted to Zendesk as an internal note
+      - Mandatory fields gate: public replies + status transitions to
+        solved/closed both require all required custom fields to be filled
+      - Attachments link locally; full ZD attachment upload is Phase 4
+      - The local mirror is always written too — so the AI worker, search,
+        analytics keep working even if the ZD round-trip is slow.
+
+    On ZD error, returns 502 with the error text. The local copy is still
+    written so the agent can retry the send later via a queue (TODO)."""
     # Mode-specific permission check: a user holding only internal_note can
     # still hit this endpoint, but only with mode='internal'.
     if mode == "public" and "tickets.public_reply" not in user["permissions"]:
@@ -3474,6 +3671,81 @@ async def post_reply(
     body = (body or "").strip()
     if not body and not attachment_ids:
         raise HTTPException(400, "empty reply")
+    new_status = (new_status or "").strip().lower()
+    if new_status and new_status not in ("new", "open", "pending", "hold", "solved", "closed"):
+        raise HTTPException(400, f"invalid new_status: {new_status}")
+
+    # Resolve custom_status_id (preferred) → also derive the category so the
+    # mandatory-field gate fires correctly for solved/closed transitions.
+    csid_int: int | None = None
+    cs_category: str | None = None
+    cs_label: str | None = None
+    if new_custom_status_id and new_custom_status_id.strip().isdigit():
+        csid_int = int(new_custom_status_id.strip())
+        with db.conn() as c:
+            r = c.execute(
+                "SELECT agent_label, status_category FROM custom_statuses WHERE id=?",
+                (csid_int,)
+            ).fetchone()
+            if not r:
+                raise HTTPException(400, f"unknown custom_status_id: {csid_int}")
+            cs_category = (r["status_category"] or "").lower()
+            cs_label = r["agent_label"]
+        # The category drives the underlying generic status that ZD will set.
+        if cs_category and not new_status:
+            new_status = cs_category
+
+    # ---- Mandatory-field gate ----
+    # Block public replies AND solved/closed transitions when required fields
+    # are empty. Internal notes are allowed regardless (agents need to be
+    # able to comment internally even on incomplete tickets).
+    transition_blocking = new_status in ("solved", "closed") or cs_category in ("solved", "closed")
+    needs_mandatory_check = (mode == "public") or transition_blocking
+    if needs_mandatory_check:
+        with db.conn() as c:
+            missing = _missing_mandatory_for_ticket(c, ticket_id)
+        if missing:
+            return JSONResponse({
+                "ok": False,
+                "error": "mandatory_fields_empty",
+                "missing": missing,
+                "detail": (f"{len(missing)} required field(s) are empty: "
+                           + ", ".join(m["title"] for m in missing[:5])
+                           + (" …" if len(missing) > 5 else "")
+                           + ". Fill them before sending."),
+            }, status_code=400)
+
+    # ---- Markdown → HTML for Zendesk ----
+    # ZD's API stores the comment body literally — `**bold**` shows as
+    # `**bold**` in the agent UI and customer email. Convert to HTML so the
+    # formatting the agent applied actually renders. The local mirror still
+    # stores the raw markdown so we can re-render or re-edit later.
+    from .. import md_to_html as _mdh
+    if body and body_format == "markdown":
+        zd_body = _mdh.markdown_to_html(body)
+        send_as_html = True
+    else:
+        zd_body = body or "(attachment-only)"
+        send_as_html = False
+
+    # ---- Zendesk write (the real send) ----
+    zd_result = None
+    zd_error = None
+    try:
+        from .. import zendesk
+        zd_result = zendesk.add_comment(
+            ticket_id=ticket_id,
+            body=zd_body if zd_body else "(attachment-only)",
+            public=(mode == "public"),
+            author_email=user.get("email"),
+            status=new_status or None,
+            custom_status_id=csid_int,
+            html_body=send_as_html,
+        )
+    except Exception as e:
+        zd_error = str(e)
+        # Don't kill the request — we still save local for retry visibility.
+        print(f"[reply] ZD write failed for ticket {ticket_id}: {e}")
     # Resolve the author. If the agent doesn't have a users row yet (e.g. dev
     # mode with auth off), create a placeholder under their email.
     with db.conn() as c:
@@ -3498,18 +3770,46 @@ async def post_reply(
         for aid in att_id_list:
             c.execute("UPDATE ticket_attachments SET comment_id=? WHERE id=? AND ticket_id=?",
                       (cid, aid, ticket_id))
-        # Bump the ticket's updated_at so list views surface it
-        c.execute("UPDATE tickets SET updated_at=? WHERE id=?", (db.now_iso(), ticket_id))
-        db.audit(c, actor=user["email"], action=f"reply_{mode}_local",
+        # Bump the ticket's updated_at + mirror new status if it changed
+        if csid_int:
+            # Persist the custom_status_id into raw blob too (ticket_detail
+            # render reads custom_status_label from raw.custom_status_id).
+            row = c.execute("SELECT raw FROM tickets WHERE id=?", (ticket_id,)).fetchone()
+            try:
+                raw_obj = json.loads(row["raw"] or "{}") if row else {}
+            except Exception:
+                raw_obj = {}
+            raw_obj["custom_status_id"] = csid_int
+            c.execute("UPDATE tickets SET status=?, raw=?, updated_at=? WHERE id=?",
+                      (new_status or raw_obj.get("status", "open"), json.dumps(raw_obj),
+                       db.now_iso(), ticket_id))
+        elif new_status:
+            c.execute("UPDATE tickets SET status=?, updated_at=? WHERE id=?",
+                      (new_status, db.now_iso(), ticket_id))
+        else:
+            c.execute("UPDATE tickets SET updated_at=? WHERE id=?", (db.now_iso(), ticket_id))
+        action_label = (f"reply_{mode}_zd" if zd_result else f"reply_{mode}_local_only")
+        status_detail = (cs_label or new_status or "-")
+        db.audit(c, actor=user["email"], action=action_label,
                  target_type="ticket", target_id=str(ticket_id),
-                 detail=f"comment_id={cid} format={body_format} attachments={len(att_id_list)}")
+                 detail=f"comment_id={cid} format={body_format} attachments={len(att_id_list)} status={status_detail} zd_err={zd_error or '-'}")
         # Per-ticket timeline
         snippet = (body[:80] + ("…" if len(body) > 80 else "")) if body else "(empty)"
         ev_type = "comment.public" if mode == "public" else "note.added"
+        timeline_summary = ("Public reply: " if mode == "public" else "Internal note: ") + snippet
+        if cs_label:
+            timeline_summary += f" · status → {cs_label}"
+        elif new_status:
+            timeline_summary += f" · status → {new_status}"
         db.audit_ticket(c, ticket_id=ticket_id, event_type=ev_type,
-                        event_summary=("Public reply: " if mode == "public" else "Internal note: ") + snippet,
+                        event_summary=timeline_summary,
                         actor_email=user["email"], actor_type="agent",
-                        raw={"comment_id": cid, "attachments_linked": len(att_id_list)})
+                        raw={"comment_id": cid, "attachments_linked": len(att_id_list),
+                             "new_status": new_status or None,
+                             "new_custom_status_id": csid_int,
+                             "new_custom_status_label": cs_label,
+                             "html_sent_to_zd": bool(send_as_html and zd_result),
+                             "zd_sent": bool(zd_result)})
         # Fire triggers — both the generic comment event and the role-specific one
         try:
             from .. import rules_engine
@@ -3520,8 +3820,17 @@ async def post_reply(
                 rules_engine.dispatch_event(c, "note.added", ticket_id, actor_email=user["email"])
         except Exception as e:
             print(f"rules dispatch failed: {e}")
-    return JSONResponse({"ok": True, "comment_id": cid, "mode": mode,
-                         "attachments_linked": len(att_id_list)})
+    return JSONResponse({
+        "ok": True,
+        "comment_id": cid,
+        "mode": mode,
+        "attachments_linked": len(att_id_list),
+        "zd_sent": bool(zd_result),
+        "zd_error": zd_error,
+        "new_status": new_status or None,
+        "new_custom_status_id": csid_int,
+        "new_custom_status_label": cs_label,
+    })
 
 
 # Supported translate languages — used in the reply box dropdown.
@@ -6100,9 +6409,92 @@ async def admin_reanalyze_bulk(
 
 @app.get("/api/tickets/{ticket_id}/history")
 async def ticket_history(ticket_id: int, limit: int = 500, user: dict = Depends(require_user)):
+    """Enriched history feed for the History panel.
+
+    Beyond the raw audit row we attach:
+      - field_label   → looked up from ticket_fields when field_key is numeric
+      - rule_name     → looked up from automations when actor is `automation:<id>`
+      - actor_name    → display name from users table (falls back to email)
+      - reason        → for system events, a human-readable "why" pulled from raw
+    Everything needed to render "X did Y because Z" without further fetches.
+    """
     with db.conn() as c:
         events = db.list_ticket_audit(c, ticket_id, limit=limit)
-    return JSONResponse({"ok": True, "events": events, "count": len(events)})
+        # Pre-fetch lookup tables once (avoid N+1)
+        field_titles: dict[int, str] = {}
+        for r in c.execute("SELECT id, title FROM ticket_fields").fetchall():
+            field_titles[int(r["id"])] = r["title"] or ""
+        # native_fields too
+        try:
+            for r in c.execute("SELECT id, title FROM native_fields").fetchall():
+                field_titles[int(r["id"])] = r["title"] or ""
+        except sqlite3.OperationalError:
+            pass
+        rule_names: dict[int, str] = {}
+        for r in c.execute("SELECT id, name FROM automations").fetchall():
+            rule_names[int(r["id"])] = r["name"] or ""
+        # User display names — only fetch agents/admins (end-users rarely act here)
+        user_names: dict[str, str] = {}
+        for r in c.execute(
+            "SELECT email, name FROM users WHERE email IS NOT NULL"
+        ).fetchall():
+            if r["email"]:
+                user_names[r["email"].lower()] = r["name"] or r["email"]
+
+    enriched = []
+    for e in events:
+        ev = dict(e)
+        # Field label
+        fk = ev.get("field_key")
+        if fk:
+            try:
+                fid_int = int(fk)
+                ev["field_label"] = field_titles.get(fid_int) or fk
+            except (ValueError, TypeError):
+                # Non-numeric field_key (e.g., 'status', 'priority', 'subject')
+                ev["field_label"] = {
+                    "status": "Status", "priority": "Priority",
+                    "subject": "Subject", "type": "Type",
+                    "assignee_id": "Assignee", "group_id": "Group",
+                    "custom_status_id": "Custom status",
+                }.get(fk, fk)
+        # Rule name
+        actor = (ev.get("actor_email") or "").strip()
+        if actor.startswith("automation:"):
+            try:
+                rid = int(actor.split(":", 1)[1])
+                ev["rule_id"] = rid
+                ev["rule_name"] = rule_names.get(rid) or f"Rule #{rid}"
+            except (ValueError, TypeError):
+                pass
+        # Actor display name
+        if actor and not actor.startswith(("automation:", "system")):
+            ev["actor_name"] = user_names.get(actor.lower(), actor)
+        else:
+            ev["actor_name"] = "System" if actor.startswith("system") else (
+                ev.get("rule_name", "Automation") if actor.startswith("automation:") else actor
+            )
+        # Best-effort "why" — for rule firings, summarize matched conditions
+        raw_obj = None
+        if isinstance(ev.get("raw"), str):
+            try: raw_obj = json.loads(ev["raw"])
+            except Exception: raw_obj = None
+        elif isinstance(ev.get("raw"), dict):
+            raw_obj = ev["raw"]
+        if raw_obj:
+            ev["raw_parsed"] = raw_obj
+            # Pull a short "reason" hint when available
+            if ev["event_type"] == "rule.fired":
+                results = raw_obj.get("results") or []
+                actions = [r.get("action") for r in results if r.get("action")]
+                ev["reason"] = (
+                    f"ran {len(actions)} action(s): {', '.join(actions[:4])}" +
+                    ("…" if len(actions) > 4 else "")
+                )
+            elif raw_obj.get("trigger_event"):
+                ev["reason"] = f"triggered by {raw_obj['trigger_event']}"
+        enriched.append(ev)
+    return JSONResponse({"ok": True, "events": enriched, "count": len(enriched)})
 
 
 @app.get("/api/admin/tickets/search")

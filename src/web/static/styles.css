@@ -1368,9 +1368,292 @@ tr.row-status-closed:hover { background: #eef2ff; }
   resize: vertical; transition: all .18s; background: #fff;
 }
 .reply-box textarea:focus { outline: none; border-color: var(--indigo); box-shadow: 0 0 0 4px rgba(79,70,229,.10); }
-.reply-actions-row { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
+.reply-actions-row {
+  display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;
+  align-items: center;
+}
 .reply-note {
   font-size: 11px; color: var(--muted); margin-top: 6px; font-style: italic;
+}
+
+/* ----- Production reply window: status picker + send-label swap + mandatory warning ----- */
+
+/* Inline "Then set to" status select, sits between AI improve + Send. */
+.reply-status-picker {
+  display: inline-flex; flex-direction: column; gap: 2px;
+  padding: 4px 10px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin-left: auto;  /* push status + send to the right side */
+}
+.reply-status-picker select {
+  border: none;
+  background: transparent;
+  font-size: 12.5px;
+  font-weight: 500;
+  color: var(--ink);
+  cursor: pointer;
+  padding: 2px 0;
+  font-family: inherit;
+}
+.reply-status-picker select:focus {
+  outline: 2px solid var(--indigo);
+  outline-offset: 2px;
+  border-radius: 4px;
+}
+
+/* Send-button label swap — show Send for public, Save for internal */
+.reply-send-label-public,
+.reply-send-label-internal { display: none; }
+.reply-box[data-mode="public"]   .reply-send-label-public   { display: inline; }
+.reply-box[data-mode="internal"] .reply-send-label-internal { display: inline; }
+
+/* Internal-note paint on the Send button */
+.reply-box[data-mode="internal"] .reply-actions-row .btn-primary {
+  background: linear-gradient(135deg, #ca8a04, #a16207);
+  border-color: #a16207;
+}
+.reply-box[data-mode="internal"] .reply-actions-row .btn-primary:hover {
+  background: linear-gradient(135deg, #a16207, #854d0e);
+}
+
+/* Mandatory-fields warning — appears below textarea when /reply returns
+   error: "mandatory_fields_empty". Red, can't miss it. */
+.reply-mandatory-warn {
+  margin-top: 8px;
+  padding: 10px 12px;
+  background: #fef2f2;
+  border: 1px solid #fecaca;
+  border-left: 4px solid #dc2626;
+  border-radius: 8px;
+  color: #991b1b;
+  font-size: 12.5px;
+  line-height: 1.5;
+}
+html[data-theme="dark"] .reply-mandatory-warn {
+  background: rgba(220, 38, 38, 0.10);
+  border-color: rgba(252, 165, 165, 0.30);
+  border-left-color: #ef4444;
+  color: #fca5a5;
+}
+.reply-mandatory-warn .rmw-head {
+  font-weight: 600;
+  margin-bottom: 4px;
+  font-size: 13px;
+}
+.reply-mandatory-warn .rmw-list {
+  margin: 4px 0 6px 22px;
+  padding: 0;
+}
+.reply-mandatory-warn .rmw-list li {
+  margin: 2px 0;
+}
+.reply-mandatory-warn .rmw-foot {
+  font-size: 11.5px;
+  color: #b91c1c;
+  font-style: italic;
+  margin-top: 4px;
+}
+html[data-theme="dark"] .reply-mandatory-warn .rmw-foot {
+  color: #fbbb98;
+}
+
+/* ----- Header status-change widget (inline, on ticket meta row) ----- */
+.status-change-wrap {
+  position: relative;
+  display: inline-flex;
+}
+.status-change-btn {
+  cursor: pointer;
+  border: none;
+  font-family: inherit;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  padding: 4px 10px;
+  transition: filter 0.15s ease, transform 0.10s ease;
+}
+.status-change-btn:hover { filter: brightness(1.04); }
+.status-change-btn:active { transform: scale(0.97); }
+.status-change-caret {
+  font-size: 9px;
+  opacity: 0.6;
+  margin-left: 2px;
+}
+.status-change-menu {
+  display: none;
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 60;
+  min-width: 220px;
+  background: var(--card);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: 0 12px 32px rgba(15, 23, 42, 0.16);
+  padding: 8px;
+  flex-direction: column;
+  gap: 2px;
+}
+.status-change-menu.open { display: flex; }
+.status-change-menu-title {
+  font-size: 10.5px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  padding: 4px 8px;
+}
+.scm-item {
+  text-align: left;
+  padding: 7px 10px;
+  background: transparent;
+  border: none;
+  border-radius: 6px;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--ink);
+  cursor: pointer;
+  transition: background 0.10s ease;
+}
+.scm-item:hover { background: var(--indigo-soft); }
+.scm-group-label {
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  padding: 8px 8px 2px 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+}
+.scm-group-label:first-of-type {
+  border-top: none;
+  margin-top: 0;
+  padding-top: 4px;
+}
+.status-change-menu { min-width: 260px; max-height: 420px; overflow-y: auto; }
+/* ----- Enhanced history rows (Customer 360 → History panel) ----- */
+.hist-icon { font-size: 15px; line-height: 1.2; }
+.hist-body { min-width: 0; }
+.hist-summary { font-size: 12.5px; font-weight: 600; color: var(--ink); margin-bottom: 3px; }
+.hist-diff {
+  font-size: 11.5px;
+  color: var(--ink);
+  padding: 3px 6px;
+  background: rgba(255,255,255,0.6);
+  border-radius: 4px;
+  margin-bottom: 4px;
+  display: inline-block;
+  max-width: 100%;
+  word-break: break-word;
+}
+.hist-diff strong { color: var(--muted); font-weight: 600; }
+.hist-before {
+  background: rgba(220, 38, 38, 0.10);
+  color: #991b1b;
+  text-decoration: line-through;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+}
+.hist-after {
+  background: rgba(5, 150, 105, 0.12);
+  color: #065f46;
+  padding: 0 4px;
+  border-radius: 3px;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 11px;
+  font-weight: 600;
+}
+html[data-theme="dark"] .hist-before { background: rgba(220,38,38,0.18); color: #fca5a5; }
+html[data-theme="dark"] .hist-after  { background: rgba(5,150,105,0.22); color: #6ee7b7; }
+.hist-why {
+  font-size: 11px;
+  color: var(--muted);
+  font-style: italic;
+  margin-bottom: 3px;
+}
+.hist-meta {
+  font-size: 10.5px;
+  color: var(--muted);
+  font-family: 'JetBrains Mono', monospace;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  margin-top: 2px;
+}
+.hist-meta .hist-sep { opacity: 0.4; }
+.hist-actor { font-weight: 600; color: var(--ink); }
+.hist-type {
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+}
+.hist-via {
+  font-size: 10px;
+  color: var(--muted);
+  font-style: italic;
+}
+.hist-who {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 9.5px;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  background: var(--indigo-soft);
+  color: var(--indigo);
+}
+.hist-who-auto  { background: #ede9fe; color: #6d28d9; }
+.hist-who-sys   { background: #e0e7ff; color: #3730a3; }
+.hist-who-agent { background: #dcfce7; color: #166534; }
+.hist-who-cust  { background: #ffedd5; color: #9a3412; }
+html[data-theme="dark"] .hist-who-auto  { background: rgba(124,58,237,0.20); color: #c4b5fd; }
+html[data-theme="dark"] .hist-who-sys   { background: rgba(67,56,202,0.25); color: #a5b4fc; }
+html[data-theme="dark"] .hist-who-agent { background: rgba(22,101,52,0.30); color: #86efac; }
+html[data-theme="dark"] .hist-who-cust  { background: rgba(154,52,18,0.30); color: #fdba74; }
+.hist-raw {
+  margin-top: 6px;
+  font-size: 10.5px;
+}
+.hist-raw summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-style: italic;
+  outline: none;
+  list-style: none;
+}
+.hist-raw summary::before { content: '▸ '; font-style: normal; transition: transform .15s; display: inline-block; }
+.hist-raw[open] summary::before { content: '▾ '; }
+.hist-raw pre {
+  margin-top: 4px;
+  padding: 6px 8px;
+  background: rgba(15, 23, 42, 0.05);
+  border-radius: 4px;
+  font-size: 10.5px;
+  line-height: 1.35;
+  max-height: 240px;
+  overflow-y: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+html[data-theme="dark"] .hist-raw pre { background: rgba(255,255,255,0.05); }
+
+.scm-foot {
+  font-size: 10.5px;
+  color: var(--muted);
+  padding: 4px 8px;
+  margin-top: 4px;
+  border-top: 1px solid var(--border);
+  font-style: italic;
 }
 
 /* Internal-note theme — flips the whole box yellow + adds a side stripe.
@@ -1753,14 +2036,24 @@ tr.row-status-closed:hover { background: #eef2ff; }
 }
 .kb-banner strong { color: #5a2d04; font-weight: 700; }
 
+/* STALE 3-column media query removed (May 2026): the ticket-body now has
+   exactly 2 children (.conv-col + .right-col), not 3. The old rule
+   `grid-template-columns: 240px 1fr 380px` was squeezing .conv-col into
+   the 240px track and pushing right-col content to the 1fr middle track,
+   making the layout completely broken at any viewport ≤ 1300px.
+   At narrow viewports we just keep the default 2-column grid and let the
+   conv-col flex down; explicit single-column stacking only kicks in below
+   900px now. */
 @media (max-width: 1300px) {
-  .ticket-body { grid-template-columns: 240px minmax(0, 1fr) 380px; }
-  .ticket-body.fields-collapsed { grid-template-columns: 44px minmax(0, 1fr) 380px; }
+  .ticket-body { grid-template-columns: minmax(0, 1fr) 380px; }
 }
 @media (max-width: 1100px) {
   .layout { grid-template-columns: 220px 1fr; }
+  .ticket-body { grid-template-columns: minmax(0, 1fr) 320px; }
+}
+@media (max-width: 900px) {
   .ticket-body { grid-template-columns: 1fr; overflow-y: auto; }
-  .fields-side, .conv-col, .right-col { border-right: none; border-bottom: 1px solid var(--border); }
+  .conv-col, .right-col { border-right: none; border-bottom: 1px solid var(--border); }
 }
 
 /* ===========================================================================
@@ -2825,6 +3118,35 @@ body.preview-on .list-preview-aside { display: block; }
   box-shadow: inset 3px 0 0 var(--indigo) !important;
 }
 
+/* ----- Kanban preview split (mirrors .list-preview-split) ----- */
+.kanban-split {
+  display: grid;
+  grid-template-columns: 1fr 0;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  transition: grid-template-columns .25s cubic-bezier(.2,.6,.2,1);
+}
+body.kanban-preview-on .kanban-split {
+  grid-template-columns: 1fr min(540px, 42%);
+}
+.kanban-board-pane {
+  min-width: 0;
+  /* board's own horizontal scroll stays inside it; aside lives outside */
+}
+.kanban-preview-aside {
+  border-left: 1px solid var(--border);
+  background: var(--card);
+  overflow-y: auto;
+  display: none;
+}
+body.kanban-preview-on .kanban-preview-aside { display: block; }
+.kanban-card.preview-active {
+  outline: 2px solid var(--indigo);
+  outline-offset: 1px;
+  box-shadow: 0 0 0 3px var(--indigo-soft);
+}
+
 /* Preview-toggle button visual states */
 .preview-on-label { display: none; }
 body.preview-on .preview-off-label { display: none; }
@@ -2990,17 +3312,24 @@ html[data-theme="dark"] .prv-msg-internal { background: linear-gradient(180deg, 
   /* Use position:fixed so the getBoundingClientRect() coords map directly to
      viewport — `position: absolute` was anchoring to the textarea's containing
      block which put the dropdown off-screen. */
-  position: fixed;
-  z-index: 9500;
+  position: fixed !important;  /* force-win over any inline ancestor positioning */
+  z-index: 99999 !important;   /* over absolutely everything (incl. tab bar, sticky topbar) */
   background: var(--card);
+  color: var(--ink);
   border: 1px solid var(--border);
   border-radius: 10px;
-  box-shadow: 0 12px 32px rgba(15,23,42,0.15);
+  box-shadow: 0 12px 32px rgba(15,23,42,0.20);
   max-height: 320px;
   overflow-y: auto;
   padding: 4px;
+  min-width: 280px;
   /* When hidden (style="display:none"), guarantee no pointer events leak to
      elements behind it. */
+}
+html[data-theme="dark"] .mention-dropdown {
+  background: #1e293b;
+  border-color: #475569;
+  box-shadow: 0 12px 32px rgba(0,0,0,0.50);
 }
 .mention-dropdown[style*="display:none"],
 .mention-dropdown[style*="display: none"] { pointer-events: none !important; }

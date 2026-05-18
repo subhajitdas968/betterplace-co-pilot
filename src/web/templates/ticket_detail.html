@@ -47,9 +47,51 @@
     </div>
     <div class="ticket-subject">{{ ticket.subject }}</div>
     <div class="ticket-meta-row">
+      {# Inline status pill + change menu. Clicking the pill opens a quick
+         picker; selecting a status hits /api/tickets/{id}/status which
+         applies mandatory-field gating and writes to Zendesk. Read-only
+         users see a plain badge with no caret. #}
+      {% if has_perm(user, 'tickets.change_status') %}
+      <span class="status-change-wrap" id="status-change-wrap">
+        <button type="button" class="badge b-{{ ticket.status }} status-change-btn"
+                onclick="document.getElementById('status-change-menu').classList.toggle('open')"
+                title="Click to change status — writes to Zendesk">
+          <span id="status-change-pill">
+            {% if ticket.custom_status_label %}{{ ticket.custom_status_label }}{% else %}{{ ticket.status }}{% endif %}
+          </span>
+          <span class="status-change-caret">▾</span>
+        </button>
+        <div class="status-change-menu" id="status-change-menu">
+          <div class="status-change-menu-title">Change status</div>
+          {% if all_custom_statuses %}
+            {% set _cat_icons = {'new':'🆕','open':'🟢','pending':'🟡','hold':'⏸','solved':'✓','closed':'⊘'} %}
+            {% set _cats = ['new','open','pending','hold','solved','closed'] %}
+            {% for cat in _cats %}
+              {% set _items = all_custom_statuses|selectattr('category','equalto',cat)|list %}
+              {% if _items %}
+                <div class="scm-group-label">{{ _cat_icons.get(cat,'•') }} {{ cat|upper }}</div>
+                {% for s in _items %}
+                <button type="button" class="scm-item scm-{{ cat }}"
+                        onclick="changeStatusFromHeader('cs:{{ s.id }}')">
+                  {{ s.label }}
+                </button>
+                {% endfor %}
+              {% endif %}
+            {% endfor %}
+          {% else %}
+            <button type="button" class="scm-item scm-open"    onclick="changeStatusFromHeader('open')">🟢 Open</button>
+            <button type="button" class="scm-item scm-pending" onclick="changeStatusFromHeader('pending')">🟡 Pending</button>
+            <button type="button" class="scm-item scm-hold"    onclick="changeStatusFromHeader('hold')">⏸ On hold</button>
+            <button type="button" class="scm-item scm-solved"  onclick="changeStatusFromHeader('solved')">✓ Solved</button>
+          {% endif %}
+          <div class="scm-foot">Writes to Zendesk · enforces mandatory fields</div>
+        </div>
+      </span>
+      {% else %}
       <span class="badge b-{{ ticket.status }}">
         {% if ticket.custom_status_label %}{{ ticket.custom_status_label }}{% else %}{{ ticket.status }}{% endif %}
       </span>
+      {% endif %}
       {% if ticket.group %}<span class="badge {% if 'managed' in (ticket.group.name or '')|lower %}b-ms{% else %}b-ps{% endif %}">{{ ticket.group.name }}</span>{% endif %}
       {% if ticket.organization %}<span class="badge b-cust">{{ ticket.organization.name }}</span>{% endif %}
       {# F0+ · Inline assignment widget #}
@@ -225,16 +267,52 @@
         <!-- Pending uploads chip row (populated by handleAttachFiles) -->
         <div class="reply-attachments" id="reply-attachments" style="display:none;"></div>
 
+        <!-- Mandatory-field warning — only shows after a blocked submit -->
+        <div id="reply-mandatory-warn" class="reply-mandatory-warn" style="display:none;"></div>
+
         <div class="reply-actions-row">
           <button type="button" class="btn btn-ai" onclick="smartReply()" id="smart-reply-btn">✦ Improve with AI</button>
-          <button type="button" class="btn btn-primary" onclick="submitReply()">Save reply</button>
-          <button type="button" class="btn btn-secondary" onclick="copyReply()">Copy to clipboard</button>
+
+          <!-- Atomically set status while sending the reply (common workflow:
+               "answer the customer and move to Pending"). Lists ALL active
+               custom statuses, grouped by underlying category. -->
+          <label class="reply-status-picker" title="Optional: change ticket status when sending">
+            <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">Then set to</span>
+            <select id="reply-new-status">
+              <option value="">— keep status —</option>
+              {% if all_custom_statuses %}
+                {% set _cats = ['new', 'open', 'pending', 'hold', 'solved', 'closed'] %}
+                {% set _cat_labels = {'new':'New','open':'Open','pending':'Pending','hold':'On hold','solved':'Solved','closed':'Closed'} %}
+                {% for cat in _cats %}
+                  {% set _items = all_custom_statuses|selectattr('category','equalto',cat)|list %}
+                  {% if _items %}
+                  <optgroup label="{{ _cat_labels[cat] }}">
+                    {% for s in _items %}
+                    <option value="cs:{{ s.id }}">{{ s.label }}</option>
+                    {% endfor %}
+                  </optgroup>
+                  {% endif %}
+                {% endfor %}
+              {% else %}
+                <option value="open">Open</option>
+                <option value="pending">Pending (waiting on customer)</option>
+                <option value="hold">On hold</option>
+                <option value="solved">Solved</option>
+              {% endif %}
+            </select>
+          </label>
+
+          <button type="button" class="btn btn-primary" onclick="submitReply()">
+            <span class="reply-send-label-public">📤 Send reply</span>
+            <span class="reply-send-label-internal">📒 Save note</span>
+          </button>
+          <button type="button" class="btn btn-secondary" onclick="copyReply()">Copy</button>
           <button type="button" class="btn btn-secondary" onclick="clearReply()">Clear</button>
           <span class="smart-reply-status" id="smart-reply-status"></span>
         </div>
         <div class="reply-note">
-          Saved locally as a native comment under this ticket — never sent to Zendesk
-          (Block #1 policy).
+          Public replies are sent to Zendesk and the customer.
+          Internal notes stay on the ticket as agent-only context.
         </div>
       </div>
       {% endif %}{# /reply-box permission gate #}
@@ -1036,17 +1114,67 @@ async function loadHistory() {
 function renderHistoryItem(host, ev) {
   const row = document.createElement('div');
   const palette = histPalette(ev.event_type);
-  row.style.cssText = `display:grid;grid-template-columns:24px 1fr;gap:8px;align-items:flex-start;padding:6px 8px;border-radius:6px;border:1px solid ${palette.border};background:${palette.bg};`;
+  row.style.cssText = `display:grid;grid-template-columns:24px 1fr;gap:8px;align-items:flex-start;padding:8px 10px;border-radius:8px;border:1px solid ${palette.border};background:${palette.bg};margin-bottom:6px;`;
   const when = formatIst(ev.created_at);
   const actor = ev.actor_email || 'system';
+  const actorName = ev.actor_name || actor;
+  const actorType = ev.actor_type || (actor.startsWith('automation:') ? 'automation' : 'agent');
+
+  // "Who" badge — agent / automation / system / customer
+  const actorBadge = (() => {
+    if (actorType === 'automation') return `<span class="hist-who hist-who-auto">⚙ automation</span>`;
+    if (actorType === 'system')     return `<span class="hist-who hist-who-sys">🤖 system</span>`;
+    if (actorType === 'agent')      return `<span class="hist-who hist-who-agent">👤 agent</span>`;
+    if (actorType === 'end-user')   return `<span class="hist-who hist-who-cust">🧑‍🤝‍🧑 customer</span>`;
+    return `<span class="hist-who">${escapeHtml(actorType)}</span>`;
+  })();
+
+  // Field change diff (before → after) when both are present
+  let diff = '';
+  if (ev.before !== undefined && ev.after !== undefined && (ev.before !== null || ev.after !== null)) {
+    const bStr = ev.before === null || ev.before === '' ? '∅' : (typeof ev.before === 'object' ? JSON.stringify(ev.before) : String(ev.before));
+    const aStr = ev.after === null || ev.after === '' ? '∅' : (typeof ev.after === 'object' ? JSON.stringify(ev.after) : String(ev.after));
+    const label = ev.field_label || ev.field_key || '';
+    diff = `<div class="hist-diff">${label ? '<strong>' + escapeHtml(label) + ':</strong> ' : ''}<code class="hist-before">${escapeHtml(bStr.slice(0,120))}</code> → <code class="hist-after">${escapeHtml(aStr.slice(0,120))}</code></div>`;
+  }
+
+  // Rule attribution
+  let why = '';
+  if (ev.rule_name) {
+    why = `<div class="hist-why">because <strong>${escapeHtml(ev.rule_name)}</strong> fired${ev.reason ? ' — ' + escapeHtml(ev.reason) : ''}</div>`;
+  } else if (ev.reason) {
+    why = `<div class="hist-why">${escapeHtml(ev.reason)}</div>`;
+  }
+
+  // Raw payload toggle — only show toggle when raw_parsed has interesting content
+  let rawBlock = '';
+  if (ev.raw_parsed && Object.keys(ev.raw_parsed).length) {
+    const rawJson = JSON.stringify(ev.raw_parsed, null, 2);
+    if (rawJson.length > 2 && rawJson !== '{}') {
+      rawBlock = `
+        <details class="hist-raw">
+          <summary>show raw payload</summary>
+          <pre>${escapeHtml(rawJson)}</pre>
+        </details>`;
+    }
+  }
+
   row.innerHTML = `
-    <div style="font-size:14px;line-height:1.2;color:${palette.fg};">${palette.icon}</div>
-    <div>
-      <div style="font-size:12px;color:#0f172a;"><strong>${escapeHtml(ev.event_summary || ev.event_type)}</strong></div>
-      <div style="font-size:10.5px;color:#64748b;font-family:'JetBrains Mono',monospace;">
-        ${escapeHtml(when)} · ${escapeHtml(actor)} · <span style="background:${palette.tagBg};color:${palette.tagFg};padding:1px 5px;border-radius:8px;">${escapeHtml(ev.event_type)}</span>
-        ${ev.source === 'zendesk' ? '<span style="margin-left:6px;color:#94a3b8;">via ZD</span>' : ''}
+    <div class="hist-icon" style="color:${palette.fg};">${palette.icon}</div>
+    <div class="hist-body">
+      <div class="hist-summary">${escapeHtml(ev.event_summary || ev.event_type)}</div>
+      ${diff}
+      ${why}
+      <div class="hist-meta">
+        ${actorBadge}
+        <span class="hist-actor">${escapeHtml(actorName)}</span>
+        <span class="hist-sep">·</span>
+        <span class="hist-when">${escapeHtml(when)}</span>
+        <span class="hist-sep">·</span>
+        <span class="hist-type" style="background:${palette.tagBg};color:${palette.tagFg};">${escapeHtml(ev.event_type)}</span>
+        ${ev.source === 'zendesk' ? '<span class="hist-via">via ZD</span>' : ''}
       </div>
+      ${rawBlock}
     </div>
   `;
   host.appendChild(row);
@@ -1106,10 +1234,32 @@ const PENDING_ATTACHMENTS = [];
 
 function setReplyMode(btn, mode) {
   document.querySelectorAll('.reply-tab').forEach(b => b.classList.remove('active'));
-  btn.classList.add('active');
-  document.getElementById('reply-box').dataset.mode = mode;
+  if (btn) btn.classList.add('active');
+  else {
+    // Fallback when called without a button (event-delegation path)
+    const target = document.querySelector(`.reply-tab[data-mode="${mode}"]`);
+    if (target) target.classList.add('active');
+  }
+  const rb = document.getElementById('reply-box');
+  if (rb) rb.dataset.mode = mode;
+  // Refocus the textarea so the agent can keep typing
+  const ta = document.getElementById('reply-text');
+  if (ta) ta.focus();
   // The internal-note theme is purely CSS; data-mode flips the chrome.
 }
+
+// Defensive delegation — if inline onclick is swallowed by another handler,
+// this still flips the tab. Capture phase so it runs before any rogue
+// stopPropagation() upstream. (The user reported internal note "not
+// clickable" — this path makes 100% sure the click registers.)
+document.addEventListener('click', (ev) => {
+  const tab = ev.target.closest && ev.target.closest('.reply-tab');
+  if (!tab) return;
+  const mode = tab.dataset.mode;
+  if (!mode) return;
+  // Don't double-fire: setReplyMode is idempotent
+  setReplyMode(tab, mode);
+}, true);  // capture phase
 
 function clearReply() {
   document.getElementById('reply-text').value = '';
@@ -1250,10 +1400,28 @@ async function submitReply() {
   const ta = document.getElementById('reply-text');
   const mode = document.getElementById('reply-box').dataset.mode || 'public';
   const st = document.getElementById('smart-reply-status');
-  if (!ta.value.trim() && PENDING_ATTACHMENTS.length === 0) {
-    st.textContent = 'Nothing to save'; st.style.color = '#be123c'; return;
+  const warnBox = document.getElementById('reply-mandatory-warn');
+  const newStatusSel = document.getElementById('reply-new-status');
+  const rawSel = newStatusSel ? (newStatusSel.value || '') : '';
+
+  // Dropdown emits either "cs:<id>" (custom status) or a generic name. Split.
+  let newStatus = '';
+  let newCustomStatusId = '';
+  if (rawSel.startsWith('cs:')) {
+    newCustomStatusId = rawSel.slice(3);
+  } else {
+    newStatus = rawSel;
   }
-  st.textContent = 'Saving…'; st.style.color = '#64748b';
+
+  if (!ta.value.trim() && PENDING_ATTACHMENTS.length === 0) {
+    st.textContent = 'Nothing to send'; st.style.color = '#be123c'; return;
+  }
+  if (warnBox) { warnBox.style.display = 'none'; warnBox.innerHTML = ''; }
+
+  // Verb depends on mode + ZD destination
+  const verb = (mode === 'public') ? 'Sending to Zendesk…' : 'Saving internal note…';
+  st.textContent = verb; st.style.color = '#64748b';
+
   try {
     const fd = new FormData();
     fd.append('body', ta.value);
@@ -1263,14 +1431,96 @@ async function submitReply() {
       fd.append('attachment_ids', PENDING_ATTACHMENTS.map(a => a.id).join(','));
     }
     if (ta.dataset.sourceLang) fd.append('source_language', ta.dataset.sourceLang);
+    if (newStatus) fd.append('new_status', newStatus);
+    if (newCustomStatusId) fd.append('new_custom_status_id', newCustomStatusId);
     const r = await fetch(`/api/tickets/${TICKET_ID}/reply`, { method: 'POST', body: fd });
-    if (!r.ok) throw new Error(await r.text());
-    const out = await r.json();
-    st.textContent = `Saved (${out.mode}${out.attachments_linked ? ', ' + out.attachments_linked + ' attached' : ''}) — reloading…`;
-    st.style.color = '#047857';
-    setTimeout(() => location.reload(), 600);
+
+    // Try to parse JSON regardless of status — server returns structured errors
+    let out = null;
+    try { out = await r.json(); } catch (_) { /* non-JSON body */ }
+
+    if (!r.ok) {
+      // Special case: mandatory fields empty — show inline warning, do NOT throw
+      if (out && out.error === 'mandatory_fields_empty' && Array.isArray(out.missing)) {
+        if (warnBox) {
+          const items = out.missing.map(m => `<li>${(m.title || ('Field #' + m.id)).replace(/</g,'&lt;')}</li>`).join('');
+          warnBox.innerHTML =
+            `<div class="rmw-head">⚠ Cannot ${mode === 'public' ? 'send reply' : 'set status'} — required fields are empty</div>` +
+            `<ul class="rmw-list">${items}</ul>` +
+            `<div class="rmw-foot">Fill these in the right-hand Fields panel, then try again. ` +
+            `Public replies need every required field; internal notes don't unless you're also changing status to solved/closed.</div>`;
+          warnBox.style.display = 'block';
+        }
+        st.textContent = `Blocked — ${out.missing.length} required field${out.missing.length===1?'':'s'} empty`;
+        st.style.color = '#be123c';
+        return;
+      }
+      throw new Error((out && (out.detail || out.error)) || (r.status + ' ' + r.statusText));
+    }
+
+    // Success — report ZD delivery state honestly
+    const zdSent = out.zd_sent;
+    const zdErr  = out.zd_error;
+    const att    = out.attachments_linked || 0;
+    const statusLbl = out.new_custom_status_label || newStatus || '';
+    let msg;
+    if (mode === 'public') {
+      if (zdSent) {
+        msg = `✓ Reply sent to Zendesk${att ? ' (' + att + ' attachment' + (att===1?'':'s') + ')' : ''}` +
+              (statusLbl ? ` · status → ${statusLbl}` : '') + ' — reloading…';
+        st.style.color = '#047857';
+      } else {
+        msg = `⚠ Saved locally but ZD send FAILED: ${zdErr || 'unknown error'} — reloading…`;
+        st.style.color = '#b45309';
+      }
+    } else {
+      msg = `✓ Internal note saved${att ? ' (' + att + ' attachment' + (att===1?'':'s') + ')' : ''}` +
+            (statusLbl ? ` · status → ${statusLbl}` : '') + ' — reloading…';
+      st.style.color = '#047857';
+    }
+    st.textContent = msg;
+    setTimeout(() => location.reload(), zdErr ? 1800 : 700);
   } catch (e) {
-    st.textContent = 'Failed: ' + e.message; st.style.color = '#be123c';
+    st.textContent = 'Failed: ' + (e.message || e); st.style.color = '#be123c';
+  }
+}
+
+// Standalone status change (top-of-ticket widget). Routes through the
+// /status endpoint which mirrors to ZD + enforces mandatory gating.
+// `raw` is either "cs:<id>" for a custom status or a generic status name.
+async function changeStatusFromHeader(raw) {
+  const ta = document.getElementById('reply-text');
+  if (ta && ta.value.trim().length > 30) {
+    if (!confirm(`Change status? You have a draft reply that is NOT being sent. Use the reply box to send a reply and change status atomically.`)) return;
+  }
+  const pill = document.getElementById('status-change-pill');
+  const orig = pill ? pill.textContent : '';
+  if (pill) pill.textContent = '…';
+  try {
+    const fd = new FormData();
+    if (raw && raw.startsWith && raw.startsWith('cs:')) {
+      fd.append('custom_status_id', raw.slice(3));
+    } else {
+      fd.append('status', raw);
+    }
+    const r = await fetch(`/api/tickets/${TICKET_ID}/status`, { method: 'POST', body: fd });
+    let out = null; try { out = await r.json(); } catch (_) {}
+    if (!r.ok) {
+      if (out && out.error === 'mandatory_fields_empty' && Array.isArray(out.missing)) {
+        const names = out.missing.map(m => m.title || ('Field #' + m.id)).join(', ');
+        alert(`Cannot set status — required fields empty:\n\n${names}\n\nFill them in the Fields panel on the right, then try again.`);
+        if (pill) pill.textContent = orig;
+        return;
+      }
+      throw new Error((out && (out.detail || out.error)) || r.status + ' ' + r.statusText);
+    }
+    // Close the status menu, then reload
+    const menu = document.getElementById('status-change-menu');
+    if (menu) menu.classList.remove('open');
+    location.reload();
+  } catch (e) {
+    if (pill) pill.textContent = orig;
+    alert('Status change failed: ' + (e.message || e));
   }
 }
 
@@ -1302,7 +1552,11 @@ async function recRejectSubmit(ev, form) {
 // agent list on first open (single fetch per page-load), then filters
 // client-side as the user types. Uses /api/tickets/{id}/field with
 // field_id=ASSIGNEE_FIELD_ID — already permission-gated server-side.
-const TICKET_ID = {{ ticket.id }};
+// (TICKET_ID is already declared further up — duplicate const here was
+// throwing `SyntaxError: Identifier 'TICKET_ID' has already been declared`
+// at parse time, which silently disabled every event listener defined
+// later in this script: @mention, format toolbar, internal-note tab,
+// send button delegation, etc. Don't redeclare.)
 let ASSIGN_AGENTS_CACHE = null;
 
 function openAssignMenu(e) {
@@ -1326,6 +1580,16 @@ document.addEventListener('click', (e) => {
   if (!menu) return;
   if (!menu.contains(e.target) && !e.target.closest('#assignee-badge')) {
     menu.style.display = 'none';
+  }
+});
+
+// Close the status-change menu when clicking outside it
+document.addEventListener('click', (e) => {
+  const wrap = document.getElementById('status-change-wrap');
+  const menu = document.getElementById('status-change-menu');
+  if (!wrap || !menu) return;
+  if (!wrap.contains(e.target)) {
+    menu.classList.remove('open');
   }
 });
 
@@ -1397,7 +1661,11 @@ async function assignTo(zdUserId, displayName) {
 (function() {
   const ta = document.getElementById('reply-text');
   const dd = document.getElementById('mention-dropdown');
-  if (!ta || !dd) return;
+  // Tag console with a recognizable prefix so users can confirm wiring
+  // from DevTools when troubleshooting.
+  if (!ta) { console.warn('[mention] #reply-text not found — not wired'); return; }
+  if (!dd) { console.warn('[mention] #mention-dropdown not found — not wired'); return; }
+  console.log('[mention] wired on textarea + dropdown');
 
   let candidates = [];
   let activeIdx = 0;
@@ -1460,31 +1728,43 @@ async function assignTo(zdUserId, displayName) {
     return { atIdx: at, query: fragment };
   }
 
+  async function fetchAndShow(query) {
+    try {
+      const r = await fetch('/api/users/search?q=' + encodeURIComponent(query || '@'));
+      if (!r.ok) {
+        dd.innerHTML = `<div class="mention-empty">Search failed (HTTP ${r.status}). Check sign-in.</div>`;
+        positionDropdown();
+        dd.style.display = 'block';
+        return;
+      }
+      const j = await r.json();
+      candidates = j.users || [];
+      activeIdx = 0;
+      render();
+      positionDropdown();
+      dd.style.display = 'block';
+    } catch (e) {
+      dd.innerHTML = `<div class="mention-empty">Search error: ${(e && e.message) || e}</div>`;
+      positionDropdown();
+      dd.style.display = 'block';
+    }
+  }
+
   async function maybeOpen() {
     const trigger = getTriggerInfo();
     if (!trigger) { close(); return; }
     triggerStart = trigger.atIdx;
-    if (trigger.query.length < 1) {
-      // Show top results for "@" alone
-      candidates = []; activeIdx = 0; render();
-      positionDropdown();
-      dd.style.display = 'block';
-      return;
-    }
+    // Show a placeholder immediately so the dropdown appears responsively,
+    // then fetch — for "@ alone" or for any query length.
+    candidates = []; activeIdx = 0;
+    dd.innerHTML = '<div class="mention-empty">Searching…</div>';
+    positionDropdown();
+    dd.style.display = 'block';
     // Debounce fetch
     clearTimeout(searchTimer);
-    searchTimer = setTimeout(async () => {
-      try {
-        const r = await fetch('/api/users/search?q=' + encodeURIComponent(trigger.query));
-        if (!r.ok) return;
-        const j = await r.json();
-        candidates = j.users || [];
-        activeIdx = 0;
-        render();
-        positionDropdown();
-        dd.style.display = 'block';
-      } catch (e) {}
-    }, 100);
+    // No query → fetch top results (use "a" as a sentinel "match anything")
+    const q = trigger.query.length < 1 ? 'a' : trigger.query;
+    searchTimer = setTimeout(() => fetchAndShow(q), trigger.query.length < 1 ? 0 : 100);
   }
 
   function insert(u) {
