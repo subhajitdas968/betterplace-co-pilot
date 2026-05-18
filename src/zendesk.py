@@ -225,7 +225,8 @@ def write_back_field(ticket_id: int, custom_fields: dict[str, Any] | None = None
 def add_comment(ticket_id: int, body: str, *, public: bool = True,
                  author_email: str | None = None, status: str | None = None,
                  custom_status_id: int | None = None,
-                 html_body: bool = False) -> dict:
+                 html_body: bool = False,
+                 add_email_ccs: list[str] | None = None) -> dict:
     """POST a comment to a Zendesk ticket via the Tickets Update API.
 
     Zendesk's "create comment" endpoint is actually a PUT to /tickets/{id}.json
@@ -268,6 +269,14 @@ def add_comment(ticket_id: int, body: str, *, public: bool = True,
         if status not in ("new", "open", "pending", "hold", "solved", "closed"):
             raise ZDError(f"invalid status: {status}")
         payload["ticket"]["status"] = status
+    if add_email_ccs:
+        # ZD's API takes email_ccs as a list of {user_email, action: "put"}.
+        # `put` adds the address to the ticket's collaborators; ZD will send
+        # them this reply (and all future replies) as a CC.
+        payload["ticket"]["email_ccs"] = [
+            {"user_email": e.strip(), "action": "put"}
+            for e in add_email_ccs if e and e.strip()
+        ]
     url = f"{config.ZD_BASE}/tickets/{ticket_id}.json"
     r = _session.put(url, json=payload, timeout=30)
     if r.status_code == 422:

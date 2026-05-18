@@ -35,9 +35,10 @@ _ALLOWED = {
 
 def _strip_dangerous(html: str) -> str:
     """Best-effort sanitizer. Strips <script>/<style>/<iframe>/<object>/<embed>
-    blocks AND any on* event handlers / javascript: URLs. This is belt-and-
-    suspenders — `markdown.markdown` doesn't emit any of those, but agents
-    sometimes paste raw HTML."""
+    blocks AND any on* event handlers / javascript: URLs. Also restricts the
+    `style` attribute to a safelist of properties (color, background, etc.)
+    so an agent's pasted HTML can't smuggle `expression()` or `behavior:`.
+    Preserves <span style=color> and <mark> emitted by the color picker."""
     # Drop tag blocks entirely (script/style/iframe/object/embed)
     html = re.sub(
         r"<\s*(script|style|iframe|object|embed)\b[^>]*>.*?<\s*/\s*\1\s*>",
@@ -54,6 +55,28 @@ def _strip_dangerous(html: str) -> str:
     # Strip javascript: URLs
     html = re.sub(r'href\s*=\s*"javascript:[^"]*"', 'href="#"', html, flags=re.IGNORECASE)
     html = re.sub(r"href\s*=\s*'javascript:[^']*'", "href='#'", html, flags=re.IGNORECASE)
+    # Sanitize style attributes — only keep color/background/background-color
+    # property pairs that look like hex/rgb/named colors.
+    _SAFE_STYLE = re.compile(
+        r"""(color|background(?:-color)?|font-weight|font-style|text-decoration)\s*:\s*
+            (
+              \#[0-9a-fA-F]{3,8} |
+              rgb(?:a)?\([^)]+\) |
+              hsl(?:a)?\([^)]+\) |
+              [a-zA-Z]{3,20} |
+              underline|line-through|bold|italic
+            )""",
+        re.VERBOSE,
+    )
+    def _filter_style(m):
+        raw = m.group(1)
+        pairs = []
+        for pm in _SAFE_STYLE.finditer(raw):
+            pairs.append(f"{pm.group(1)}:{pm.group(2)}")
+        return f' style="{";".join(pairs)}"' if pairs else ""
+    html = re.sub(r'\s+style\s*=\s*"([^"]*)"', _filter_style, html, flags=re.IGNORECASE)
+    html = re.sub(r"\s+style\s*=\s*'([^']*)'",
+                  lambda m: _filter_style(re.match(r"^(.*)$", m.group(1))), html, flags=re.IGNORECASE)
     return html
 
 
@@ -161,7 +184,7 @@ def markdown_to_html(body: str) -> str:
         body = _pre_pass_strike(body)
         html = _md.markdown(
             body,
-            extensions=["fenced_code", "sane_lists", "nl2br"],
+            extensions=["fenced_code", "sane_lists", "nl2br", "tables"],
             output_format="html5",
         )
     else:

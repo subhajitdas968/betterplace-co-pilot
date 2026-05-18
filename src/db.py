@@ -897,6 +897,13 @@ def _migrate(conn: sqlite3.Connection) -> None:
         # and a free-form metadata blob for things like the translate-source language.
         "ALTER TABLE ticket_comments ADD COLUMN body_format TEXT DEFAULT 'plain'",
         "ALTER TABLE ticket_comments ADD COLUMN meta TEXT DEFAULT '{}'",
+        # Per-comment email recipients — pulled from ZD's `via.source` block.
+        # JSON arrays of email strings. NULL until first sync that captured
+        # them. Used by the To/CC editor in the reply box + "Reply on this
+        # thread" so per-comment context is preserved.
+        "ALTER TABLE ticket_comments ADD COLUMN from_email TEXT",
+        "ALTER TABLE ticket_comments ADD COLUMN to_emails TEXT DEFAULT '[]'",
+        "ALTER TABLE ticket_comments ADD COLUMN cc_emails TEXT DEFAULT '[]'",
         "CREATE INDEX IF NOT EXISTS idx_comments_format ON ticket_comments(body_format)",
         # Local-only override for the "required" flag. ZD's required + required_in_portal
         # is what we sync; this column lets the admin mark a field required

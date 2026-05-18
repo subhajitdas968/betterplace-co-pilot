@@ -407,11 +407,23 @@ def translate(text: str, target_lang: str) -> dict:
 
 
 def suggest_reply(c: sqlite3.Connection, ticket_id: int, draft: str) -> dict:
-    """Smart reply: takes the agent's current draft + full conversation, returns improved reply."""
+    """Smart reply: takes the agent's current draft + full conversation,
+    returns improved reply. Mirrors translate()'s two-tier path — metered
+    API first, then `claude -p` CLI fallback so it works even without
+    ANTHROPIC_API_KEY configured (matches our admin AI worker setup)."""
     user_prompt = build_user_prompt(c, ticket_id)
     user_prompt += "\n\n## Agent's current draft\n" + (draft or "(empty)")
     user_prompt += "\n\nProduce the JSON suggested_reply object now. JSON only."
-    out = _claude_call(SMART_REPLY_PROMPT, user_prompt, max_tokens=900)
+    try:
+        out = _claude_call(SMART_REPLY_PROMPT, user_prompt, max_tokens=900)
+    except RuntimeError as auth_err:
+        # Lazy-init "ANTHROPIC_API_KEY not set" — try CLI fallback.
+        try:
+            out = _claude_via_cli(SMART_REPLY_PROMPT, user_prompt, max_tokens=900)
+        except Exception as cli_err:
+            raise RuntimeError(
+                f"Improve-with-AI failed. {auth_err} CLI fallback also failed: {cli_err}"
+            ) from cli_err
     try:
         reply = _extract_json(out["text"])
     except Exception:

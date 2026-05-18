@@ -69,7 +69,7 @@
             {% for cat in _cats %}
               {% set _items = all_custom_statuses|selectattr('category','equalto',cat)|list %}
               {% if _items %}
-                <div class="scm-group-label">{{ _cat_icons.get(cat,'•') }} {{ cat|upper }}</div>
+                <div class="scm-group-label cat-{{ cat }}">{{ _cat_icons.get(cat,'•') }} {{ cat|upper }}</div>
                 {% for s in _items %}
                 <button type="button" class="scm-item scm-{{ cat }}"
                         onclick="changeStatusFromHeader('cs:{{ s.id }}')">
@@ -167,7 +167,11 @@
       {% for c in ticket.comments %}
       {% set is_agent = c.author_role in ['agent','admin'] %}
       {% set is_internal = not c.public %}
-      {% set body_clean = c.body|clean %}
+      {# Render the comment body as safe HTML — markdown for our agent
+         replies (toolbar formatting renders), plain HTML stays HTML, and
+         plain text gets line breaks. The bodyhtml filter sanitizes any
+         hostile tags + on-handlers. #}
+      {% set body_html = c.body|bodyhtml(c.body_format if c.body_format is defined else None) %}
       <div class="bubble-row {% if is_agent %}row-right{% else %}row-left{% endif %}">
         {% if not is_agent %}
         <div class="bubble-avatar a-cust">{{ (c.author_name or '?')[0]|upper }}</div>
@@ -184,7 +188,23 @@
             {% endif %}
             <span class="bubble-time-summary">{{ c.created_at|ist }}</span>
           </summary>
-          <div class="bubble-body">{{ body_clean[:3000] }}{% if (body_clean|length) > 3000 %}…{% endif %}</div>
+          <div class="bubble-body bubble-body-rich">{{ body_html|safe }}</div>
+          <!-- Per-thread reply: clicking sets the reply box's To/CC from this
+               specific comment's stored addresses (when available — older
+               synced rows fall back to ticket-level recipients) and scrolls
+               + focuses the textarea. -->
+          {% set _cmt_from = c.from_email or c.author_email or '' %}
+          {% set _cmt_to = c.to_emails or [] %}
+          {% set _cmt_cc = c.cc_emails or [] %}
+          <div class="bubble-actions">
+            <button type="button" class="bubble-action-btn"
+                    data-cmt-id="{{ c.id }}"
+                    data-cmt-from="{{ _cmt_from|e }}"
+                    data-cmt-to='{{ _cmt_to|tojson|e }}'
+                    data-cmt-cc='{{ _cmt_cc|tojson|e }}'
+                    data-cmt-when="{{ c.created_at }}"
+                    onclick="replyOnThisThread(this)">↩ Reply on this thread</button>
+          </div>
           {% if c.attachments %}
           <div class="bubble-attachments">
             {% for a in c.attachments %}
@@ -220,10 +240,48 @@
         Ask an admin for the <code>Agent</code> role if you need to respond.
       </div>
       {% else %}
-      <div class="reply-box" id="reply-box" data-mode="public">
+      {# data-default-cc uses SINGLE-QUOTE wrapper because |tojson outputs
+         JSON with raw " inside (e.g. ["a@b.com"]). If we wrapped in "..."
+         the inner " would close the attribute early — breaking JSON.parse
+         on the JS side, which (because it's uncaught) aborts the entire
+         inline script and prevents @mention/toolbar/etc. from wiring up.
+         |tojson is already HTML-safe for <, >, &, ' so single-quote
+         wrapping is sufficient and correct. #}
+      <div class="reply-box" id="reply-box" data-mode="public" data-draftmode="1"
+           data-default-to="{{ (ticket.recipients.to or '')|e }}"
+           data-default-cc='{{ (ticket.recipients.cc or [])|tojson }}'>
+        <!-- Recipients bar — To (read-only label, from the ZD requester) + CC
+             chips with add/remove. The Forward use-case (replacing To with a
+             different person) is gated on the SMTP transport build — for now
+             we display a clear notice instead of silently changing nothing. -->
+        <div class="reply-recipients" id="reply-recipients">
+          <div class="rr-row">
+            <span class="rr-label">To</span>
+            <span class="rr-to" id="rr-to-display">{{ ticket.recipients.to or '(requester has no email)' }}</span>
+            <span class="rr-to-hint" title="Zendesk replies always go to the original requester. To send to someone else, add them as CC. True forward (changing the To address) requires the SMTP transport — coming soon.">ℹ︎</span>
+          </div>
+          <div class="rr-row">
+            <span class="rr-label">CC</span>
+            <span class="rr-cc-chips" id="rr-cc-chips"></span>
+            <input type="email" class="rr-cc-add" id="rr-cc-add"
+                   placeholder="add CC email — press Enter">
+          </div>
+        </div>
+
         <div class="reply-tabs">
           {% if can_public_reply %}<button type="button" class="reply-tab {% if can_public_reply %}active{% endif %}" data-mode="public" onclick="setReplyMode(this,'public')">Public reply</button>{% endif %}
           {% if can_internal_note %}<button type="button" class="reply-tab {% if not can_public_reply %}active{% endif %}" data-mode="internal" onclick="setReplyMode(this,'internal')">📒 Internal note</button>{% endif %}
+
+          <!-- Draft / Live toggle — default Draft. Send is gated until the
+               agent flips to Live, preventing accidental ZD posts. The
+               textarea body is saved per-ticket in localStorage so refresh
+               doesn't lose the draft. -->
+          <span class="reply-mode-toggle" id="reply-mode-toggle" title="Draft mode prevents accidental sends. Click to switch to Live mode.">
+            <button type="button" class="rmt-btn rmt-draft active" id="rmt-draft"
+                    onclick="setDraftMode(true)">📝 Draft</button>
+            <button type="button" class="rmt-btn rmt-live" id="rmt-live"
+                    onclick="setDraftMode(false)">🚀 Live</button>
+          </span>
         </div>
 
         <!-- Formatting toolbar (Markdown, applies in both modes) -->
@@ -236,9 +294,60 @@
           <button type="button" class="tb-btn" data-md="codeblock" title="Code block">{ }</button>
           <button type="button" class="tb-btn" data-md="link"   title="Link">🔗</button>
           <span class="tb-sep"></span>
-          <button type="button" class="tb-btn" data-md="ul" title="Bulleted list">•</button>
-          <button type="button" class="tb-btn" data-md="ol" title="Numbered list">1.</button>
+          <!-- Bulleted list — click for "-", hold-press the caret to pick style -->
+          <span class="tb-split">
+            <button type="button" class="tb-btn tb-btn-split" data-md="ul"
+                    data-list-style="-"
+                    title="Bulleted list (Enter continues, Enter on empty escapes)">•</button>
+            <button type="button" class="tb-btn tb-btn-caret" onclick="toggleListStyleMenu('ul', this)" title="Pick bullet style">▾</button>
+            <div class="tb-list-menu" id="tb-list-menu-ul" data-list-kind="ul">
+              <button type="button" class="tb-list-opt" data-style="-">- dash</button>
+              <button type="button" class="tb-list-opt" data-style="*">* asterisk</button>
+              <button type="button" class="tb-list-opt" data-style="•">• bullet</button>
+            </div>
+          </span>
+          <!-- Numbered list — click for "1.", caret for style -->
+          <span class="tb-split">
+            <button type="button" class="tb-btn tb-btn-split" data-md="ol"
+                    data-list-style="1."
+                    title="Numbered list (Enter auto-numbers next item)">1.</button>
+            <button type="button" class="tb-btn tb-btn-caret" onclick="toggleListStyleMenu('ol', this)" title="Pick numbering style">▾</button>
+            <div class="tb-list-menu" id="tb-list-menu-ol" data-list-kind="ol">
+              <button type="button" class="tb-list-opt" data-style="1.">1. 2. 3.</button>
+              <button type="button" class="tb-list-opt" data-style="1)">1) 2) 3)</button>
+              <button type="button" class="tb-list-opt" data-style="a.">a. b. c.</button>
+              <button type="button" class="tb-list-opt" data-style="i.">i. ii. iii.</button>
+            </div>
+          </span>
           <button type="button" class="tb-btn" data-md="quote" title="Quote">❝</button>
+          <!-- Table — click for 3×3, caret for custom size -->
+          <span class="tb-split">
+            <button type="button" class="tb-btn tb-btn-split" data-md="table"
+                    title="Insert table (3×3 by default)">⊞</button>
+            <button type="button" class="tb-btn tb-btn-caret" onclick="toggleTableSizeMenu(this)" title="Pick table size">▾</button>
+            <div class="tb-table-menu" id="tb-table-menu">
+              <div class="tb-table-menu-title">Pick size</div>
+              <div class="tb-table-grid" id="tb-table-grid"></div>
+              <div class="tb-table-hint" id="tb-table-hint">3 × 3</div>
+            </div>
+          </span>
+          <span class="tb-sep"></span>
+          <!-- Text color + highlight color (HTML span — markdown can't do
+               color, and we send html_body=True to ZD so it renders). -->
+          <span class="tb-split">
+            <button type="button" class="tb-btn tb-btn-color" id="tb-color-btn"
+                    onclick="applyColor('fg', null)" title="Text color (last used)"><span class="tb-color-A">A</span><span class="tb-color-bar" id="tb-color-fg-bar" style="background:#dc2626"></span></button>
+            <button type="button" class="tb-btn tb-btn-caret" onclick="toggleColorMenu('fg', this)" title="Pick text color">▾</button>
+            <div class="tb-color-menu" id="tb-color-menu-fg" data-kind="fg"></div>
+          </span>
+          <span class="tb-split">
+            <button type="button" class="tb-btn tb-btn-color" id="tb-hl-btn"
+                    onclick="applyColor('bg', null)" title="Highlight (last used)"><span class="tb-color-A">▩</span><span class="tb-color-bar" id="tb-color-bg-bar" style="background:#fde68a"></span></button>
+            <button type="button" class="tb-btn tb-btn-caret" onclick="toggleColorMenu('bg', this)" title="Pick highlight color">▾</button>
+            <div class="tb-color-menu" id="tb-color-menu-bg" data-kind="bg"></div>
+          </span>
+          <span class="tb-sep"></span>
+          <button type="button" class="tb-btn" onclick="rtClearFormat()" title="Clear formatting from selection">⌫ Clear fmt</button>
           <span class="tb-sep"></span>
           <label class="tb-attach" title="Attach a file">
             📎 Attach
@@ -259,9 +368,17 @@
           {% endif %}
         </div>
 
-        <textarea id="reply-text" class="ph-autocomplete"
-                  placeholder="Type your reply. @ to mention agents · {{ '{{' }} to insert a placeholder."></textarea>
-        <!-- @mention dropdown — positioned absolutely below the cursor when active -->
+        <!-- WYSIWYG editor (contenteditable div). All toolbar formatting
+             renders in-place — bold becomes <b>, color becomes <span style>,
+             tables become real <table> markup. On submit we extract .innerHTML
+             and send as HTML to Zendesk. No markdown/preview round-trip. -->
+        <div id="reply-text"
+             class="reply-edit-rich bubble-body-rich"
+             contenteditable="true"
+             role="textbox"
+             aria-multiline="true"
+             data-placeholder="Type your reply. @ to mention agents · {{ '{{' }} to insert a placeholder."></div>
+        <!-- @mention dropdown — positioned via JS when active -->
         <div id="mention-dropdown" class="mention-dropdown" style="display:none;"></div>
 
         <!-- Pending uploads chip row (populated by handleAttachFiles) -->
@@ -273,34 +390,46 @@
         <div class="reply-actions-row">
           <button type="button" class="btn btn-ai" onclick="smartReply()" id="smart-reply-btn">✦ Improve with AI</button>
 
-          <!-- Atomically set status while sending the reply (common workflow:
-               "answer the customer and move to Pending"). Lists ALL active
-               custom statuses, grouped by underlying category. -->
-          <label class="reply-status-picker" title="Optional: change ticket status when sending">
-            <span style="font-size:11px;color:var(--muted);text-transform:uppercase;letter-spacing:0.06em;">Then set to</span>
-            <select id="reply-new-status">
-              <option value="">— keep status —</option>
+          <!-- Atomically set status while sending the reply. Custom picker
+               (NOT a native <select>) so we can colour-code per category.
+               State lives on data-value of #reply-new-status — submitReply()
+               reads from there. -->
+          <div class="reply-status-picker reply-status-picker-custom" title="Optional: change ticket status when sending">
+            <span class="rsp-label">Then set to</span>
+            <button type="button" class="rsp-trigger" id="reply-status-trigger"
+                    onclick="toggleReplyStatusMenu(this)">
+              <span class="rsp-display" id="reply-status-display">— keep status —</span>
+              <span class="rsp-caret">▾</span>
+            </button>
+            <!-- Hidden state holder; submitReply reads .value -->
+            <input type="hidden" id="reply-new-status" value="">
+            <div class="rsp-menu" id="reply-status-menu">
+              <button type="button" class="rsp-item rsp-keep"
+                      onclick="pickReplyStatus('','— keep status —','keep')">— keep status —</button>
               {% if all_custom_statuses %}
                 {% set _cats = ['new', 'open', 'pending', 'hold', 'solved', 'closed'] %}
                 {% set _cat_labels = {'new':'New','open':'Open','pending':'Pending','hold':'On hold','solved':'Solved','closed':'Closed'} %}
+                {% set _cat_icons  = {'new':'🆕','open':'🟢','pending':'🟡','hold':'⏸','solved':'✓','closed':'⊘'} %}
                 {% for cat in _cats %}
                   {% set _items = all_custom_statuses|selectattr('category','equalto',cat)|list %}
                   {% if _items %}
-                  <optgroup label="{{ _cat_labels[cat] }}">
+                    <div class="rsp-group cat-{{ cat }}">{{ _cat_icons.get(cat,'•') }} {{ _cat_labels[cat]|upper }}</div>
                     {% for s in _items %}
-                    <option value="cs:{{ s.id }}">{{ s.label }}</option>
+                    <button type="button" class="rsp-item rsp-item-{{ cat }}"
+                            onclick="pickReplyStatus('cs:{{ s.id }}', '{{ s.label|e }}', '{{ cat }}')">
+                      {{ s.label }}
+                    </button>
                     {% endfor %}
-                  </optgroup>
                   {% endif %}
                 {% endfor %}
               {% else %}
-                <option value="open">Open</option>
-                <option value="pending">Pending (waiting on customer)</option>
-                <option value="hold">On hold</option>
-                <option value="solved">Solved</option>
+                <button type="button" class="rsp-item rsp-item-open"   onclick="pickReplyStatus('open','Open','open')">Open</button>
+                <button type="button" class="rsp-item rsp-item-pending" onclick="pickReplyStatus('pending','Pending (waiting on customer)','pending')">Pending</button>
+                <button type="button" class="rsp-item rsp-item-hold"   onclick="pickReplyStatus('hold','On hold','hold')">On hold</button>
+                <button type="button" class="rsp-item rsp-item-solved" onclick="pickReplyStatus('solved','Solved','solved')">Solved</button>
               {% endif %}
-            </select>
-          </label>
+            </div>
+          </div>
 
           <button type="button" class="btn btn-primary" onclick="submitReply()">
             <span class="reply-send-label-public">📤 Send reply</span>
@@ -815,6 +944,15 @@
 </main>
 
 <script>
+// ===== BP-REPLY DIAGNOSTIC =====
+// First line of the inline script. If you see this in DevTools console
+// at page load, the script is being parsed + executed. If you DON'T see
+// it, the browser is serving a cached old version of the page OR the
+// script is broken before this point. Hard refresh (Cmd+Shift+R) and
+// recheck.
+console.log('%c[bp-reply] script loaded at', 'background:#4f46e5;color:#fff;padding:2px 8px;border-radius:4px', new Date().toISOString());
+// ===== END DIAGNOSTIC =====
+
 // Run history-aware AI re-analysis on this ticket INLINE (not queued).
 // Spawns claude -p server-side, blocks 20-40s, then reloads with rich insight.
 let _reanalyzeRunning = false;
@@ -877,14 +1015,17 @@ async function reanalyzeThisTicket(btnOrEvent) {
   }, 2000);
 }
 
-// Carries the AI-suggested reply text into the reply textarea.
+// Carries the AI-suggested reply text into the reply editor.
 function useAiReply() {
   const src = document.getElementById('ai-suggested-reply');
   if (!src) return;
-  const ta = document.getElementById('reply-text');
-  ta.value = src.innerText;
-  ta.focus();
-  ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const ed = document.getElementById('reply-text');
+  if (!ed) return;
+  // Preserve line breaks from the AI reply text by wrapping each line in <p>
+  const lines = (src.innerText || '').split(/\n\n+/).filter(s => s.trim());
+  ed.innerHTML = lines.map(l => '<p>' + l.replace(/\n/g, '<br>').replace(/</g,'&lt;') + '</p>').join('');
+  ed.focus();
+  ed.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 // ----- Approve / Reject feedback on AI field suggestions -----
@@ -1062,18 +1203,21 @@ function copyDoc() {
 
 // ----- Smart reply -----
 async function smartReply() {
-  const ta = document.getElementById('reply-text');
+  const ed = document.getElementById('reply-text');
   const st = document.getElementById('smart-reply-status');
   const btn = document.getElementById('smart-reply-btn');
   st.textContent = 'Thinking…'; st.style.color = '#64748b';
   btn.disabled = true;
   try {
-    const fd = new FormData(); fd.append('draft', ta.value);
+    const fd = new FormData();
+    fd.append('draft', ed ? (ed.innerText || '') : '');
     const r = await fetch(`/api/tickets/${TICKET_ID}/smart-reply`, { method: 'POST', body: fd });
     if (!r.ok) throw new Error(await r.text());
     const reply = await r.json();
     if (confirm('AI suggested:\n\n' + (reply.suggested || '') + '\n\nReplace your draft?')) {
-      ta.value = reply.suggested || ta.value;
+      // Wrap the suggested plain text into <p> blocks for the contenteditable
+      const lines = (reply.suggested || '').split(/\n\n+/).filter(s => s.trim());
+      ed.innerHTML = lines.map(l => '<p>' + l.replace(/\n/g, '<br>').replace(/</g,'&lt;') + '</p>').join('');
     }
     st.textContent = 'Suggestion ready'; st.style.color = '#047857';
     setTimeout(() => st.textContent = '', 3000);
@@ -1262,14 +1406,16 @@ document.addEventListener('click', (ev) => {
 }, true);  // capture phase
 
 function clearReply() {
-  document.getElementById('reply-text').value = '';
+  const ed = document.getElementById('reply-text');
+  if (ed) ed.innerHTML = '';
   PENDING_ATTACHMENTS.length = 0;
   renderReplyAttachments();
+  _clearDraft();
 }
 
 function copyReply() {
-  const ta = document.getElementById('reply-text');
-  navigator.clipboard.writeText(ta.value);
+  const ed = document.getElementById('reply-text');
+  navigator.clipboard.writeText(ed ? (ed.innerText || '') : '');
   const st = document.getElementById('smart-reply-status');
   st.textContent = 'Copied'; st.style.color = '#047857';
   setTimeout(() => st.textContent = '', 1500);
@@ -1311,11 +1457,12 @@ async function handleAttachFiles(files) {
 }
 
 async function translateDraft() {
-  const ta = document.getElementById('reply-text');
+  const ed = document.getElementById('reply-text');
   const lang = document.getElementById('reply-lang').value;
   const st = document.getElementById('smart-reply-status');
   if (!lang) { st.textContent = 'Pick a language'; st.style.color = '#be123c'; return; }
-  if (!ta.value.trim()) { st.textContent = 'Type a draft first'; st.style.color = '#be123c'; return; }
+  const draftText = ed ? (ed.innerText || '') : '';
+  if (!draftText.trim()) { st.textContent = 'Type a draft first'; st.style.color = '#be123c'; return; }
   // Animated dots so the wait feels alive (Haiku usually ~1-2s; CLI fallback ~10s)
   let dots = 0;
   st.style.color = '#64748b';
@@ -1326,7 +1473,7 @@ async function translateDraft() {
   const t0 = Date.now();
   try {
     const fd = new FormData();
-    fd.append('draft', ta.value);
+    fd.append('draft', draftText);
     fd.append('target_lang', lang);
     const r = await fetch(`/api/tickets/${TICKET_ID}/translate-draft`, { method: 'POST', body: fd });
     clearInterval(tick);
@@ -1335,8 +1482,6 @@ async function translateDraft() {
     const ms = Date.now() - t0;
     const elapsed = (ms/1000).toFixed(1);
     const viaCli = out.via_cli_fallback;
-    // Friendly model label — show "Haiku" when API hit, "CLI fallback" when the
-    // metered API key isn't configured and we shelled out to `claude -p`.
     const modelLabel = viaCli ? 'CLI fallback (slow)' : 'Haiku API';
     let preview = `Translated to ${lang} in ${elapsed}s via ${modelLabel} (source: ${out.source_lang || 'auto'}).`;
     if (viaCli) {
@@ -1344,8 +1489,9 @@ async function translateDraft() {
     }
     preview += '\n\nReplace your draft?';
     if (confirm(preview)) {
-      ta.dataset.sourceLang = out.source_lang || '';
-      ta.value = out.translated;
+      ed.dataset.sourceLang = out.source_lang || '';
+      const lines = (out.translated || '').split(/\n\n+/).filter(s => s.trim());
+      ed.innerHTML = lines.map(l => '<p>' + l.replace(/\n/g, '<br>').replace(/</g,'&lt;') + '</p>').join('');
     }
     st.textContent = `✓ ${elapsed}s · ${modelLabel}`;
     st.style.color = viaCli ? '#b45309' : '#047857';
@@ -1357,52 +1503,884 @@ async function translateDraft() {
 }
 
 // ----- Markdown toolbar -----
-function applyMd(action) {
-  const ta = document.getElementById('reply-text');
-  const start = ta.selectionStart, end = ta.selectionEnd;
-  const sel = ta.value.slice(start, end);
-  let inserted = sel || '', wrap = ['', ''];
-  switch (action) {
-    case 'bold':       wrap = ['**', '**']; inserted = sel || 'bold text'; break;
-    case 'italic':     wrap = ['*',  '*'];  inserted = sel || 'italic text'; break;
-    case 'strike':     wrap = ['~~', '~~']; inserted = sel || 'strikethrough'; break;
-    case 'code':       wrap = ['`',  '`'];  inserted = sel || 'code'; break;
-    case 'codeblock':  wrap = ['\n```\n', '\n```\n']; inserted = sel || 'code\nblock'; break;
-    case 'link':       wrap = ['[', '](https://)']; inserted = sel || 'link text'; break;
-    case 'ul':         wrap = ['\n- ', '']; inserted = sel || 'item'; break;
-    case 'ol':         wrap = ['\n1. ', '']; inserted = sel || 'item'; break;
-    case 'quote':      wrap = ['\n> ', '']; inserted = sel || 'quote'; break;
+// ===== WYSIWYG editor helpers (contenteditable) =====
+// `getEd()` returns the contenteditable div. Selection lives in
+// window.getSelection() — no .selectionStart anymore. All formatting goes
+// through document.execCommand for in-place rendering. Submit reads
+// .innerHTML directly and sends it to ZD as html_body=True.
+//
+// CRITICAL — focus retention. When the agent clicks a toolbar button
+// (Bold, color swatch, table cell, etc.) the BUTTON would normally take
+// focus, which collapses the editor's selection. By the time the click
+// handler fires and calls execCommand, there's no selection in the
+// editor → execCommand silently does nothing. The fix is `mousedown` +
+// `preventDefault()`: prevents focus shifting away from the editor,
+// preserving the selection so execCommand actually wraps the selected
+// text in <b>, applies color, etc.
+//
+// We attach this to the document with capture: true so it runs BEFORE
+// any other handlers, on every reply toolbar element + color/table/list
+// menu opener. The actual click handler still fires.
+document.addEventListener('mousedown', (ev) => {
+  // Anything inside the reply toolbar OR inside any of our floating
+  // toolbar menus (color, table, list-style) should NOT steal focus.
+  const t = ev.target;
+  if (!t.closest) return;
+  if (t.closest('.reply-toolbar') ||
+      t.closest('.tb-color-menu') ||
+      t.closest('.tb-table-menu') ||
+      t.closest('.tb-list-menu')) {
+    // Only block on actual interactive elements — let clicks on the
+    // toolbar background bubble normally.
+    if (t.closest('button, label, .tb-color-swatch, .tb-table-cell, .tb-list-opt')) {
+      ev.preventDefault();
+    }
   }
-  const before = ta.value.slice(0, start);
-  const after  = ta.value.slice(end);
-  ta.value = before + wrap[0] + inserted + wrap[1] + after;
-  ta.focus();
-  const cursor = before.length + wrap[0].length + inserted.length + wrap[1].length;
-  ta.selectionStart = ta.selectionEnd = cursor;
+}, true);
+
+function getEd() { return document.getElementById('reply-text'); }
+function getEdText() {
+  const ed = getEd();
+  return ed ? (ed.innerText || '') : '';
+}
+function getEdHTML() {
+  const ed = getEd();
+  return ed ? (ed.innerHTML || '') : '';
+}
+function setEdHTML(html) {
+  const ed = getEd();
+  if (ed) ed.innerHTML = html || '';
+}
+function edFocus() {
+  const ed = getEd();
+  if (ed) ed.focus();
 }
 
-document.addEventListener('click', (ev) => {
-  const btn = ev.target.closest('.tb-btn');
-  if (btn && btn.dataset.md) { ev.preventDefault(); applyMd(btn.dataset.md); }
+// Save / restore selection. With mousedown+preventDefault on toolbar
+// buttons the editor doesn't lose focus, so the live selection is usually
+// still valid when rtExec runs. We keep _savedRange as a fallback for any
+// edge case where the selection did get cleared.
+let _savedRange = null;
+function rtSaveSelection() {
+  const sel = window.getSelection();
+  if (!sel || sel.rangeCount === 0) return;
+  const range = sel.getRangeAt(0);
+  const ed = getEd();
+  if (!ed) return;
+  if (ed.contains(range.commonAncestorContainer)) {
+    _savedRange = range.cloneRange();
+  }
+}
+function rtRestoreSelection() {
+  const ed = getEd();
+  if (!ed) return;
+  // CRITICAL: document.execCommand requires the contenteditable host to
+  // be `document.activeElement` — having a live Range inside it is NOT
+  // enough. Always focus the editor FIRST, then deal with the selection.
+  // (Earlier version short-circuited when a live selection existed, but
+  // that selection alone doesn't make execCommand operate; focus does.)
+  if (document.activeElement !== ed) {
+    ed.focus();
+  }
+  const sel = window.getSelection();
+  const hasLiveSelInEd = sel && sel.rangeCount > 0 &&
+                          ed.contains(sel.getRangeAt(0).commonAncestorContainer);
+  if (hasLiveSelInEd) {
+    return;  // Live selection survived, that's what execCommand will use
+  }
+  // Either no selection at all, or selection moved outside the editor.
+  // Restore from saved range if we have one; otherwise place caret at
+  // end of editor so subsequent typing / bold-then-type works.
+  if (_savedRange) {
+    sel.removeAllRanges();
+    try { sel.addRange(_savedRange); } catch (e) {}
+  } else {
+    // Place caret at end of editor content
+    const range = document.createRange();
+    range.selectNodeContents(ed);
+    range.collapse(false);   // collapse to end
+    sel.removeAllRanges();
+    sel.addRange(range);
+  }
+}
+
+// Insert raw HTML at the cursor — used by table button, color picker
+// (when no selection), placeholder autocomplete, @mention.
+function rtInsertHTML(html) {
+  rtRestoreSelection();
+  if (document.execCommand) {
+    document.execCommand('insertHTML', false, html);
+  } else {
+    // Fallback for browsers that dropped execCommand
+    const sel = window.getSelection();
+    if (!sel.rangeCount) return;
+    const range = sel.getRangeAt(0);
+    range.deleteContents();
+    const tpl = document.createElement('template');
+    tpl.innerHTML = html;
+    range.insertNode(tpl.content);
+    sel.collapseToEnd();
+  }
+  rtSaveSelection();
+  _scheduleDraftSave();
+}
+
+// Direct-DOM wrapper for inline tags. Used as a fallback when execCommand
+// fails (deprecated in modern browsers + has many quirks). Wraps the
+// current selection in `tagName`; if selection is collapsed, inserts an
+// empty wrapper with a zero-width space and places the caret inside so
+// subsequent typing inherits the formatting.
+function rtWrapInline(tagName, styleStr) {
+  rtRestoreSelection();
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) {
+    console.warn('[rt] no selection for', tagName);
+    return false;
+  }
+  const range = sel.getRangeAt(0);
+  const ed = getEd();
+  if (!ed || !ed.contains(range.commonAncestorContainer)) return false;
+  const wrap = document.createElement(tagName);
+  if (styleStr) wrap.setAttribute('style', styleStr);
+  if (range.collapsed) {
+    wrap.appendChild(document.createTextNode('​'));  // zero-width
+    range.insertNode(wrap);
+    const inside = document.createRange();
+    inside.setStart(wrap.firstChild, 1);
+    inside.collapse(true);
+    sel.removeAllRanges();
+    sel.addRange(inside);
+  } else {
+    try {
+      range.surroundContents(wrap);
+    } catch (e) {
+      // surroundContents fails on cross-element selection. Extract and re-insert.
+      const frag = range.extractContents();
+      wrap.appendChild(frag);
+      range.insertNode(wrap);
+    }
+    const newRange = document.createRange();
+    newRange.selectNodeContents(wrap);
+    sel.removeAllRanges();
+    sel.addRange(newRange);
+  }
+  _scheduleDraftSave();
+  return true;
+}
+
+// Direct-DOM block formatter (for blockquote).
+function rtWrapBlock(tagName) {
+  rtRestoreSelection();
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return false;
+  const range = sel.getRangeAt(0);
+  const ed = getEd();
+  if (!ed) return false;
+  // Find nearest block-level ancestor inside editor
+  let node = range.startContainer;
+  if (node.nodeType === Node.TEXT_NODE) node = node.parentNode;
+  while (node && node !== ed && !/^(P|DIV|LI|H[1-6])$/.test(node.tagName || '')) {
+    node = node.parentNode;
+  }
+  const target = (node && node !== ed) ? node : null;
+  const wrap = document.createElement(tagName);
+  if (target) {
+    target.parentNode.insertBefore(wrap, target);
+    wrap.appendChild(target);
+  } else {
+    // Wrap the whole range
+    try {
+      const content = range.extractContents();
+      wrap.appendChild(content);
+      range.insertNode(wrap);
+    } catch (e) { return false; }
+  }
+  _scheduleDraftSave();
+  return true;
+}
+
+// One unified function for all rich-text actions. Tries execCommand first
+// (still the fastest path when it works), falls back to direct DOM when
+// execCommand returns false. Logs to console with [rt] prefix so we can
+// trace what's happening in DevTools.
+function rtExec(cmd, arg) {
+  rtRestoreSelection();
+  let ok = false;
+  try {
+    ok = document.execCommand(cmd, false, arg || null);
+  } catch (e) {
+    console.warn('[rt] execCommand threw:', cmd, e);
+    ok = false;
+  }
+  if (!ok) {
+    // Direct-DOM fallback per command
+    if (cmd === 'bold')                  ok = rtWrapInline('strong');
+    else if (cmd === 'italic')           ok = rtWrapInline('em');
+    else if (cmd === 'strikeThrough')    ok = rtWrapInline('s');
+    else if (cmd === 'underline')        ok = rtWrapInline('u');
+    else if (cmd === 'foreColor')        ok = rtWrapInline('span', 'color:' + arg);
+    else if (cmd === 'hiliteColor' ||
+             cmd === 'backColor')        ok = rtWrapInline('mark', 'background:' + arg);
+    else if (cmd === 'formatBlock')      ok = rtWrapBlock((arg||'p').replace(/[<>]/g,''));
+    else if (cmd === 'createLink' && arg) {
+      ok = rtWrapInline('a', 'color:#4f46e5');
+      // After wrap, set href on the new <a>
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        const node = sel.getRangeAt(0).commonAncestorContainer;
+        let a = node.nodeType === 1 ? node : node.parentNode;
+        while (a && a.tagName !== 'A') a = a.parentNode;
+        if (a) a.setAttribute('href', arg);
+      }
+    }
+    else if (cmd === 'insertUnorderedList' ||
+             cmd === 'insertOrderedList') {
+      // List fallback: wrap current line in <ul><li>…</li></ul>
+      const tag = cmd === 'insertUnorderedList' ? 'ul' : 'ol';
+      const sel = window.getSelection();
+      if (sel && sel.rangeCount) {
+        const range = sel.getRangeAt(0);
+        const li = document.createElement('li');
+        const list = document.createElement(tag);
+        list.appendChild(li);
+        if (range.collapsed) {
+          li.appendChild(document.createTextNode('​'));
+          range.insertNode(list);
+          const r = document.createRange();
+          r.setStart(li.firstChild, 1); r.collapse(true);
+          sel.removeAllRanges(); sel.addRange(r);
+        } else {
+          try {
+            const frag = range.extractContents();
+            li.appendChild(frag);
+            range.insertNode(list);
+          } catch (e) { return false; }
+        }
+        ok = true;
+      }
+    }
+    console.log('[rt] fallback', cmd, 'ok=', ok);
+  } else {
+    console.log('[rt] execCommand', cmd, 'ok=', ok);
+  }
+  rtSaveSelection();
+  _scheduleDraftSave();
+  return ok;
+}
+
+// Clear all formatting from the selection.
+function rtClearFormat() {
+  rtRestoreSelection();
+  document.execCommand('removeFormat');
+  document.execCommand('unlink');
+  _scheduleDraftSave();
+}
+
+// Track selection on every selectionchange while the editor is focused,
+// so saved range is always current.
+document.addEventListener('selectionchange', () => {
+  const ed = getEd();
+  if (!ed) return;
+  if (document.activeElement === ed) rtSaveSelection();
 });
 
-document.addEventListener('keydown', (ev) => {
+// ===== Reply 'Then set to' picker (custom colored dropdown) =====
+// Move menu to document.body once (escapes any transformed ancestor that
+// would otherwise break position:fixed) and viewport-position it on open.
+(function _moveStatusMenuToBody() {
+  const menu = document.getElementById('reply-status-menu');
+  if (menu && menu.parentNode !== document.body) document.body.appendChild(menu);
+})();
+
+function toggleReplyStatusMenu(btn) {
+  const menu = document.getElementById('reply-status-menu');
+  if (!menu) return;
+  const wasOpen = menu.classList.contains('open');
+  if (wasOpen) { menu.classList.remove('open'); return; }
+  // Position viewport-aware — flip up when no room below.
+  const r = btn.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const menuMax = 420;
+  const spaceBelow = vh - r.bottom;
+  const spaceAbove = r.top;
+  menu.style.minWidth = Math.max(260, r.width) + 'px';
+  // Right-align to trigger so it doesn't overflow rightward
+  menu.style.right = 'auto';
+  menu.style.left = Math.max(8, r.right - 300) + 'px';
+  if (spaceBelow >= 240 || spaceBelow >= spaceAbove) {
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.bottom = 'auto';
+    menu.style.maxHeight = Math.min(menuMax, spaceBelow - 12) + 'px';
+  } else {
+    menu.style.top = 'auto';
+    menu.style.bottom = (vh - r.top + 4) + 'px';
+    menu.style.maxHeight = Math.min(menuMax, spaceAbove - 12) + 'px';
+  }
+  menu.classList.add('open');
+}
+function pickReplyStatus(value, label, category) {
+  const hidden = document.getElementById('reply-new-status');
+  const disp   = document.getElementById('reply-status-display');
+  const trig   = document.getElementById('reply-status-trigger');
+  const menu   = document.getElementById('reply-status-menu');
+  if (hidden) hidden.value = value;
+  if (disp) disp.textContent = label;
+  if (trig) {
+    trig.dataset.cat = category || '';
+  }
+  if (menu) menu.classList.remove('open');
+}
+document.addEventListener('click', (ev) => {
+  const wrap = ev.target.closest('.reply-status-picker-custom');
+  const menu = document.getElementById('reply-status-menu');
+  if (!menu) return;
+  if (!wrap) menu.classList.remove('open');
+});
+
+// ===== Recipients editor (To + CC chips) =====
+// State kept in window._replyRecipients so submitReply can read it.
+window._replyRecipients = { to: '', cc: [], pinned_comment_id: null };
+
+function _renderCcChips() {
+  const host = document.getElementById('rr-cc-chips');
+  if (!host) return;
+  host.innerHTML = '';
+  window._replyRecipients.cc.forEach((email, i) => {
+    const chip = document.createElement('span');
+    chip.className = 'rr-chip';
+    chip.innerHTML = `<span class="rr-chip-email">${email.replace(/[<>"&]/g, '')}</span><button type="button" class="rr-chip-rm" title="Remove" data-i="${i}">×</button>`;
+    chip.querySelector('.rr-chip-rm').addEventListener('click', () => {
+      window._replyRecipients.cc.splice(i, 1);
+      _renderCcChips();
+    });
+    host.appendChild(chip);
+  });
+}
+
+function _ccAddFromInput() {
+  const input = document.getElementById('rr-cc-add');
+  if (!input) return;
+  const val = (input.value || '').trim();
+  if (!val) return;
+  // Loose validation — anything containing '@' and '.' goes through.
+  if (!val.includes('@') || !val.includes('.')) {
+    input.style.borderColor = '#be123c';
+    setTimeout(() => input.style.borderColor = '', 1200);
+    return;
+  }
+  if (!window._replyRecipients.cc.includes(val)) {
+    window._replyRecipients.cc.push(val);
+    _renderCcChips();
+  }
+  input.value = '';
+}
+
+(function _initRecipients() {
+  const box = document.getElementById('reply-box');
+  if (!box) return;
+  const defaultTo = box.dataset.defaultTo || '';
+  const defaultCc = JSON.parse(box.dataset.defaultCc || '[]');
+  window._replyRecipients.to = defaultTo;
+  window._replyRecipients.cc = defaultCc.slice();
+  _renderCcChips();
+  const input = document.getElementById('rr-cc-add');
+  if (input) {
+    input.addEventListener('keydown', (ev) => {
+      if (ev.key === 'Enter' || ev.key === ',' || ev.key === ' ') {
+        ev.preventDefault();
+        _ccAddFromInput();
+      }
+    });
+    input.addEventListener('blur', _ccAddFromInput);
+  }
+})();
+
+// Click "↩ Reply on this thread" → pin this comment's recipients + scroll/focus.
+function replyOnThisThread(btn) {
+  const cmtFrom = btn.dataset.cmtFrom || '';
+  let cmtTo = []; let cmtCc = [];
+  try { cmtTo = JSON.parse(btn.dataset.cmtTo || '[]'); } catch (e) {}
+  try { cmtCc = JSON.parse(btn.dataset.cmtCc || '[]'); } catch (e) {}
+  const box = document.getElementById('reply-box');
+  // To address — ZD replies always go to the original requester, so we don't
+  // CHANGE To here; we just pin context. CC is what we actually swap.
+  // Build effective CC = sender of this comment + that comment's CCs,
+  // minus our own emails / agents to avoid duplicates.
+  const effectiveCc = [];
+  const seen = new Set();
+  function addOnce(e) {
+    if (!e) return;
+    const k = e.toLowerCase().trim();
+    if (!k || seen.has(k)) return;
+    seen.add(k);
+    effectiveCc.push(e);
+  }
+  // If this comment was FROM the customer, their email is already the To,
+  // so don't CC them. If it was FROM another collaborator, add them.
+  if (cmtFrom && cmtFrom.toLowerCase() !== (window._replyRecipients.to || '').toLowerCase()) {
+    addOnce(cmtFrom);
+  }
+  cmtTo.forEach(e => { if (e.toLowerCase() !== (window._replyRecipients.to || '').toLowerCase()) addOnce(e); });
+  cmtCc.forEach(addOnce);
+  // If no per-comment context (legacy row), fall back to ticket-level CCs
+  if (!effectiveCc.length) {
+    const defaultCc = JSON.parse(box.dataset.defaultCc || '[]');
+    defaultCc.forEach(addOnce);
+  }
+  window._replyRecipients.cc = effectiveCc;
+  window._replyRecipients.pinned_comment_id = btn.dataset.cmtId || null;
+  _renderCcChips();
+  // Show a pinned-thread banner above the textarea
+  let pin = document.getElementById('reply-thread-pin');
+  if (!pin) {
+    pin = document.createElement('div');
+    pin.id = 'reply-thread-pin';
+    pin.className = 'reply-thread-pin';
+    const recip = document.getElementById('reply-recipients');
+    if (recip) recip.parentNode.insertBefore(pin, recip);
+  }
+  const whenIst = btn.dataset.cmtWhen || '';
+  pin.innerHTML = `📌 Replying on the thread from <strong>${cmtFrom || 'this comment'}</strong> · ${whenIst}
+                    <button type="button" class="reply-thread-pin-clear" onclick="_clearThreadPin()">unpin</button>`;
+  // Scroll the reply box into view + focus textarea
   const ta = document.getElementById('reply-text');
-  if (!ta || document.activeElement !== ta) return;
+  if (ta) {
+    ta.scrollIntoView({ behavior: 'smooth', block: 'center' });
+    setTimeout(() => ta.focus(), 350);
+  }
+}
+
+function _clearThreadPin() {
+  const pin = document.getElementById('reply-thread-pin');
+  if (pin) pin.remove();
+  // Restore ticket-level default recipients
+  const box = document.getElementById('reply-box');
+  window._replyRecipients.cc = JSON.parse(box.dataset.defaultCc || '[]');
+  window._replyRecipients.pinned_comment_id = null;
+  _renderCcChips();
+}
+
+// ===== Draft mode + per-ticket draft persistence =====
+// While Draft mode is ON (the default), Send is gated by a confirm dialog so
+// the agent can't accidentally fire a customer reply. The body is saved per
+// ticket in localStorage on every keystroke (debounced) so refresh / tab
+// switch doesn't lose it. Switching to Live + sending clears the saved draft.
+const DRAFT_KEY_PREFIX = 'bp_reply_draft_';
+function _draftKey(field) { return DRAFT_KEY_PREFIX + TICKET_ID + '_' + field; }
+
+function setDraftMode(isDraft) {
+  const box = document.getElementById('reply-box');
+  if (!box) return;
+  box.dataset.draftmode = isDraft ? '1' : '0';
+  const dBtn = document.getElementById('rmt-draft');
+  const lBtn = document.getElementById('rmt-live');
+  if (dBtn) dBtn.classList.toggle('active', isDraft);
+  if (lBtn) lBtn.classList.toggle('active', !isDraft);
+  try { localStorage.setItem(_draftKey('mode'), isDraft ? '1' : '0'); } catch (e) {}
+}
+
+let _saveTimer = null;
+function _scheduleDraftSave() {
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => {
+    try {
+      const ed = document.getElementById('reply-text');
+      if (ed) localStorage.setItem(_draftKey('body'), ed.innerHTML || '');
+    } catch (e) {}
+  }, 400);
+}
+
+(function _wireDraftPersistence() {
+  // Restore mode + body on mount
+  try {
+    const savedMode = localStorage.getItem(_draftKey('mode'));
+    if (savedMode === '0') setDraftMode(false);
+  } catch (e) {}
+  const ed = document.getElementById('reply-text');
+  if (!ed) return;
+  // Restore saved body (HTML now, not plain text)
+  try {
+    const savedBody = localStorage.getItem(_draftKey('body'));
+    if (savedBody && !ed.innerHTML.trim()) {
+      ed.innerHTML = savedBody;
+      setTimeout(() => {
+        const st = document.getElementById('smart-reply-status');
+        if (st && !st.textContent) {
+          st.textContent = '📝 Draft restored';
+          st.style.color = '#64748b';
+          setTimeout(() => { if (st.textContent === '📝 Draft restored') st.textContent = ''; }, 3000);
+        }
+      }, 200);
+    }
+  } catch (e) {}
+  ed.addEventListener('input', _scheduleDraftSave);
+})();
+
+function _clearDraft() {
+  try {
+    localStorage.removeItem(_draftKey('body'));
+  } catch (e) {}
+}
+
+// Active list styles — agent picks via the caret menu next to ul/ol buttons.
+// Persisted across sessions so the agent's preference sticks.
+const LIST_STYLE = {
+  ul: localStorage.getItem('bp_list_style_ul') || '-',
+  ol: localStorage.getItem('bp_list_style_ol') || '1.',
+};
+
+// WYSIWYG action dispatcher — replaces the old markdown-text approach.
+// All actions render in-place via document.execCommand so the agent sees
+// real bold/italic/colors/lists/tables as they type, not raw `**text**`.
+function applyMd(action) {
+  switch (action) {
+    case 'bold':       rtExec('bold'); break;
+    case 'italic':     rtExec('italic'); break;
+    case 'strike':     rtExec('strikeThrough'); break;
+    case 'code':       rtInsertHTML('<code>' + (_selText() || 'code') + '</code>'); break;
+    case 'codeblock':  rtInsertHTML('<pre><code>' + (_selText() || 'code\nblock') + '</code></pre>'); break;
+    case 'link':       {
+      const url = prompt('Link URL:', 'https://');
+      if (!url) return;
+      rtExec('createLink', url);
+      break;
+    }
+    case 'ul':         rtExec('insertUnorderedList'); break;
+    case 'ol':         rtExec('insertOrderedList'); break;
+    case 'quote':      rtExec('formatBlock', '<blockquote>'); break;
+    case 'table':      rtInsertHTML(_buildHTMLTable(3, 3)); break;
+  }
+}
+
+// Return the currently selected text (used when wrapping <code>).
+function _selText() {
+  const sel = window.getSelection();
+  if (!sel || !sel.rangeCount) return '';
+  return sel.toString();
+}
+
+// Build a REAL HTML table for the WYSIWYG editor. Renders with borders
+// in-place; submit sends it to ZD as-is (html_body=True).
+function _buildHTMLTable(rows, cols) {
+  const inlineStyles = 'border-collapse:collapse;width:100%;margin:8px 0;';
+  const cellStyle = 'border:1px solid #cbd5e1;padding:5px 8px;';
+  const thStyle = cellStyle + 'background:#eef2ff;text-align:left;font-weight:600;';
+  let html = '<table style="' + inlineStyles + '">';
+  html += '<thead><tr>';
+  for (let c = 0; c < cols; c++) html += '<th style="' + thStyle + '">Col ' + (c+1) + '</th>';
+  html += '</tr></thead><tbody>';
+  for (let r = 0; r < rows; r++) {
+    html += '<tr>';
+    for (let c = 0; c < cols; c++) html += '<td style="' + cellStyle + '">&nbsp;</td>';
+    html += '</tr>';
+  }
+  html += '</tbody></table><p>&nbsp;</p>';
+  return html;
+}
+
+// Table-size picker: 6×6 grid hover preview, click commits.
+// Mount to body once so position:fixed survives transformed ancestors.
+(function _moveTableMenuToBody() {
+  const menu = document.getElementById('tb-table-menu');
+  if (menu && menu.parentNode !== document.body) document.body.appendChild(menu);
+})();
+
+function toggleTableSizeMenu(anchor) {
+  const menu = document.getElementById('tb-table-menu');
+  const grid = document.getElementById('tb-table-grid');
+  const hint = document.getElementById('tb-table-hint');
+  if (!menu || !grid) return;
+  const wasOpen = menu.classList.contains('open');
+  if (wasOpen) { menu.classList.remove('open'); return; }
+  menu.classList.add('open');
+  // Position viewport-aware
+  const r = anchor.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const menuH = 200;
+  const spaceBelow = vh - r.bottom;
+  menu.style.left = Math.max(8, r.left) + 'px';
+  if (spaceBelow >= menuH || spaceBelow >= r.top) {
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.bottom = 'auto';
+  } else {
+    menu.style.top = 'auto';
+    menu.style.bottom = (vh - r.top + 4) + 'px';
+  }
+  // Build 6×6 grid (lazy)
+  if (!grid.children.length) {
+    for (let i = 0; i < 36; i++) {
+      const cell = document.createElement('div');
+      cell.className = 'tb-table-cell';
+      const row = Math.floor(i / 6) + 1, col = (i % 6) + 1;
+      cell.dataset.row = row;
+      cell.dataset.col = col;
+      cell.addEventListener('mouseenter', () => {
+        hint.textContent = row + ' × ' + col;
+        Array.from(grid.children).forEach((c, idx) => {
+          const r2 = Math.floor(idx/6)+1, c2 = (idx%6)+1;
+          c.classList.toggle('hover', r2 <= row && c2 <= col);
+        });
+      });
+      cell.addEventListener('click', () => {
+        rtInsertHTML(_buildHTMLTable(row, col));
+        menu.classList.remove('open');
+      });
+      grid.appendChild(cell);
+    }
+  }
+}
+
+// Color palettes — colorblind-friendly + plenty of variety.
+const COLOR_PALETTE = [
+  ['#000000','#374151','#6b7280','#9ca3af','#d1d5db','#ffffff'],
+  ['#dc2626','#ea580c','#f59e0b','#eab308','#84cc16','#10b981'],
+  ['#14b8a6','#06b6d4','#0ea5e9','#3b82f6','#6366f1','#8b5cf6'],
+  ['#a855f7','#d946ef','#ec4899','#f43f5e','#78350f','#92400e'],
+];
+const HIGHLIGHT_PALETTE = [
+  ['transparent','#fef3c7','#fde68a','#fcd34d','#fbbf24'],   // yellows
+  ['#dcfce7','#bbf7d0','#86efac','#4ade80','#22c55e'],       // greens
+  ['#dbeafe','#bfdbfe','#93c5fd','#60a5fa','#3b82f6'],       // blues
+  ['#fce7f3','#fbcfe8','#f9a8d4','#f472b6','#ec4899'],       // pinks
+  ['#e0e7ff','#c7d2fe','#a5b4fc','#818cf8','#6366f1'],       // indigos
+];
+
+let _lastColors = {
+  fg: localStorage.getItem('bp_color_fg') || '#dc2626',
+  bg: localStorage.getItem('bp_color_bg') || '#fde68a',
+};
+
+function _renderColorMenu(kind) {
+  const menu = document.getElementById('tb-color-menu-' + kind);
+  if (!menu || menu.dataset.built === '1') return;
+  menu.dataset.built = '1';
+  const palette = (kind === 'fg' ? COLOR_PALETTE : HIGHLIGHT_PALETTE);
+  const head = document.createElement('div');
+  head.className = 'tb-color-head';
+  head.textContent = (kind === 'fg' ? 'Text color' : 'Highlight color');
+  menu.appendChild(head);
+  palette.forEach(row => {
+    const r = document.createElement('div');
+    r.className = 'tb-color-row';
+    row.forEach(c => {
+      const sw = document.createElement('button');
+      sw.type = 'button';
+      sw.className = 'tb-color-swatch' + (c === 'transparent' ? ' is-clear' : '');
+      sw.style.background = c;
+      sw.dataset.color = c;
+      sw.title = c;
+      sw.addEventListener('click', (ev) => {
+        ev.preventDefault();
+        applyColor(kind, c);
+        menu.classList.remove('open');
+      });
+      r.appendChild(sw);
+    });
+    menu.appendChild(r);
+  });
+  // Custom-color input row
+  const customRow = document.createElement('div');
+  customRow.className = 'tb-color-custom';
+  customRow.innerHTML = `<label>Custom <input type="color" value="${_lastColors[kind]}"></label>
+                          <button type="button" class="tb-color-clear">${kind==='bg'?'No highlight':'Default'}</button>`;
+  customRow.querySelector('input[type=color]').addEventListener('change', (ev) => {
+    applyColor(kind, ev.target.value);
+    menu.classList.remove('open');
+  });
+  customRow.querySelector('.tb-color-clear').addEventListener('click', (ev) => {
+    ev.preventDefault();
+    applyColor(kind, 'transparent');
+    menu.classList.remove('open');
+  });
+  menu.appendChild(customRow);
+}
+
+// Mount color menus to body once so position:fixed survives transformed
+// ancestors. (Symptom of NOT doing this: dropdown appears at the wrong
+// coords or invisible — the same bug we hit with @mention earlier.)
+(function _moveColorMenusToBody() {
+  ['tb-color-menu-fg', 'tb-color-menu-bg'].forEach(id => {
+    const m = document.getElementById(id);
+    if (m && m.parentNode !== document.body) document.body.appendChild(m);
+  });
+})();
+
+function toggleColorMenu(kind, anchor) {
+  // Close the other one if open
+  const other = document.getElementById('tb-color-menu-' + (kind === 'fg' ? 'bg' : 'fg'));
+  if (other) other.classList.remove('open');
+  _renderColorMenu(kind);
+  const menu = document.getElementById('tb-color-menu-' + kind);
+  if (!menu) { console.warn('[color] menu element not found for kind=', kind); return; }
+  const wasOpen = menu.classList.contains('open');
+  if (wasOpen) { menu.classList.remove('open'); return; }
+  menu.classList.add('open');
+  // Viewport-aware position — flip up when no room below
+  const r = anchor.getBoundingClientRect();
+  const vh = window.innerHeight;
+  const menuH = 260;  // approximate; clip via max-height
+  const spaceBelow = vh - r.bottom;
+  menu.style.left = Math.max(8, Math.min(window.innerWidth - 230, r.left)) + 'px';
+  if (spaceBelow >= menuH || spaceBelow >= r.top) {
+    menu.style.top = (r.bottom + 4) + 'px';
+    menu.style.bottom = 'auto';
+    menu.style.maxHeight = Math.min(menuH, spaceBelow - 12) + 'px';
+  } else {
+    menu.style.top = 'auto';
+    menu.style.bottom = (vh - r.top + 4) + 'px';
+    menu.style.maxHeight = Math.min(menuH, r.top - 12) + 'px';
+  }
+}
+
+// Apply color via execCommand on the contenteditable. `foreColor` for text
+// color, `hiliteColor`/`backColor` for highlight (browser-dependent). When
+// there's a selection it wraps; with no selection, applies to subsequent
+// typed text (browser default).
+function applyColor(kind, color) {
+  if (color === null) color = _lastColors[kind];
+  _lastColors[kind] = color;
+  try { localStorage.setItem('bp_color_' + kind, color); } catch (e) {}
+  const bar = document.getElementById('tb-color-' + kind + '-bar');
+  if (bar) bar.style.background = (color === 'transparent' ? 'transparent' : color);
+
+  rtRestoreSelection();
+  const sel = window.getSelection();
+  const hasSelection = sel && sel.rangeCount && !sel.isCollapsed;
+
+  if (kind === 'fg') {
+    if (color === 'transparent' || !color) {
+      // Remove color from selection
+      rtExec('foreColor', 'inherit');
+    } else if (hasSelection) {
+      rtExec('foreColor', color);
+    } else {
+      // No selection — insert a styled span placeholder and put cursor inside
+      rtInsertHTML('<span style="color:' + color + '">​</span>');
+    }
+  } else {
+    if (color === 'transparent' || !color) {
+      rtExec('hiliteColor', 'transparent');
+    } else if (hasSelection) {
+      // Try hiliteColor first (Firefox), fall back to backColor (Chrome)
+      try { rtExec('hiliteColor', color); }
+      catch (e) { rtExec('backColor', color); }
+    } else {
+      rtInsertHTML('<mark style="background:' + color + '">​</mark>');
+    }
+  }
+}
+
+// Close color/table menus on outside click
+document.addEventListener('click', (ev) => {
+  if (!ev.target.closest('.tb-split') && !ev.target.closest('.tb-color-menu') && !ev.target.closest('.tb-table-menu')) {
+    document.querySelectorAll('.tb-color-menu.open, .tb-table-menu.open').forEach(m => m.classList.remove('open'));
+  }
+});
+
+// List-style picker — flips which marker the ul/ol button inserts.
+function toggleListStyleMenu(kind, anchor) {
+  const menu = document.getElementById('tb-list-menu-' + kind);
+  if (!menu) return;
+  const open = menu.classList.toggle('open');
+  // Close the other one if open
+  const other = document.getElementById('tb-list-menu-' + (kind === 'ul' ? 'ol' : 'ul'));
+  if (other) other.classList.remove('open');
+  if (open) {
+    // Position the menu below the caret button
+    const r = anchor.getBoundingClientRect();
+    menu.style.left = Math.max(8, r.left) + 'px';
+    menu.style.top  = (r.bottom + 4) + 'px';
+  }
+}
+
+// Toolbar buttons: act on mousedown (NOT click). This is critical for
+// contenteditable + execCommand — by the time `click` fires the editor's
+// focus is gone. Doing the action on mousedown + preventDefault keeps
+// focus and selection both intact.
+document.addEventListener('mousedown', (ev) => {
+  // 1. Toolbar format buttons (data-md)
+  const btn = ev.target.closest && ev.target.closest('.tb-btn');
+  if (btn && btn.dataset.md) {
+    ev.preventDefault();        // STOP focus from shifting + STOP click default
+    console.log('[rt] toolbar mousedown:', btn.dataset.md);
+    applyMd(btn.dataset.md);
+    return;
+  }
+  // 2. List-style option pick → remember + close menu
+  const opt = ev.target.closest && ev.target.closest('.tb-list-opt');
+  if (opt) {
+    ev.preventDefault();
+    const menu = opt.closest('.tb-list-menu');
+    if (!menu) return;
+    const kind = menu.dataset.listKind;
+    const style = opt.dataset.style;
+    LIST_STYLE[kind] = style;
+    try { localStorage.setItem('bp_list_style_' + kind, style); } catch (e) {}
+    const main = document.querySelector(`.tb-btn[data-md="${kind}"]`);
+    if (main) {
+      main.dataset.listStyle = style;
+      main.textContent = (kind === 'ul' ? style : (style.replace(/[a-z]/i, '1')));
+    }
+    menu.classList.remove('open');
+    return;
+  }
+});
+
+// Click handler: only used to CLOSE list menus on outside clicks.
+document.addEventListener('click', (ev) => {
+  if (!ev.target.closest('.tb-split')) {
+    document.querySelectorAll('.tb-list-menu.open').forEach(m => m.classList.remove('open'));
+  }
+});
+
+// ----- Cmd/Ctrl shortcuts -----
+// Native contenteditable handles Enter inside <ul>/<ol> lists natively —
+// pressing Enter continues the list, pressing Enter on an empty <li>
+// escapes the list. No custom code needed.
+document.addEventListener('keydown', (ev) => {
+  const ed = document.getElementById('reply-text');
+  if (!ed || document.activeElement !== ed) return;
   if (!(ev.ctrlKey || ev.metaKey)) return;
   const k = ev.key.toLowerCase();
   if (k === 'b') { ev.preventDefault(); applyMd('bold'); }
   else if (k === 'i') { ev.preventDefault(); applyMd('italic'); }
   else if (k === 'k') { ev.preventDefault(); applyMd('link'); }
+  else if (k === 'l' && ev.shiftKey) { ev.preventDefault(); applyMd('ul'); }
 });
 
 async function submitReply() {
-  const ta = document.getElementById('reply-text');
-  const mode = document.getElementById('reply-box').dataset.mode || 'public';
+  const ed = document.getElementById('reply-text');
+  const box = document.getElementById('reply-box');
+  const mode = box.dataset.mode || 'public';
   const st = document.getElementById('smart-reply-status');
   const warnBox = document.getElementById('reply-mandatory-warn');
   const newStatusSel = document.getElementById('reply-new-status');
   const rawSel = newStatusSel ? (newStatusSel.value || '') : '';
+  // Editor content — use innerHTML (rich-text). Strip out the placeholder
+  // div if the editor is otherwise empty.
+  const bodyHTML = (ed && ed.innerHTML || '').trim();
+  const bodyText = (ed && ed.innerText || '').trim();
+
+  // --- Draft mode guard ---
+  // If we're in Draft mode, refuse to send and prompt to switch to Live.
+  // This is the accidental-send safety net.
+  if (box.dataset.draftmode === '1') {
+    const choice = window.confirm(
+      "📝 You're in DRAFT mode.\n\n" +
+      "Your draft is saved locally — nothing has been sent.\n\n" +
+      "Click OK to SWITCH TO LIVE and send now, or Cancel to keep editing in Draft mode."
+    );
+    if (!choice) {
+      if (st) {
+        st.textContent = 'Stayed in Draft mode — draft saved locally';
+        st.style.color = '#64748b';
+        setTimeout(() => { if (st.textContent.startsWith('Stayed')) st.textContent = ''; }, 2500);
+      }
+      return;
+    }
+    // User confirmed → flip to Live and proceed
+    setDraftMode(false);
+  }
 
   // Dropdown emits either "cs:<id>" (custom status) or a generic name. Split.
   let newStatus = '';
@@ -1413,7 +2391,7 @@ async function submitReply() {
     newStatus = rawSel;
   }
 
-  if (!ta.value.trim() && PENDING_ATTACHMENTS.length === 0) {
+  if (!bodyText && PENDING_ATTACHMENTS.length === 0) {
     st.textContent = 'Nothing to send'; st.style.color = '#be123c'; return;
   }
   if (warnBox) { warnBox.style.display = 'none'; warnBox.innerHTML = ''; }
@@ -1424,15 +2402,25 @@ async function submitReply() {
 
   try {
     const fd = new FormData();
-    fd.append('body', ta.value);
+    // WYSIWYG: body is HTML. Server sanitizes + sends to ZD as html_body.
+    fd.append('body', bodyHTML);
     fd.append('mode', mode);
-    fd.append('body_format', 'markdown');
+    fd.append('body_format', 'html');
     if (PENDING_ATTACHMENTS.length) {
       fd.append('attachment_ids', PENDING_ATTACHMENTS.map(a => a.id).join(','));
     }
-    if (ta.dataset.sourceLang) fd.append('source_language', ta.dataset.sourceLang);
+    if (ed && ed.dataset.sourceLang) fd.append('source_language', ed.dataset.sourceLang);
     if (newStatus) fd.append('new_status', newStatus);
     if (newCustomStatusId) fd.append('new_custom_status_id', newCustomStatusId);
+    // Recipients — `cc_emails` is comma-separated. `pinned_comment_id` is
+    // surfaced so the server can record per-thread context in the audit.
+    if (window._replyRecipients) {
+      const cc = (window._replyRecipients.cc || []).join(',');
+      if (cc) fd.append('cc_emails', cc);
+      if (window._replyRecipients.pinned_comment_id) {
+        fd.append('reply_to_comment_id', window._replyRecipients.pinned_comment_id);
+      }
+    }
     const r = await fetch(`/api/tickets/${TICKET_ID}/reply`, { method: 'POST', body: fd });
 
     // Try to parse JSON regardless of status — server returns structured errors
@@ -1479,6 +2467,8 @@ async function submitReply() {
       st.style.color = '#047857';
     }
     st.textContent = msg;
+    // Wipe the persisted draft only after a real send succeeded.
+    _clearDraft();
     setTimeout(() => location.reload(), zdErr ? 1800 : 700);
   } catch (e) {
     st.textContent = 'Failed: ' + (e.message || e); st.style.color = '#be123c';
@@ -1489,8 +2479,9 @@ async function submitReply() {
 // /status endpoint which mirrors to ZD + enforces mandatory gating.
 // `raw` is either "cs:<id>" for a custom status or a generic status name.
 async function changeStatusFromHeader(raw) {
-  const ta = document.getElementById('reply-text');
-  if (ta && ta.value.trim().length > 30) {
+  const ed = document.getElementById('reply-text');
+  const draftText = ed ? (ed.innerText || '').trim() : '';
+  if (draftText.length > 30) {
     if (!confirm(`Change status? You have a draft reply that is NOT being sent. Use the reply box to send a reply and change status atomically.`)) return;
   }
   const pill = document.getElementById('status-change-pill');
@@ -1653,23 +2644,30 @@ async function assignTo(zdUserId, displayName) {
   }
 }
 
-// ---------- @mention autocomplete in the reply textarea ----------
-// When the agent types "@" followed by 1+ chars in #reply-text, fetch
-// matching agents/customers and show a positioned dropdown. Arrow keys
-// navigate; Enter/Tab inserts "@Full Name " into the textarea at the
-// caret position. Click an item to insert it the same way.
-(function() {
-  const ta = document.getElementById('reply-text');
+// Global error trap — surfaces any unhandled error in this script block
+// to the console with a clear prefix so we can diagnose why a feature
+// silently broke. (Doesn't change behaviour; just makes failures loud.)
+window.addEventListener('error', (ev) => {
+  console.error('[bp-reply] uncaught error:', ev.error || ev.message, ev.filename, ev.lineno);
+});
+
+// ---------- @mention autocomplete in the contenteditable reply box ----------
+// Reads/manipulates selection via window.getSelection() now that the editor
+// is a contenteditable div, not a textarea. Detects `@` followed by 1+ chars
+// in the text node containing the caret, shows a positioned dropdown of
+// matching agents/users, inserts a styled mention chip on selection.
+function _initMentionAutocomplete() {
+  const ed = document.getElementById('reply-text');
   const dd = document.getElementById('mention-dropdown');
-  // Tag console with a recognizable prefix so users can confirm wiring
-  // from DevTools when troubleshooting.
-  if (!ta) { console.warn('[mention] #reply-text not found — not wired'); return; }
+  if (!ed) { console.warn('[mention] #reply-text not found — not wired'); return; }
   if (!dd) { console.warn('[mention] #mention-dropdown not found — not wired'); return; }
-  console.log('[mention] wired on textarea + dropdown');
+  if (ed._mentionWired) { return; }  // idempotent
+  ed._mentionWired = true;
+  console.log('[mention] wired on contenteditable + dropdown');
 
   let candidates = [];
   let activeIdx = 0;
-  let triggerStart = -1;  // index in textarea where the "@" lives
+  let triggerRange = null;  // Range covering "@query" — used to replace on insert
   let searchTimer = null;
 
   function escapeHtml(s) {
@@ -1681,19 +2679,43 @@ async function assignTo(zdUserId, displayName) {
     dd.style.display = 'none';
     dd.innerHTML = '';
     candidates = [];
-    triggerStart = -1;
+    triggerRange = null;
   }
 
   // Move dropdown to <body> so position:fixed coords map cleanly to viewport
-  // (any positioned ancestor would shift the dropdown otherwise).
   if (dd.parentNode !== document.body) document.body.appendChild(dd);
 
   function positionDropdown() {
-    // Position:fixed → coords are viewport-relative. No scroll offset needed.
-    const r = ta.getBoundingClientRect();
-    dd.style.left = r.left + 'px';
-    dd.style.top = (r.bottom + 4) + 'px';
-    dd.style.width = Math.min(360, r.width) + 'px';
+    // Anchor below the caret (not the whole editor) for tight context.
+    const sel = window.getSelection();
+    let r;
+    if (sel && sel.rangeCount) {
+      const rect = sel.getRangeAt(0).getBoundingClientRect();
+      // If selection is collapsed at start of an empty line, rect.width=0
+      // and rect.left=0 — fall back to the editor rect in that case.
+      if (rect.bottom > 0 && rect.left > 0) {
+        r = { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom, width: 220 };
+      } else {
+        r = ed.getBoundingClientRect();
+      }
+    } else {
+      r = ed.getBoundingClientRect();
+    }
+    const vh = window.innerHeight;
+    const popupH = 320;
+    const spaceBelow = vh - r.bottom;
+    const spaceAbove = r.top;
+    dd.style.width = '320px';
+    dd.style.left = Math.max(8, Math.min(window.innerWidth - 340, r.left)) + 'px';
+    if (spaceBelow >= 200 || spaceBelow >= spaceAbove) {
+      dd.style.top = (r.bottom + 4) + 'px';
+      dd.style.bottom = 'auto';
+      dd.style.maxHeight = Math.min(popupH, spaceBelow - 12) + 'px';
+    } else {
+      dd.style.top = 'auto';
+      dd.style.bottom = (vh - r.top + 4) + 'px';
+      dd.style.maxHeight = Math.min(popupH, spaceAbove - 12) + 'px';
+    }
   }
 
   function render() {
@@ -1712,20 +2734,35 @@ async function assignTo(zdUserId, displayName) {
     }).join('');
   }
 
+  // Look back from caret within the current text node to find `@` start.
+  // Returns {range, query} or null. The range covers the `@query` text.
   function getTriggerInfo() {
-    // Look back from the caret to find a "@" that starts a mention.
-    // Mention is active iff: caret is after a "@" that comes after a
-    // word-boundary, AND there's no whitespace between "@" and caret.
-    const caret = ta.selectionStart;
-    const text = ta.value.slice(0, caret);
-    const at = text.lastIndexOf('@');
+    const sel = window.getSelection();
+    if (!sel || !sel.rangeCount || !sel.isCollapsed) return null;
+    const range = sel.getRangeAt(0);
+    if (!ed.contains(range.startContainer)) return null;
+    const node = range.startContainer;
+    if (node.nodeType !== Node.TEXT_NODE) return null;
+    const offset = range.startOffset;
+    const text = node.nodeValue || '';
+    // Scan back for @ followed by word chars only
+    let at = -1;
+    for (let i = offset - 1; i >= 0; i--) {
+      const ch = text[i];
+      if (ch === '@') { at = i; break; }
+      if (/\s/.test(ch) || ch === ' ') return null;
+    }
     if (at < 0) return null;
-    // Must be at start OR preceded by whitespace
+    // @ must be at start of text node OR preceded by whitespace
     const prev = at === 0 ? '' : text[at - 1];
-    if (prev && !/\s/.test(prev)) return null;
-    const fragment = text.slice(at + 1);
-    if (/\s/.test(fragment)) return null;  // user typed past the mention
-    return { atIdx: at, query: fragment };
+    if (prev && !/\s/.test(prev) && prev !== ' ') return null;
+    const query = text.slice(at + 1, offset);
+    if (/\s/.test(query)) return null;
+    // Build a Range spanning @query
+    const r = document.createRange();
+    r.setStart(node, at);
+    r.setEnd(node, offset);
+    return { range: r, query: query };
   }
 
   async function fetchAndShow(query) {
@@ -1753,41 +2790,36 @@ async function assignTo(zdUserId, displayName) {
   async function maybeOpen() {
     const trigger = getTriggerInfo();
     if (!trigger) { close(); return; }
-    triggerStart = trigger.atIdx;
-    // Show a placeholder immediately so the dropdown appears responsively,
-    // then fetch — for "@ alone" or for any query length.
+    triggerRange = trigger.range;
     candidates = []; activeIdx = 0;
     dd.innerHTML = '<div class="mention-empty">Searching…</div>';
     positionDropdown();
     dd.style.display = 'block';
-    // Debounce fetch
     clearTimeout(searchTimer);
-    // No query → fetch top results (use "a" as a sentinel "match anything")
     const q = trigger.query.length < 1 ? 'a' : trigger.query;
     searchTimer = setTimeout(() => fetchAndShow(q), trigger.query.length < 1 ? 0 : 100);
   }
 
   function insert(u) {
-    if (triggerStart < 0) return;
-    const caret = ta.selectionStart;
-    const before = ta.value.slice(0, triggerStart);
-    const after = ta.value.slice(caret);
-    const insertion = '@' + (u.name || u.email || 'user') + ' ';
-    ta.value = before + insertion + after;
-    const newCaret = (before + insertion).length;
-    ta.setSelectionRange(newCaret, newCaret);
-    ta.focus();
+    if (!triggerRange) return;
+    const sel = window.getSelection();
+    sel.removeAllRanges();
+    sel.addRange(triggerRange);
+    // Build the mention chip — a styled <span> that displays "@Name"
+    const chip = '<span class="mention-chip" data-email="' + escapeHtml(u.email || '') +
+                 '" contenteditable="false">@' + escapeHtml(u.name || u.email || 'user') + '</span>&nbsp;';
+    document.execCommand('insertHTML', false, chip);
     close();
+    edFocus();
   }
 
-  ta.addEventListener('input', maybeOpen);
-  ta.addEventListener('click', maybeOpen);
-  ta.addEventListener('keyup', (e) => {
-    // Arrow keys handled in keydown; other keys just refresh the trigger
+  ed.addEventListener('input', maybeOpen);
+  ed.addEventListener('click', maybeOpen);
+  ed.addEventListener('keyup', (e) => {
     if (['ArrowDown','ArrowUp','Enter','Tab','Escape'].indexOf(e.key) >= 0) return;
     maybeOpen();
   });
-  ta.addEventListener('keydown', (e) => {
+  ed.addEventListener('keydown', (e) => {
     if (dd.style.display !== 'block' || !candidates.length) {
       if (e.key === 'Escape') close();
       return;
@@ -1815,9 +2847,16 @@ async function assignTo(zdUserId, displayName) {
     if (!Number.isNaN(i) && candidates[i]) insert(candidates[i]);
   });
   document.addEventListener('click', (e) => {
-    if (!dd.contains(e.target) && e.target !== ta) close();
+    if (!dd.contains(e.target) && e.target !== ed) close();
   });
-})();
+}  // /_initMentionAutocomplete
+
+// Try immediately (DOM is already parsed by the time this script runs since
+// it's at the bottom of <body>), and retry on DOMContentLoaded just in case.
+_initMentionAutocomplete();
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', _initMentionAutocomplete);
+}
 </script>
 
 {% endblock %}

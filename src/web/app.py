@@ -69,6 +69,54 @@ def _clean_html(text: str | None) -> str:
     return s.strip()
 
 
+def _render_body_html(text: str | None, body_format: str | None = None) -> str:
+    """Render a comment body to safe HTML for the conversation bubble.
+
+    - If `body_format == 'markdown'` OR the body looks like markdown
+      (has unrendered `**`, `~~`, list markers etc.) → markdown→HTML.
+    - If the body looks like HTML (has `<p>`, `<div>`, etc.) → sanitize-only.
+    - Otherwise → escape and newlines→<br>.
+
+    This is what the conversation bubbles use. Sanitization strips
+    <script>/<style>/<iframe>/<object>/<embed> tags AND on*= handlers,
+    so even a hostile customer reply can't execute JS.
+    """
+    import re as _re
+    from html import escape as _esc
+    if not text:
+        return ""
+    s = text.replace("\r\n", "\n").replace("\r", "\n")
+    looks_like_html = bool(_re.search(r"<\s*(p|div|br|table|tr|td|ul|ol|li|h[1-6]|strong|em|a|pre|code)\b", s, _re.IGNORECASE))
+    looks_like_md = bool(
+        _re.search(r"\*\*[^*\n]+\*\*", s) or
+        _re.search(r"(?<!\*)\*[^*\n]+\*(?!\*)", s) or
+        _re.search(r"~~[^~\n]+~~", s) or
+        _re.search(r"`[^`\n]+`", s) or
+        _re.search(r"^\s*[-*]\s+\S", s, _re.MULTILINE) or
+        _re.search(r"^\s*\d+\.\s+\S", s, _re.MULTILINE) or
+        _re.search(r"```", s) or
+        _re.search(r"\[[^\]]+\]\([^)]+\)", s)
+    )
+    fmt = (body_format or "").lower()
+    use_md = (fmt == "markdown") or (looks_like_md and not looks_like_html)
+
+    if use_md:
+        from .. import md_to_html as _mdh
+        html = _mdh.markdown_to_html(s)
+    elif looks_like_html:
+        # Sanitize the existing HTML — we trust ZD's own renderer not to
+        # smuggle <script>, but customer-side mailers sometimes embed crap.
+        from .. import md_to_html as _mdh
+        html = _mdh._strip_dangerous(s)
+    else:
+        # Plain text — escape and preserve newlines.
+        escaped = _esc(s)
+        # Convert double-newline to paragraph break, single to <br>
+        parts = [f"<p>{p.replace(chr(10), '<br>')}</p>" for p in escaped.split("\n\n") if p.strip()]
+        html = "\n".join(parts)
+    return html
+
+
 def _to_ist(ts: str | None, fmt: str = "%d %b %Y, %H:%M IST") -> str:
     """Convert an ISO/UTC timestamp to Asia/Kolkata (IST = UTC+5:30) display."""
     if not ts:
@@ -86,6 +134,7 @@ def _to_ist(ts: str | None, fmt: str = "%d %b %Y, %H:%M IST") -> str:
 
 
 TEMPLATES.env.filters["clean"] = _clean_html
+TEMPLATES.env.filters["bodyhtml"] = _render_body_html
 TEMPLATES.env.filters["ist"] = _to_ist
 
 # Cache-busting token included in every CSS link, so browsers don't serve stale styles.
@@ -1983,6 +2032,60 @@ def _form_field_titles(c: sqlite3.Connection, ticket_form_id: int | None, group_
     return [t for t in base if t.lower() != "priority"]
 
 
+def _default_recipients_to_email(c, ticket_id: int) -> str:
+    """Helper: get the requester's email for the given ticket. Used when we
+    insert an outbound agent reply so the bubble's stored to_emails list is
+    accurate."""
+    row = c.execute("""
+        SELECT u.email FROM tickets t LEFT JOIN users u ON u.id = t.requester_id
+         WHERE t.id = ?
+    """, (ticket_id,)).fetchone()
+    return (row["email"] if row and row["email"] else "") or ""
+
+
+def _row_has(row, col: str) -> bool:
+    """Safely test whether a sqlite3.Row has a named column. Used to keep the
+    template render forward-compat with rows synced before recent ALTER TABLEs."""
+    try:
+        _ = row[col]
+        return True
+    except (IndexError, KeyError):
+        return False
+
+
+def _default_recipients(c, t, requester, raw_ticket) -> dict:
+    """Compute the default To/CC for the reply box on this ticket.
+
+    To  = the requester's email (the customer's address ZD will reply to).
+    CC  = ticket.collaborator_ids resolved to emails via the users table.
+
+    Stored back as a dict so the template can render them as chips and the
+    submitReply JS can POST them as `to_emails` / `cc_emails`.
+    """
+    to_email = (requester["email"] if requester and requester["email"] else None)
+    cc_emails: list[str] = []
+    collab_ids = raw_ticket.get("collaborator_ids") or []
+    if collab_ids:
+        placeholders = ",".join("?" for _ in collab_ids)
+        rows = c.execute(
+            f"SELECT email FROM users WHERE id IN ({placeholders}) AND email IS NOT NULL AND email != ''",
+            list(collab_ids),
+        ).fetchall()
+        cc_emails = [r["email"] for r in rows]
+    # Some ZD payloads include `email_cc_ids` instead of collaborator_ids
+    extra_cc_ids = raw_ticket.get("email_cc_ids") or []
+    if extra_cc_ids:
+        placeholders = ",".join("?" for _ in extra_cc_ids)
+        rows = c.execute(
+            f"SELECT email FROM users WHERE id IN ({placeholders}) AND email IS NOT NULL AND email != ''",
+            list(extra_cc_ids),
+        ).fetchall()
+        for r in rows:
+            if r["email"] not in cc_emails:
+                cc_emails.append(r["email"])
+    return {"to": to_email, "cc": cc_emails, "from": None}
+
+
 def _full_ticket(c: sqlite3.Connection, ticket_id: int) -> dict | None:
     t = c.execute("SELECT * FROM tickets WHERE id=?", (ticket_id,)).fetchone()
     if not t:
@@ -2240,9 +2343,20 @@ def _full_ticket(c: sqlite3.Connection, ticket_id: int) -> dict | None:
         "group": dict(grp) if grp else None,
         "assignee": dict(assignee) if assignee else None,
         "comments": [
-            {**dict(cm), "attachments": attachments_by_comment.get(cm["id"], [])}
+            {**dict(cm),
+             "attachments": attachments_by_comment.get(cm["id"], []),
+             # Parse the stored to/cc JSON arrays (may be NULL on legacy rows
+             # synced before we captured this — empty list in that case).
+             "to_emails": json.loads(cm["to_emails"] or "[]") if _row_has(cm, "to_emails") else [],
+             "cc_emails": json.loads(cm["cc_emails"] or "[]") if _row_has(cm, "cc_emails") else [],
+             "from_email": cm["from_email"] if _row_has(cm, "from_email") else None,
+            }
             for cm in cmts
         ],
+        # Default reply recipients — used by the reply box when the agent
+        # hasn't picked "Reply on this thread" of a specific comment.
+        # To: the requester. CC: any collaborators ZD has on file.
+        "recipients": _default_recipients(c, t, requester, raw_ticket),
         "fields": fields,
         "insight": insight,
         "similar": similar,
@@ -3223,8 +3337,9 @@ async def submit_feedback(
         last_ins = c.execute("SELECT id FROM ticket_insights WHERE ticket_id=? ORDER BY id DESC LIMIT 1", (ticket_id,)).fetchone()
         insight_id = last_ins["id"] if last_ins else None
 
-        # POLICY (Block #1): no writes to Zendesk. All field changes are LOCAL ONLY.
-        # Approve/edit decisions go into tickets.local_overrides; sync never touches them.
+        # POLICY (May 2026): Approve/edit decisions now write to Zendesk + local.
+        # If ZD rejects, fall back to local-only so the agent's decision is
+        # preserved and visible (write_status surfaces the failure).
         if decision in ("approved", "edited") and final:
             fid = _resolve_field_id_by_title(c, field)
             if fid:
@@ -3235,9 +3350,20 @@ async def submit_feedback(
                         if o.get("name") == final or o.get("value") == final:
                             stored_value = o.get("value")
                             break
+                # ZD write first
+                zd_sent_fb = False
+                try:
+                    from .. import zendesk
+                    zendesk.write_back_field(ticket_id, custom_fields={int(fid): stored_value})
+                    zd_sent_fb = True
+                except Exception as e:
+                    print(f"[ai-feedback] ZD write failed for ticket {ticket_id} field {fid}: {e}")
+                    write_status = f"zd_failed_local_saved: {e}"
+                # Always save local (even on ZD failure)
                 try:
                     db.set_local_field_override(c, ticket_id, fid, stored_value)
-                    write_status = "saved_local_only"
+                    if zd_sent_fb:
+                        write_status = "saved_zd_and_local"
                 except Exception as e:
                     write_status = f"local_save_error: {e}"
             else:
@@ -3320,6 +3446,17 @@ async def update_ticket_field(
             if not prev:
                 raise HTTPException(404, f"Ticket {ticket_id} not found")
             before_id = prev["assignee_id"]
+            # ZD write FIRST — if ZD rejects we never touch the local mirror,
+            # so the two stay in sync. (Block #1's local-only policy is reversed
+            # for fields now — agents need ZD to reflect their edits.)
+            zd_err = None
+            try:
+                from .. import zendesk
+                zendesk.write_back_field(ticket_id, standard_fields={"assignee_id": new_zd_id})
+            except Exception as e:
+                zd_err = str(e)
+            if zd_err:
+                raise HTTPException(502, f"Zendesk rejected the assignment: {zd_err}")
             c.execute("UPDATE tickets SET assignee_id=?, updated_at=? WHERE id=?",
                       (new_zd_id, db.now_iso(), ticket_id))
             # Resolve display names for the audit entry
@@ -3328,10 +3465,11 @@ async def update_ticket_field(
                 r = c.execute("SELECT name FROM users WHERE id=?", (uid,)).fetchone()
                 return r["name"] if r else f"#{uid}"
             db.audit_ticket(c, ticket_id=ticket_id, event_type="assignee.changed",
-                            event_summary=f"{_name(before_id) or '∅'} → {_name(new_zd_id) or '∅'}",
+                            event_summary=f"Assignee: {_name(before_id) or '∅'} → {_name(new_zd_id) or '∅'}",
                             actor_email=user["email"], actor_type="agent",
                             field_key="assignee_id",
-                            before=before_id, after=new_zd_id)
+                            before=before_id, after=new_zd_id,
+                            raw={"zd_sent": True})
             try:
                 from .. import rules_engine
                 rules_engine.dispatch_event(c, "assignee.changed", ticket_id,
@@ -3342,7 +3480,8 @@ async def update_ticket_field(
                 print(f"rules dispatch failed: {e}")
             return JSONResponse({"ok": True, "ticket_id": ticket_id,
                                   "assignee_id": new_zd_id,
-                                  "display": _name(new_zd_id)})
+                                  "display": _name(new_zd_id),
+                                  "zd_sent": True})
 
         # ---- Default path: custom field edit (requires tickets.edit_fields) ----
         if "tickets.edit_fields" not in user["permissions"]:
@@ -3363,19 +3502,45 @@ async def update_ticket_field(
                     stored_value = o.get("value")
                     break
 
+        # ---- Zendesk write FIRST ----
+        # Reversing Block #1 for fields: agents need ZD to reflect their edits
+        # so the rest of the org / customer-facing form sees the same state.
+        # If ZD rejects, we DO still save locally so the agent can retry —
+        # response carries zd_sent=false + zd_error so the UI can warn.
+        zd_sent = False
+        zd_err = None
+        try:
+            from .. import zendesk
+            zendesk.write_back_field(
+                ticket_id,
+                custom_fields={int(field_id): stored_value},
+            )
+            zd_sent = True
+        except Exception as e:
+            zd_err = str(e)
+            print(f"[field-edit] ZD write failed for ticket {ticket_id} field {field_id}: {e}")
+
         try:
             db.set_local_field_override(c, ticket_id, field_id, stored_value)
         except Exception as e:
             raise HTTPException(500, f"Local save failed: {e}")
 
-        db.audit(c, actor=user["email"], action="manual_field_edit_local",
+        action_label = "manual_field_edit_zd" if zd_sent else "manual_field_edit_local_only"
+        db.audit(c, actor=user["email"], action=action_label,
                  target_type="ticket", target_id=str(ticket_id),
-                 detail=f"field={f['title']} value={stored_value} (local only — ZD untouched)")
+                 detail=f"field={f['title']} value={stored_value} zd_sent={zd_sent} zd_err={zd_err or '-'}")
         # Per-ticket audit timeline
+        before_disp = before if before not in (None, "") else "∅"
+        after_disp  = stored_value if stored_value not in (None, "") else "∅"
+        summary = f"{f['title']}: {before_disp} → {after_disp}"
+        if not zd_sent and zd_err:
+            summary += f"  ⚠ NOT synced to ZD ({zd_err[:60]})"
         db.audit_ticket(c, ticket_id=ticket_id, event_type="field.changed",
-                        event_summary=f"{f['title']}: {before or '∅'} → {stored_value or '∅'}",
+                        event_summary=summary,
                         actor_email=user["email"], actor_type="agent",
-                        field_key=str(field_id), before=before, after=stored_value)
+                        field_key=str(field_id), before=before, after=stored_value,
+                        raw={"zd_sent": zd_sent, "zd_error": zd_err,
+                             "field_title": f["title"]})
         # Fire trigger rules
         try:
             from .. import rules_engine
@@ -3393,8 +3558,13 @@ async def update_ticket_field(
                 if o.get("value") == stored_value:
                     display = o.get("name") or stored_value
                     break
-    return JSONResponse({"ok": True, "field": f["title"], "raw_value": stored_value,
-                         "display": display, "scope": "local_only"})
+    return JSONResponse({
+        "ok": True, "field": f["title"], "raw_value": stored_value,
+        "display": display,
+        "scope": ("zd_and_local" if zd_sent else "local_only"),
+        "zd_sent": zd_sent,
+        "zd_error": zd_err,
+    })
 
 
 @app.post("/api/tickets/{ticket_id}/add-field-option")
@@ -3643,6 +3813,8 @@ async def post_reply(
     source_language: str = Form(""),          # if the draft was translated, capture original lang
     new_status: str = Form(""),                # optional generic status (open/pending/hold/solved)
     new_custom_status_id: str = Form(""),     # optional ZD custom_status_id (overrides new_status)
+    cc_emails: str = Form(""),                # comma-separated CC addresses to add to the ticket
+    reply_to_comment_id: str = Form(""),       # comment id the agent pinned via "Reply on this thread"
     user: dict = Depends(auth_mod.require_any("tickets.public_reply", "tickets.internal_note")),
 ):
     """Save a native comment AND write it to Zendesk via the API.
@@ -3666,8 +3838,9 @@ async def post_reply(
         raise HTTPException(403, "Missing permission: tickets.internal_note (needed to post an internal note)")
     if mode not in ("public", "internal"):
         raise HTTPException(400, "mode must be 'public' or 'internal'")
-    if body_format not in ("plain", "markdown"):
-        body_format = "markdown"
+    # WYSIWYG editor sends HTML now. Old paths can still send plain/markdown.
+    if body_format not in ("plain", "markdown", "html"):
+        body_format = "html"
     body = (body or "").strip()
     if not body and not attachment_ids:
         raise HTTPException(400, "empty reply")
@@ -3715,18 +3888,35 @@ async def post_reply(
                            + ". Fill them before sending."),
             }, status_code=400)
 
-    # ---- Markdown → HTML for Zendesk ----
-    # ZD's API stores the comment body literally — `**bold**` shows as
-    # `**bold**` in the agent UI and customer email. Convert to HTML so the
-    # formatting the agent applied actually renders. The local mirror still
-    # stores the raw markdown so we can re-render or re-edit later.
+    # ---- Body conversion for Zendesk ----
+    # WYSIWYG editor sends HTML directly. We sanitize it (strip script,
+    # event handlers, javascript: URLs, restrict style attrs) before
+    # forwarding. Markdown bodies are converted then sanitized. Plain
+    # text is escaped + newlines→<br>.
     from .. import md_to_html as _mdh
-    if body and body_format == "markdown":
+    if body and body_format == "html":
+        zd_body = _mdh._strip_dangerous(body)
+        send_as_html = True
+    elif body and body_format == "markdown":
         zd_body = _mdh.markdown_to_html(body)
         send_as_html = True
+    elif body:
+        # Plain text → escape + line breaks
+        from html import escape as _esc
+        zd_body = _esc(body).replace("\n", "<br>")
+        send_as_html = True
     else:
-        zd_body = body or "(attachment-only)"
+        zd_body = "(attachment-only)"
         send_as_html = False
+
+    # ---- Resolve CC list ----
+    # User can paste comma- (or comma+space-) separated emails.
+    cc_list: list[str] = []
+    if cc_emails:
+        for raw in cc_emails.replace(";", ",").split(","):
+            v = raw.strip()
+            if v and "@" in v and "." in v and v not in cc_list:
+                cc_list.append(v)
 
     # ---- Zendesk write (the real send) ----
     zd_result = None
@@ -3741,6 +3931,7 @@ async def post_reply(
             status=new_status or None,
             custom_status_id=csid_int,
             html_body=send_as_html,
+            add_email_ccs=cc_list if (mode == "public") else None,
         )
     except Exception as e:
         zd_error = str(e)
@@ -3759,12 +3950,30 @@ async def post_reply(
             c.execute("INSERT INTO users (id, name, email, role, raw) VALUES (?, ?, ?, 'agent', ?)",
                       (author_id, user.get("name") or user["email"], user["email"],
                        json.dumps({"source": "native_login"})))
+        # Build meta blob with everything the bubble + reply-on-this needs
+        meta_blob: dict = {}
+        if source_language:
+            meta_blob["source_language"] = source_language
+        if reply_to_comment_id and reply_to_comment_id.strip().isdigit():
+            meta_blob["reply_to_comment_id"] = int(reply_to_comment_id.strip())
         cid = db.insert_native_comment(
             c, ticket_id=ticket_id, author_id=author_id,
             body=body, public=(mode == "public"),
             body_format=body_format,
-            meta={"source_language": source_language} if source_language else {},
+            meta=meta_blob,
         )
+        # Persist recipients on the new comment row so future "Reply on this
+        # thread" clicks have the right addresses.
+        try:
+            c.execute(
+                "UPDATE ticket_comments SET from_email=?, to_emails=?, cc_emails=? WHERE id=?",
+                (user.get("email") or "",
+                 json.dumps([_default_recipients_to_email(c, ticket_id)] if mode == "public" else []),
+                 json.dumps(cc_list),
+                 cid),
+            )
+        except Exception as e:
+            print(f"[reply] failed to persist comment recipients: {e}")
         # Attach any pre-uploaded files
         att_id_list = [int(x) for x in attachment_ids.split(",") if x.strip().lstrip("-").isdigit()]
         for aid in att_id_list:
@@ -3845,6 +4054,26 @@ TRANSLATE_LANGUAGES = [
     {"code": "gu", "name": "Gujarati (ગુજરાતી)"},
     {"code": "pa", "name": "Punjabi (ਪੰਜਾਬੀ)"},
 ]
+
+
+@app.post("/api/reply/preview-html")
+async def reply_preview_html(
+    body: str = Form(...),
+    body_format: str = Form("markdown"),
+    user: dict = Depends(require_user),
+):
+    """Render an agent's draft to safe HTML for the live preview pane.
+
+    This is what the agent's reply will actually look like in the customer's
+    inbox + the conversation bubble. Pure rendering — no side effects, no
+    AI calls, no Zendesk write.
+    """
+    from .. import md_to_html as _mdh
+    if body_format == "markdown":
+        html = _mdh.markdown_to_html(body or "")
+    else:
+        html = _mdh._strip_dangerous(body or "")
+    return JSONResponse({"ok": True, "html": html})
 
 
 @app.post("/api/tickets/{ticket_id}/translate-draft")
